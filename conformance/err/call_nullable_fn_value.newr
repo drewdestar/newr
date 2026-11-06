@@ -1,0 +1,7 @@
+# expect: E2001
+# Calling a nullable function value directly is an error at check
+# (BUILD_REPORT §16, hole 2): it may be `none`, so the call would
+# die with a raw TypeError at runtime.
+let v: int? = none
+let f = v?.is_some
+print f()

@@ -585,6 +585,89 @@ class TestNullable(unittest.TestCase):
         self.assertEqual(run_ok(src), "5\nnone\n")
 
 
+class TestOptionalChainNullableField(unittest.TestCase):
+    """BUILD_REPORT §16 (§15.8 holes): a `?.` chain must
+    short-circuit on EVERY `none` it can meet, not just the first
+    receiver — a nullable field in the middle, or a nullable
+    method result, ends the segment. And a bare method name is a
+    function value, not a Python attribute."""
+
+    def test_chain_through_nullable_field(self):
+        # Hole 1: `o?.inner.name` — `inner` itself is `Inner?`.
+        src = ("struct Inner:\n"
+               "  name: str\n"
+               "struct Outer:\n"
+               "  inner: Inner?\n"
+               "let a: Outer? = Outer(inner: Inner(name: \"n\"))\n"
+               "let b: Outer? = Outer(inner: none)\n"
+               "let c: Outer? = none\n"
+               "print a?.inner.name\n"
+               "print b?.inner.name\n"
+               "print c?.inner.name\n")
+        self.assertEqual(run_ok(src), "n\nnone\nnone\n")
+
+    def test_method_after_nullable_field(self):
+        # Same hole, one link further: the method after a nullable
+        # field used to fail the build with E4001.
+        src = ("struct Inner:\n"
+               "  name: str\n"
+               "struct Outer:\n"
+               "  inner: Inner?\n"
+               "let a: Outer? = Outer(inner: Inner(name: \"x\"))\n"
+               "let b: Outer? = Outer(inner: none)\n"
+               "print a?.inner.name.upper()\n"
+               "print b?.inner.name.upper()\n")
+        self.assertEqual(run_ok(src), "X\nnone\n")
+
+    def test_unwrap_nullable_result_then_method(self):
+        # D38 over-strip: `?.unwrap()` on a nullable Result whose
+        # value type is itself nullable — the `str?` must survive
+        # inside the chain and short-circuit `.upper()`.
+        src = ("let r: Result[str?, error]? = ok(none)\n"
+               "print r?.unwrap().upper()\n"
+               "let s: Result[str?, error]? = ok(\"hi\")\n"
+               "print s?.unwrap().upper()\n"
+               "let u: Result[str?, error]? = none\n"
+               "print u?.unwrap().upper()\n")
+        self.assertEqual(run_ok(src), "none\nHI\nnone\n")
+
+    def test_nullable_method_as_value_runs(self):
+        # Hole 2: `v.is_some` / `v?.is_some` are function values.
+        src = ("let v: int? = 5\n"
+               "let f = v.is_some\n"
+               "print f()\n"
+               "let w: int? = none\n"
+               "let g = w.is_some\n"
+               "print g()\n"
+               "let h = v?.is_some\n"
+               "print h.unwrap()()\n"
+               "let k = w?.is_some\n"
+               "print k\n")
+        self.assertEqual(run_ok(src), "true\nfalse\ntrue\nnone\n")
+
+    def test_bare_method_as_value_runs(self):
+        # Same hole for ordinary methods: `xs.len` has no Python
+        # attribute, so it must emit a lambda, not `xs.len`.
+        src = ("let xs: list[int] = [1, 2, 3]\n"
+               "let n = xs.len\n"
+               "print n()\n"
+               "let s: str = \"hi\"\n"
+               "let up = s.upper\n"
+               "print up()\n"
+               "let ys: list[int]? = [4, 5]\n"
+               "let m = ys?.len\n"
+               "print m.unwrap()()\n")
+        self.assertEqual(run_ok(src), "3\nHI\n2\n")
+
+    def test_printing_method_value_does_not_crash(self):
+        src = ("let v: int? = 5\n"
+               "print v.is_some\n"
+               "print v?.is_some\n")
+        out = run_ok(src)
+        self.assertTrue(out.startswith("<function"),
+                        f"expected a function rendering, got {out!r}")
+
+
 class TestMatch(unittest.TestCase):
     def test_enum_match(self):
         src = ("enum Shape:\n"

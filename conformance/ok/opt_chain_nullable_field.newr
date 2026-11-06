@@ -1,0 +1,42 @@
+# `?.` chains short-circuit on every `none` they can meet, not just
+# the first receiver (BUILD_REPORT §16, hole 1): a nullable field in
+# the middle of a chain, or a nullable method result, ends the
+# segment instead of crashing with a raw AttributeError.
+struct Inner:
+  name: str
+struct Outer:
+  inner: Inner?
+let passed = true
+let a: Outer? = Outer(inner: Inner(name: "n"))
+let b: Outer? = Outer(inner: none)
+let c: Outer? = none
+if a?.inner.name.unwrap() != "n":
+  passed = false
+let bn = b?.inner.name
+if bn.is_none() != true:
+  passed = false
+let cn = c?.inner.name
+if cn.is_none() != true:
+  passed = false
+if a?.inner.name.upper().unwrap() != "N":
+  passed = false
+let bu = b?.inner.name.upper()
+if bu.is_none() != true:
+  passed = false
+# A method whose own return type is nullable: `unwrap()` on a
+# `Result[str?, error]?` keeps the `str?` inside the chain.
+let r: Result[str?, error]? = ok(none)
+let ru = r?.unwrap().upper()
+if ru.is_none() != true:
+  passed = false
+let s: Result[str?, error]? = ok("hi")
+if s?.unwrap().upper().unwrap() != "HI":
+  passed = false
+let u: Result[str?, error]? = none
+let uu = u?.unwrap().upper()
+if uu.is_none() != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

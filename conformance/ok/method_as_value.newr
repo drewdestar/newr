@@ -1,0 +1,34 @@
+# A bare method name is a function value (BUILD_REPORT §16,
+# hole 2): `v.is_some` is `fn() -> bool`, `xs.len` is
+# `fn() -> int` — not a Python attribute that does not exist.
+let passed = true
+let v: int? = 5
+let w: int? = none
+let f = v.is_some
+if f() != true:
+  passed = false
+let g = w.is_some
+if g() != false:
+  passed = false
+let h = v?.is_some
+if h.unwrap()() != true:
+  passed = false
+let k = w?.is_some
+if k.is_none() != true:
+  passed = false
+let xs: list[int] = [1, 2, 3]
+let n = xs.len
+if n() != 3:
+  passed = false
+let ys: list[int]? = [4, 5]
+let m = ys?.len
+if m.unwrap()() != 2:
+  passed = false
+let s: str = "hi"
+let up = s.upper
+if up() != "HI":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

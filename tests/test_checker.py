@@ -363,6 +363,59 @@ class TestNullability(unittest.TestCase):
         self.assertTrue(prog.stmts[0].value.optional)
         self.assertFalse(prog.stmts[1].value.optional)
 
+    def test_nullable_method_as_value_is_fn_not_bool(self):
+        # §15.8 hole 2: a bare nullable-method name is a FUNCTION
+        # value, not its return type. `v.is_some` is `fn() -> bool`,
+        # so assigning it to a bool is E2001 and calling the value
+        # is fine.
+        r = check('let v: int? = 5\nlet b: bool = v.is_some\nprint b\n')
+        self.assertIn("E2001", codes(r))
+        r = check('let v: int? = 5\nlet f = v.is_some\nprint f()\n')
+        self.assertEqual(errs(r), [])
+        r = check('let v: int? = 5\nlet f: fn() -> bool = v.is_some\n'
+                  'print f()\n')
+        self.assertEqual(errs(r), [])
+
+    def test_optional_nullable_method_as_value_is_nullable_fn(self):
+        # `v?.is_some` is a NULLABLE fn value: none when `v` is
+        # none, else the method. Assigning it to a plain fn is
+        # E2001, and calling it directly is E2001 (it may be none).
+        r = check('let v: int? = 5\n'
+                  'let f: fn() -> bool = v?.is_some\nprint f\n')
+        self.assertIn("E2001", codes(r))
+        r = check('let v: int? = 5\nlet f = v?.is_some\nprint f()\n')
+        self.assertIn("E2001", codes(r))
+        r = check('let v: int? = 5\nlet f = v?.is_some\n'
+                  'let g = f.unwrap()\nprint g()\n')
+        self.assertEqual(errs(r), [])
+
+    def test_optional_chain_method_as_value_is_nullable_fn(self):
+        # Same rule for an inner-type method reached through `?.`:
+        # `xs?.len` is a nullable fn value, not a plain fn.
+        r = check('let xs: list[int]? = [1, 2]\n'
+                  'let f: fn() -> int = xs?.len\nprint f\n')
+        self.assertIn("E2001", codes(r))
+        r = check('let xs: list[int]? = [1, 2]\nlet f = xs?.len\n'
+                  'print f()\n')
+        self.assertIn("E2001", codes(r))
+        r = check('let xs: list[int] = [1, 2]\nlet f = xs.len\n'
+                  'print f()\n')
+        self.assertEqual(errs(r), [])
+
+    def test_optional_chain_nullable_field_type(self):
+        # §15.8 hole 1, checker side: `o?.inner.name` types as
+        # `str?` (the chain short-circuits on either `none`).
+        r = check('struct Inner:\n  name: str\n'
+                  'struct Outer:\n  inner: Inner?\n'
+                  'let o: Outer? = Outer(inner: none)\n'
+                  'let n: str? = o?.inner.name\nprint n\n')
+        self.assertEqual(errs(r), [])
+        r = check('struct Inner:\n  name: str\n'
+                  'struct Outer:\n  inner: Inner?\n'
+                  'let o: Outer? = Outer(inner: none)\n'
+                  'let n: str = o?.inner.name\nprint n\n')
+        self.assertIn("E2001", codes(r))
+
 
 class TestResultAndPropagate(unittest.TestCase):
     def test_try_expr_returns_result(self):

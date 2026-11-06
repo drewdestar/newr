@@ -31,9 +31,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import ast_nodes as A
-from .ast_nodes import Type
+from .ast_nodes import Type, fn_of
 from .errors import Span
-from .modules import MODULES
+from .modules import METHODS, MODULES
 
 
 class EmitterError(Exception):
@@ -730,6 +730,114 @@ class _Emitter:
 
     # ------------------------------------------------------------ member / index
 
+    def _method_receiver_mapping(self, recv_type: Type) -> dict:
+        """Type-argument mapping for a method table lookup, mirroring
+        the checker's `_receiver_mapping`."""
+        if recv_type.name == "list" and recv_type.params:
+            return {"T": recv_type.params[0]}
+        if recv_type.name == "set" and recv_type.params:
+            return {"T": recv_type.params[0]}
+        if recv_type.name == "dict" and len(recv_type.params) == 2:
+            return {"K": recv_type.params[0], "V": recv_type.params[1]}
+        if recv_type.name == "Result" and len(recv_type.params) == 2:
+            return {"T": recv_type.params[0], "E": recv_type.params[1]}
+        return {}
+
+    def _subst_method_spec(self, spec, mapping: dict):
+        """Substitute a METHODS-table spec (a Type, or a "T"/"K"/"V"
+        string) with the receiver's type arguments. Returns None
+        for the unrepresentable specs ("any", "lenable", "...")."""
+        if isinstance(spec, str):
+            if spec in mapping:
+                return mapping[spec]
+            return None
+        if isinstance(spec, Type):
+            if spec.name in mapping and not spec.params:
+                return mapping[spec.name]
+            params = tuple(self._subst_method_spec(p, mapping)
+                           for p in spec.params)
+            if any(p is None for p in params):
+                return None
+            return Type(spec.name, params, nullable=spec.nullable)
+        return None
+
+    def _method_value_sig(self, recv_type: Type, name: str):
+        """`(params, ret)` for a method of `recv_type`, or None.
+
+        Mirrors the checker's METHODS tables with the receiver's
+        type arguments substituted. A nullable method's "T" is the
+        receiver's inner type; a method found only in the nullable
+        table on a NON-nullable receiver is a rebased `?.` method
+        inside an `opt_chain` lambda (D38) — the receiver is proven
+        non-none there, so "T" is the receiver itself.
+        """
+        table = None
+        mapping: dict = {}
+        if recv_type.nullable and name in METHODS.get("nullable", {}):
+            table = METHODS["nullable"]
+            mapping = {"T": Type(recv_type.name,
+                                 params=recv_type.params,
+                                 nullable=False)}
+        elif recv_type.name in METHODS \
+                and name in METHODS[recv_type.name]:
+            table = METHODS[recv_type.name]
+            mapping = self._method_receiver_mapping(recv_type)
+        elif name in METHODS.get("nullable", {}):
+            table = METHODS["nullable"]
+            mapping = {"T": recv_type}
+        if table is None:
+            return None
+        sig = table[name]
+        params = [self._subst_method_spec(p, mapping)
+                  for p in sig.get("params", [])]
+        ret = self._subst_method_spec(sig.get("return"), mapping)
+        return params, ret
+
+    def _is_plain_field(self, recv_type: Type, name: str) -> bool:
+        """True when `name` is a real field of `recv_type` (a struct
+        field, or an enum variant) — a plain attribute access, never
+        a method value. Provider/entity types have no tables here,
+        so they report False and the method-signature lookup decides.
+        """
+        decl = self.structs.get(recv_type.name)
+        if decl is not None:
+            return any(f.name == name for f in decl.fields)
+        return False
+
+    def _emit_method_value(self, node: A.Member, obj_type: Type,
+                           sig) -> str:
+        """A method used as a value (§16, hole 2): a lambda taking
+        the method's parameters, capturing the receiver by value
+        (D10) as a defaulted parameter — the receiver expression is
+        evaluated once, when the lambda is created, never again at
+        call time. The body is the ordinary method call with the
+        receiver replaced by the snapshot name."""
+        params, ret = sig
+        obj_text = self.emit_expr(node.obj, _PREC["primary"])
+        self._push_scope()
+        recv = self._bind_fresh("_r", type=obj_type, kind="param")
+        arg_bindings = []
+        arg_nodes = []
+        for i, ptype in enumerate(params):
+            b = self._bind_fresh(f"_a{i}", type=ptype, kind="param")
+            arg_bindings.append(b)
+            arg_nodes.append(A.Name(span=node.span, name=f"_a{i}",
+                                    expr_type=ptype))
+        recv_name = A.Name(span=node.span, name="_r",
+                           expr_type=obj_type)
+        member = A.Member(span=node.span, obj=recv_name,
+                          name=node.name, optional=False,
+                          expr_type=self._type_of(node))
+        call = A.Call(span=node.span, func=member, args=arg_nodes,
+                      kwargs=[], expr_type=ret)
+        sig_text = ", ".join(b.py for b in arg_bindings)
+        if sig_text:
+            sig_text += ", "
+        sig_text += f"{recv.py}={obj_text}"
+        body = self._callable_body(call, f"lambda {sig_text}: ")
+        self._pop_scope()
+        return body
+
     def _emit_member(self, node: A.Member) -> str:
         obj = node.obj
         if isinstance(obj, A.Name):
@@ -745,6 +853,16 @@ class _Emitter:
                 fake = _Binding(py=obj.name, kind="named-module",
                                 module=obj.name)
                 return self._emit_module_member(node, fake)
+        obj_type = self._type_of(obj)
+        t = self._type_of(node)
+        # §16 (hole 2): a method used as a value is a lambda, not a
+        # Python attribute — `int` has no `is_some`, `list` has no
+        # `len`. A real struct field stays a plain attribute.
+        if t.name == "fn" and not self._is_plain_field(obj_type,
+                                                       node.name):
+            sig = self._method_value_sig(obj_type, node.name)
+            if sig is not None:
+                return self._emit_method_value(node, obj_type, sig)
         obj_text = self.emit_expr(obj, _PREC["primary"])
         return f"{obj_text}.{node.name}"
 
@@ -1137,30 +1255,45 @@ class _Emitter:
             cur = self._link_receiver(cur)
         return False
 
-    def _rebase(self, node, old_base, new_base):
+    def _rebase(self, node, old_base, new_base, in_lambda_types=None):
         """Clone a Member/Index/Call chain, replacing the subtree
         `old_base` (by identity) with `new_base`, and clearing the
         `optional` flags (the optionality is handled by the
         `opt_chain` wrapper, not inside the lambda body). Types are
         copied onto the clones — the checker already typed the
-        original nodes."""
+        original nodes — except when `in_lambda_types` maps a link
+        to its in-lambda type (§16, hole 1): the checker's chain
+        type conflates the `?.` short-circuit with a field's own
+        nullability, and inside the lambda only the latter survives,
+        so the map's type is the exact one for dispatch."""
         if node is old_base:
             return new_base
         if isinstance(node, A.Member):
+            expr_type = node.expr_type
+            if in_lambda_types is not None \
+                    and in_lambda_types.get(id(node)) is not None:
+                expr_type = in_lambda_types[id(node)]
             return A.Member(
                 span=node.span,
-                obj=self._rebase(node.obj, old_base, new_base),
+                obj=self._rebase(node.obj, old_base, new_base,
+                                 in_lambda_types),
                 name=node.name, optional=False,
-                expr_type=node.expr_type)
+                expr_type=expr_type)
         if isinstance(node, A.Index):
+            expr_type = node.expr_type
+            if in_lambda_types is not None \
+                    and in_lambda_types.get(id(node)) is not None:
+                expr_type = in_lambda_types[id(node)]
             return A.Index(
                 span=node.span,
-                obj=self._rebase(node.obj, old_base, new_base),
-                index=node.index, expr_type=node.expr_type)
+                obj=self._rebase(node.obj, old_base, new_base,
+                                 in_lambda_types),
+                index=node.index, expr_type=expr_type)
         if isinstance(node, A.Call) and isinstance(node.func, A.Member):
             func = A.Member(
                 span=node.func.span,
-                obj=self._rebase(node.func.obj, old_base, new_base),
+                obj=self._rebase(node.func.obj, old_base, new_base,
+                                 in_lambda_types),
                 name=node.func.name, optional=False,
                 expr_type=node.func.expr_type)
             # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
@@ -1171,15 +1304,59 @@ class _Emitter:
             # dispatches against the nullable type and fails with
             # E4001. Only Call links are stripped: a Member link
             # (`a?.b`) may be nullable because the FIELD itself is
-            # nullable, which survives inside the lambda.
+            # nullable, which survives inside the lambda. When the
+            # caller supplies the exact in-lambda type (§16), that
+            # wins over this heuristic — it is exact where D38
+            # over-strips (a method whose own return type is
+            # nullable, e.g. `unwrap()` on `Result[str?, _]`).
             expr_type = node.expr_type
-            if node.func.optional and expr_type is not None \
+            if in_lambda_types is not None \
+                    and in_lambda_types.get(id(node)) is not None:
+                expr_type = in_lambda_types[id(node)]
+            elif node.func.optional and expr_type is not None \
                     and expr_type.nullable:
                 expr_type = Type(expr_type.name,
                                  params=expr_type.params, nullable=False)
             return A.Call(span=node.span, func=func, args=node.args,
                           kwargs=node.kwargs, expr_type=expr_type)
         return node
+
+    def _in_lambda_link_type(self, link, recv_type: Type):
+        """In-lambda result type of a chain link (§16, hole 1).
+
+        Inside an `opt_chain` lambda the receiver is proven
+        non-none, so this is the link's result type with the `?.`
+        short-circuit removed — but a nullable FIELD type or a
+        nullable method return survives. Returns None when the type
+        cannot be determined (provider/entity types); the caller
+        treats None as nullable and splits the segment, which is
+        always safe.
+        """
+        if isinstance(link, A.Member):
+            decl = self.structs.get(recv_type.name)
+            if decl is not None:
+                for f in decl.fields:
+                    if f.name == link.name:
+                        return f.type
+                return None  # not a field; structs have no methods
+            sig = self._method_value_sig(recv_type, link.name)
+            if sig is not None:
+                params, ret = sig
+                return fn_of(params, ret)
+            return None
+        if isinstance(link, A.Call) and isinstance(link.func, A.Member):
+            sig = self._method_value_sig(recv_type, link.func.name)
+            if sig is None:
+                return None
+            _params, ret = sig
+            return ret
+        if isinstance(link, A.Index):
+            if recv_type.name == "list" and recv_type.params:
+                return recv_type.params[0]
+            if recv_type.name == "dict" and len(recv_type.params) == 2:
+                return recv_type.params[1]
+            return None
+        return None
 
     def _emit_chain(self, node) -> str:
         """`?.` lowering (D9, corrected): one `opt_chain` call per
@@ -1210,10 +1387,6 @@ class _Emitter:
                                       _PREC["primary"])
         i = first_opt
         while i < len(links):
-            j = i + 1
-            while j < len(links) and not self._link_is_optional(links[j]):
-                j += 1
-            seg_end = links[j - 1]
             inner_recv = self._link_receiver(links[i])
             recv_type = self._type_of(inner_recv)
             # Inside the lambda the receiver is proven non-none
@@ -1223,6 +1396,32 @@ class _Emitter:
             # value were still nullable.
             inner_type = Type(recv_type.name, params=recv_type.params,
                               nullable=False)
+            # §16 (hole 1): a segment must also end before any link
+            # whose receiver can be `none` INSIDE the lambda — a
+            # nullable field (`o?.inner.name`) or a nullable method
+            # result (`r?.unwrap().upper()` on `Result[str?, _]?`).
+            # The checker's `expr_type` conflates the `?.`
+            # short-circuit with a field's own nullability, so the
+            # in-lambda types are walked link by link instead.
+            # `in_lambda` maps each link in this segment to its
+            # in-lambda result type, so `_rebase` types the clones
+            # exactly: a Member link's nullability inside the lambda
+            # is its FIELD's nullability, not the checker's chain
+            # type — without this, a method after a nullable field
+            # dispatches against `T?` and fails with E4001.
+            in_lambda: dict[int, Type | None] = {}
+            cur_type = self._in_lambda_link_type(links[i], inner_type)
+            in_lambda[id(links[i])] = cur_type
+            j = i + 1
+            while j < len(links):
+                if self._link_is_optional(links[j]):
+                    break
+                if cur_type is None or cur_type.nullable:
+                    break
+                cur_type = self._in_lambda_link_type(links[j], cur_type)
+                in_lambda[id(links[j])] = cur_type
+                j += 1
+            seg_end = links[j - 1]
             self._push_scope()
             binding = self._bind_fresh("_v", type=inner_type, kind="param")
             # The rebased base is a Name for the NEWR name `_v` — the
@@ -1230,7 +1429,8 @@ class _Emitter:
             # `_v_1` in a nested chain).
             new_base = A.Name(span=links[i].span, name="_v",
                               expr_type=inner_type)
-            body_node = self._rebase(seg_end, inner_recv, new_base)
+            body_node = self._rebase(seg_end, inner_recv, new_base,
+                                     in_lambda)
             self._need_rt("opt_chain")
             body = self._callable_body(body_node, f"lambda {binding.py}: ")
             self._pop_scope()

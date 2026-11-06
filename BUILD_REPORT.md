@@ -1860,3 +1860,194 @@ harness exit 0. NOT re-verified here (unchanged since M2):
 CI has still never run — Windows/macOS execution stays
 UNVERIFIED until green on all three OSes; no live Discord bot
 has connected yet (P-42).
+
+## 16. §15.8 follow-up fix round — the two open holes (7 Nov 2026)
+
+Both holes from §15.8, same severity class as item 3 (a program
+passing the full front end must never die with a raw Python
+traceback). Decision in both cases: GUARD, not reject — the
+shapes are legitimate programs under the language's design
+(SPEC §9.2 already promises "`a?.b.c()` short-circuits the
+whole postfix chain after the `?.`", TypeScript behaviour, so no
+SPEC change was needed; and methods-as-values already exist for
+ordinary methods, so a nullable method as a value is the same
+feature, not a new one). Rejecting would have made the language
+smaller for no reason; guarding keeps every program that
+checked before still checking, and makes it run.
+
+### 16.1 Hole 1 — `?.` chain with a nullable intermediate field
+
+Repro: `struct Inner: name: str` / `struct Outer: inner: Inner?`
+/ `let o: Outer? = Outer(inner: none)` / `print o?.inner.name`
+— check ok, build ok, run died `AttributeError: 'NoneType'
+object has no attribute 'name'`.
+
+Root cause: `_emit_chain` (D9) folded every non-optional link
+after the first `?.` into the same `opt_chain` lambda, so
+`.name` ran unguarded when `inner` was `none`. The checker's
+chain type (`str?` here) cannot tell the emitter where to
+split: it conflates the `?.` short-circuit with a field's own
+nullability, so a segment boundary cannot be read off
+`expr_type` — the in-lambda type has to be walked link by link.
+
+Fix (`compiler/emitter.py`): `_emit_chain` now walks the
+segment's in-lambda types with a new helper
+`_in_lambda_link_type` — Member link → the declared struct
+field type from `self.structs` (or the method's fn type for a
+method value), Call link → the method return type from the
+METHODS tables with substitution (`_method_value_sig` /
+`_subst_method_spec`, mirroring the checker's tables), Index
+link → the element type — and ends the segment before any
+link whose receiver can be `none` INSIDE the lambda (a
+nullable field, or a nullable method result). Splitting is
+always semantically safe: an extra `opt_chain` call is
+harmless, and the emitted code for a chain with no nullable
+intermediate is unchanged. The walk also passes the computed
+in-lambda types into `_rebase` (new `in_lambda_types` map,
+`id(node) -> Type`), so cloned Member/Call nodes carry the
+in-lambda type instead of the checker's chain type — that is
+what fixes the second-order failure `o?.inner.name.upper()`
+used to fail the build with clean `error[E4001]: ... 'str?'
+has no method 'upper'`. The old D38 heuristic (strip an
+optional Call link's nullable type) stays as the fallback for
+links with no map entry — but the map is exact where D38
+over-strips: `r?.unwrap().upper()` on
+`Result[str?, error]? = ok(none)` now prints `none` instead
+of dying, because `unwrap()`'s own return (`str?`) is
+genuinely nullable and must survive inside the lambda.
+Unknown types (provider/entity receivers) return None from
+the walk and split conservatively.
+
+Tests: `tests/test_emitter.py::TestOptionalChainNullableField`
+— `test_chain_through_nullable_field` (`o?.inner.name` →
+`n`/`none`/`none`), `test_method_after_nullable_field`
+(`.upper()` after the nullable field → `X`/`none`),
+`test_unwrap_nullable_result_then_method` (the D38 case →
+`none`/`HI`/`none`). Conformance:
+`conformance/ok/opt_chain_nullable_field.newr` (prints PASS).
+Red-check: reverting the `_emit_chain` segment scan to the
+old fold-everything loop makes all 3 tests fail (2 failures +
+1 E4001 build error); restored byte-identical
+(sha256-verified, `emitter.py 53b61c67…`).
+
+### 16.2 Hole 2 — bare nullable-method value
+
+Repro: `let v: int? = 5` / `print v?.is_some` (no parens) — and
+the same hole on plain values (`print v.is_some`). Check ok,
+build ok, run died `AttributeError: 'int' object has no
+attribute 'is_some'`. The same hole covered ordinary methods
+too: `xs.len` died `AttributeError: 'list' object has no
+attribute 'len'`.
+
+Root cause (two halves): the checker `_member_field_type`
+returned the method's RETURN type (`bool`) for a bare
+nullable-method access, while the emitter emitted a field
+access that does not exist; and the emitter had no
+method-value path for builtin/nullable methods at all (only
+user functions and struct fields existed as values).
+
+Fix, checker (`compiler/checker.py`): the nullable branch of
+`_member_field_type` now returns a fn type via
+`_method_fn_type` — `v.is_some` is `fn() -> bool`,
+`v?.is_some` is the nullable fn `(fn() -> bool)?` — and the
+recursion branch that used to return a bare fn type now
+returns `nullable_of(ft)`: a fn reached through `?.` is
+itself nullable (`xs?.len` is `(fn() -> int)?`, not a plain
+fn). Consequence, also fixed: calling a nullable fn value
+directly (`let f = xs?.len; f()`) is now rejected with E2001
+at check in both `_synth_Call` branches (named and general
+callee), since the value may be `none` and the call would
+otherwise still die with a raw TypeError. Passing a nullable
+fn as an argument was already rejected by type equality.
+
+Fix, emitter (`compiler/emitter.py`): `_emit_member` now
+detects a method used as a value (member type is `fn`, not a
+real struct field per `_is_plain_field`, and the receiver has
+a METHODS-table signature via `_method_value_sig`) and emits
+a lambda through `_emit_method_value`: the method's
+parameters as lambda parameters, the receiver captured by
+value (D10) as a defaulted parameter so it is evaluated once
+when the lambda is created, never again at call time, and the
+body is a synthetic Call node so `_emit_method_call` (incl.
+its D38 fallback) does the dispatch. The rebased case
+(`v?.is_some` inside an `opt_chain` lambda, receiver already
+stripped to `int`) works because `_method_value_sig` also
+consults the nullable table when the receiver type is
+non-nullable. `to_str` falls back to Python `str()` for
+functions, so `print v.is_some` prints a lambda repr without
+crashing. Store methods as values are out of scope (checker
+allows them via `_store_member_type`, emitter behaviour
+unchanged — not one of the two holes).
+
+Tests: `tests/test_checker.py::TestNullability` —
+`test_nullable_method_as_value_is_fn_not_bool`,
+`test_optional_nullable_method_as_value_is_nullable_fn`,
+`test_optional_chain_method_as_value_is_nullable_fn`,
+`test_optional_chain_nullable_field_type`;
+`tests/test_emitter.py::TestOptionalChainNullableField` —
+`test_nullable_method_as_value_runs`,
+`test_bare_method_as_value_runs`, `test_printing_method_value_does_not_crash`.
+Conformance: `conformance/ok/method_as_value.newr` (PASS) and
+`conformance/err/call_nullable_fn_value.newr`
+(`# expect: E2001`). Red-check: reverting the checker typing
++ the E2001 rejections + the emitter method-value path makes
+all 6 hole-2 tests fail; restored byte-identical
+(sha256-verified, `checker.py 861fd139…`,
+`emitter.py 53b61c67…`).
+
+### 16.3 Conformance-note (a wrong test, not a compiler bug)
+
+While writing `opt_chain_nullable_field.newr` the first
+draft asserted `b?.inner.name.is_none() != true` for
+`b.inner = none` — that is wrong: under SPEC §9.2 the whole
+chain short-circuits to `none` (a `bool?`), it is NOT `true`.
+The program was rewritten to bind the chain result to a
+variable first and call `.is_none()` on it, the same pattern
+`opt_methods.newr` uses. No compiler change came out of this.
+
+### 16.4 Optional item — LEFT OPEN
+
+The amount-based heal for `economy_debit` / `economy_credit`
+replay (evaluator's non-blocking note) was NOT done: it is
+not trivial in the sense the brief meant. The code change
+itself is small (read `COALESCE(SUM(amount), 0)` per key in
+`_apply` / `_debit`, top the remainder up like
+`_transfer` does), but it touches the economy template that
+was just verified in the M2 fix round, changes the
+`goldens/py/shop.py` golden (needs a `--bless` after
+line-by-line diff review), and needs new tests plus a
+re-run of the crash-between-legs / poison / concurrent-debit
+stress scenarios. Reachable only via direct DB tampering (a
+synthetic zero-amount ledger row), so it stays open for a
+later round rather than risking the verified template here.
+
+### 16.5 Results
+
+- Suite: **685 tests OK** (675 baseline + 10 new: 4 checker +
+  6 emitter), **12 skipped** on system Python and **1 skipped**
+  in a fresh venv with discord.py 2.7.1 + aiosqlite
+  (`/tmp/s16-venv`).
+- Conformance: **71 ok + 26 err** (was 69 + 25), harness
+  exit 0; `tests/test_conformance.py` passes.
+- Goldens: unchanged — `tests/test_goldens.py` passes, no
+  `--bless` needed (no golden program contains the fixed
+  shapes).
+- Live verification, fresh temp dir: `hello.newr` →
+  "Hello, world!", exit 0; `shop.newr` builds (3 warnings, as
+  before), `hello_bot.newr`, `showcase.newr` build; all three
+  reach the `DISCORD_TOKEN` guard, exit 1, in the venv.
+  §15.8 repro 1 now prints `none` / `n` / `N`, exit 0;
+  repro 2 prints two lambda reprs, `true`, `3`, exit 0;
+  calling a nullable fn value directly is rejected at check
+  with clean `error[E2001]: `f` may be `none` — unwrap it
+  before calling it`, exit 4.
+- NOT re-verified here (unchanged since M2): CI has still
+  never run — Windows/macOS execution stays UNVERIFIED until
+  green on all three OSes; no live Discord bot has connected
+  yet (P-42).
+- Changed files: `compiler/{checker,emitter}.py`,
+  `tests/{test_checker,test_emitter}.py`, plus 3 new
+  conformance programs (`ok/opt_chain_nullable_field.newr`,
+  `ok/method_as_value.newr`,
+  `err/call_nullable_fn_value.newr`). **Not pushed** — chie
+  reviews and pushes.

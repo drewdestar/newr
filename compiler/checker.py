@@ -926,17 +926,27 @@ class Checker:
         if obj_type.nullable:
             inner = _strip_nullable(obj_type)
             if name in METHODS.get("nullable", {}):
-                return METHODS["nullable"][name]["return"] \
-                    if not isinstance(
-                        METHODS["nullable"][name]["return"], str) \
-                    else inner
+                # §16 (hole 2): a bare nullable-method name is a
+                # FUNCTION value, not its return type — `v.is_some`
+                # is `fn() -> bool`, `v?.is_some` is the nullable
+                # fn `(fn() -> bool)?`. (Calls go through
+                # `_call_member`, which reads the METHODS table
+                # directly, so this only types bare accesses.)
+                fn_t = self._method_fn_type(
+                    obj_type, name, METHODS["nullable"][name])
+                if optional:
+                    return nullable_of(fn_t)
+                return fn_t
             if optional or self._is_optional_chain(obj_expr):
                 ft = self._member_field_type(inner, name, span, True,
                                              obj_expr, _in_chain=True)
                 if _is_unknown(ft):
                     return UNKNOWN
-                if ft.name == "fn":
-                    return ft
+                # §16 (hole 2): a fn value reached through `?.` is
+                # itself nullable — `xs?.len` is `(fn() -> int)?`,
+                # not a plain fn. Returning it unwrapped lied about
+                # the type, and calling it died with a raw
+                # TypeError when the receiver was `none`.
                 return nullable_of(ft)
             self._error(span, "E2001",
                         f"cannot access `.{name}` on a `{obj_type}` value",
@@ -1310,6 +1320,19 @@ class Checker:
             if binding is not None:
                 # A variable holding a function value.
                 ft = binding.type
+                if ft.name == "fn" and ft.nullable:
+                    # §16 (hole 2): a nullable fn value may be
+                    # `none` — calling it directly would die with a
+                    # raw TypeError, so it is an error at check.
+                    self._error(expr.span, "E2001",
+                                f"`{name}` may be `none` — unwrap it "
+                                "before calling it",
+                                expected="fn(...) -> ...", found=str(ft),
+                                help="use `.unwrap()` to get the "
+                                     "function first")
+                    for arg in expr.args:
+                        self.synth(arg)
+                    return UNKNOWN
                 if ft.name == "fn" and ft.params:
                     params = [(f"arg{i}", p)
                               for i, p in enumerate(ft.params[:-1])]
@@ -1335,6 +1358,19 @@ class Checker:
         # Any other callee expression (lambda, parenthesised fn value).
         ft = self.synth(func)
         if _is_unknown(ft):
+            for arg in expr.args:
+                self.synth(arg)
+            return UNKNOWN
+        if ft.name == "fn" and ft.nullable:
+            # §16 (hole 2): same rule as for a named fn value — a
+            # nullable fn may be `none`, so calling it directly is
+            # an error at check, not a raw TypeError at runtime.
+            self._error(expr.span, "E2001",
+                        "this function value may be `none` — unwrap "
+                        "it before calling it",
+                        expected="fn(...) -> ...", found=str(ft),
+                        help="use `.unwrap()` to get the function "
+                             "first")
             for arg in expr.args:
                 self.synth(arg)
             return UNKNOWN
