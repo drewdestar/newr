@@ -1,0 +1,83 @@
+[
+  {
+    "name": "lines-10k",
+    "bytes": 178890,
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.885,
+    "peak_kb": 39004,
+    "stderr_tail": ""
+  },
+  {
+    "name": "vars-10k",
+    "bytes": 167792,
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 5.318,
+    "peak_kb": 39336,
+    "stderr_tail": ""
+  },
+  {
+    "name": "string-1mb",
+    "bytes": 1000009,
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 1.152,
+    "peak_kb": 74120,
+    "stderr_tail": ""
+  },
+  {
+    "name": "list-100k",
+    "bytes": 688897,
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 2.219,
+    "peak_kb": 91228,
+    "stderr_tail": ""
+  },
+  {
+    "name": "fns-1000",
+    "bytes": 40794,
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.286,
+    "peak_kb": 22484,
+    "stderr_tail": ""
+  },
+  {
+    "name": "long-ident-10k",
+    "bytes": 20016,
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.144,
+    "peak_kb": 16780,
+    "stderr_tail": ""
+  },
+  {
+    "name": "long-line-100k",
+    "bytes": 100008,
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.627,
+    "peak_kb": 36784,
+    "stderr_tail": ""
+  },
+  {
+    "name": "bot-500-commands",
+    "bytes": 17313,
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.183,
+    "peak_kb": 17872,
+    "stderr_tail": ""
+  },
+  {
+    "name": "import-chain-100",
+    "bytes": 29,
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.162,
+    "peak_kb": 16084,
+    "stderr_tail": ""
+  }
+]

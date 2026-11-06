@@ -1,0 +1,6 @@
+let x = true ? 1 : 2
+print x
+let y = false ? 1 : 2
+print y
+let z = (1 + 2) * 3
+print z

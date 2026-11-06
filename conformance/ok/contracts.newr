@@ -1,0 +1,9 @@
+# Contracts (SPEC.md §9.7): `result` is bound inside `ensures`.
+fn absolute(n: int) -> int:
+  requires n != 0
+  ensures result >= 0
+  if n < 0:
+    return -n
+  return n
+
+print absolute(-3)

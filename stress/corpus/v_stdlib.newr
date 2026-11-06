@@ -1,0 +1,16 @@
+print math.sqrt(16.0)
+print math.floor(3.7)
+print math.pi
+print random.int(1, 10)
+print time.now()
+print time.format(time.now(), "%Y-%m-%d")
+print env.get("HOME") ?? "no-home"
+print env.args
+print min(3, 1)
+print max(3, 1)
+print abs(-5)
+print round(3.6)
+print str(42)
+print int("7")
+print float("2.5")
+print bool("true")

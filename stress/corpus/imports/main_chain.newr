@@ -1,0 +1,3 @@
+import "imp0.newr"
+import "imp19.newr"
+print imp19.chain_val_19

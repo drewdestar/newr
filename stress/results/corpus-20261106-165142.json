@@ -1,0 +1,928 @@
+{
+  "results": [
+    {
+      "name": "v_hello",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15708,
+      "mismatch": null
+    },
+    {
+      "name": "v_arith",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15776,
+      "mismatch": null
+    },
+    {
+      "name": "v_fn",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.145,
+      "peak_kb": 15148,
+      "mismatch": null
+    },
+    {
+      "name": "v_control",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15704,
+      "mismatch": null
+    },
+    {
+      "name": "v_strings",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15924,
+      "mismatch": null
+    },
+    {
+      "name": "v_collections",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15940,
+      "mismatch": null
+    },
+    {
+      "name": "v_nullable",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15920,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "v_contracts",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.126,
+      "peak_kb": 15708,
+      "mismatch": null
+    },
+    {
+      "name": "v_try",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.143,
+      "peak_kb": 15752,
+      "mismatch": null
+    },
+    {
+      "name": "v_match",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15268,
+      "mismatch": null
+    },
+    {
+      "name": "v_struct_enum",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15780,
+      "mismatch": null
+    },
+    {
+      "name": "v_numbers",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15708,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "v_unicode_idents",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15700,
+      "mismatch": null
+    },
+    {
+      "name": "v_stdlib",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15768,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "v_ternary_pipe",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15792,
+      "mismatch": null
+    },
+    {
+      "name": "v_bot_minimal",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15852,
+      "mismatch": null
+    },
+    {
+      "name": "v_task_durations",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.203,
+      "peak_kb": 15880,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "i_unterminated_string",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15708,
+      "mismatch": null
+    },
+    {
+      "name": "i_stray_brace",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15656,
+      "mismatch": null
+    },
+    {
+      "name": "i_bad_escape",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15732,
+      "mismatch": null
+    },
+    {
+      "name": "i_tab_indent",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15716,
+      "mismatch": null
+    },
+    {
+      "name": "i_bad_indent",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15556,
+      "mismatch": null
+    },
+    {
+      "name": "i_missing_colon",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15728,
+      "mismatch": null
+    },
+    {
+      "name": "i_bad_number",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15884,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "i_unexpected_char",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15816,
+      "mismatch": null
+    },
+    {
+      "name": "i_type_mismatch",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15840,
+      "mismatch": null
+    },
+    {
+      "name": "i_wrong_argc",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15716,
+      "mismatch": null
+    },
+    {
+      "name": "i_undefined_name",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15440,
+      "mismatch": null
+    },
+    {
+      "name": "i_use_before_def",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15792,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "i_redefine_builtin",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15792,
+      "mismatch": null
+    },
+    {
+      "name": "i_duplicate_top",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15692,
+      "mismatch": null
+    },
+    {
+      "name": "i_bad_nullable_recv",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.205,
+      "peak_kb": 15724,
+      "mismatch": null
+    },
+    {
+      "name": "i_overflow_decimal",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.146,
+      "peak_kb": 15144,
+      "mismatch": null
+    },
+    {
+      "name": "i_overflow_hex",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.193,
+      "peak_kb": 15716,
+      "mismatch": null
+    },
+    {
+      "name": "i_overflow_binary",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.142,
+      "peak_kb": 15736,
+      "mismatch": null
+    },
+    {
+      "name": "i_int64_min_ok",
+      "category": "i",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15680,
+      "mismatch": null
+    },
+    {
+      "name": "i_qq_nullable_rhs",
+      "category": "i",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15736,
+      "mismatch": null
+    },
+    {
+      "name": "i_nullable_assign",
+      "category": "i",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15740,
+      "mismatch": null
+    },
+    {
+      "name": "i_div_zero",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15700,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "i_index_oob_type",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15464,
+      "mismatch": null
+    },
+    {
+      "name": "i_call_non_fn",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.143,
+      "peak_kb": 15724,
+      "mismatch": null
+    },
+    {
+      "name": "i_return_outside_fn",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15708,
+      "mismatch": null
+    },
+    {
+      "name": "i_break_outside_loop",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15704,
+      "mismatch": null
+    },
+    {
+      "name": "d_desc_101",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.142,
+      "peak_kb": 15192,
+      "mismatch": null
+    },
+    {
+      "name": "d_desc_100_ok",
+      "category": "d",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15768,
+      "mismatch": null
+    },
+    {
+      "name": "d_reply_2001",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15352,
+      "mismatch": null
+    },
+    {
+      "name": "d_reply_2000_ok",
+      "category": "d",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15736,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "d_reply_placeholders_ok",
+      "category": "d",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.145,
+      "peak_kb": 15836,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "d_reply_placeholders_over",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15796,
+      "mismatch": null
+    },
+    {
+      "name": "d_cmd_name_33",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15740,
+      "mismatch": null
+    },
+    {
+      "name": "d_cmd_name_32_ok",
+      "category": "d",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15548,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "d_cmd_name_bad_chars",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15660,
+      "mismatch": null
+    },
+    {
+      "name": "d_bot_name_33",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15880,
+      "mismatch": null
+    },
+    {
+      "name": "d_dup_command",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.196,
+      "peak_kb": 15748,
+      "mismatch": null
+    },
+    {
+      "name": "d_unknown_intent",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.315,
+      "peak_kb": 15740,
+      "mismatch": null
+    },
+    {
+      "name": "d_option_min_max",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.144,
+      "peak_kb": 15848,
+      "mismatch": null
+    },
+    {
+      "name": "d_too_many_options",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.152,
+      "peak_kb": 15824,
+      "mismatch": null
+    },
+    {
+      "name": "d_no_answer_path",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.189,
+      "peak_kb": 15740,
+      "mismatch": null
+    },
+    {
+      "name": "d_embed_too_big",
+      "category": "d",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.144,
+      "peak_kb": 15752,
+      "mismatch": null
+    },
+    {
+      "name": "b_nonutf8",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 2,
+      "wall_s": 0.122,
+      "peak_kb": 15540,
+      "mismatch": null
+    },
+    {
+      "name": "b_empty",
+      "category": "bytes",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.123,
+      "peak_kb": 15712,
+      "mismatch": null
+    },
+    {
+      "name": "b_only_comments",
+      "category": "bytes",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.194,
+      "peak_kb": 15660,
+      "mismatch": null
+    },
+    {
+      "name": "b_lone_cr",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.216,
+      "peak_kb": 15516,
+      "mismatch": null
+    },
+    {
+      "name": "b_crlf_error",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.183,
+      "peak_kb": 15788,
+      "mismatch": null
+    },
+    {
+      "name": "b_mixed_endings",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.193,
+      "peak_kb": 15580,
+      "mismatch": null
+    },
+    {
+      "name": "b_bom",
+      "category": "bytes",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.202,
+      "peak_kb": 15840,
+      "mismatch": null
+    },
+    {
+      "name": "b_truncated_string",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.2,
+      "peak_kb": 15656,
+      "mismatch": null
+    },
+    {
+      "name": "b_truncated_block",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.143,
+      "peak_kb": 15740,
+      "mismatch": null
+    },
+    {
+      "name": "b_truncated_fn",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CRASH",
+      "exit": 1,
+      "wall_s": 0.195,
+      "peak_kb": 15556,
+      "mismatch": null
+    },
+    {
+      "name": "b_cesu8_surrogate",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 2,
+      "wall_s": 0.183,
+      "peak_kb": 15516,
+      "mismatch": null
+    },
+    {
+      "name": "b_nul_byte",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.197,
+      "peak_kb": 15068,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "b_nul_outside",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.179,
+      "peak_kb": 15440,
+      "mismatch": null
+    },
+    {
+      "name": "b_only_ws",
+      "category": "bytes",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.143,
+      "peak_kb": 15308,
+      "mismatch": null
+    },
+    {
+      "name": "b_crlf_ok",
+      "category": "bytes",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.198,
+      "peak_kb": 15680,
+      "mismatch": null
+    },
+    {
+      "name": "b_cr_only_file",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.183,
+      "peak_kb": 15536,
+      "mismatch": null
+    },
+    {
+      "name": "imports_chain20",
+      "category": "imports",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.198,
+      "peak_kb": 15780,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "imports_cycle",
+      "category": "imports",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.203,
+      "peak_kb": 15212,
+      "mismatch": null
+    },
+    {
+      "name": "imports_self",
+      "category": "imports",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.184,
+      "peak_kb": 15676,
+      "mismatch": null
+    },
+    {
+      "name": "imports_missing",
+      "category": "imports",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.232,
+      "peak_kb": 15708,
+      "mismatch": null
+    }
+  ],
+  "crashes": [
+    {
+      "name": "b_truncated_fn",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CRASH",
+      "exit": 1,
+      "wall_s": 0.195,
+      "peak_kb": 15556,
+      "mismatch": null
+    }
+  ],
+  "mismatches": [
+    {
+      "name": "v_nullable",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15920,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "v_numbers",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15708,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "v_stdlib",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15768,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "v_task_durations",
+      "category": "v",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.203,
+      "peak_kb": 15880,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "i_bad_number",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15884,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "i_use_before_def",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15792,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "i_div_zero",
+      "category": "i",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.122,
+      "peak_kb": 15700,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "d_reply_2000_ok",
+      "category": "d",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15736,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "d_reply_placeholders_ok",
+      "category": "d",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.145,
+      "peak_kb": 15836,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "d_cmd_name_32_ok",
+      "category": "d",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.122,
+      "peak_kb": 15548,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    },
+    {
+      "name": "b_nul_byte",
+      "category": "bytes",
+      "expected": "error",
+      "class": "CLEAN",
+      "exit": 0,
+      "wall_s": 0.197,
+      "peak_kb": 15068,
+      "mismatch": "expected error, got clean exit 0"
+    },
+    {
+      "name": "imports_chain20",
+      "category": "imports",
+      "expected": "valid",
+      "class": "CLEAN",
+      "exit": 4,
+      "wall_s": 0.198,
+      "peak_kb": 15780,
+      "mismatch": "expected valid, got CLEAN exit=4"
+    }
+  ]
+}

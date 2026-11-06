@@ -1,0 +1,13 @@
+let n = 0
+while n < 5:
+  n = n + 1
+  if n == 3:
+    print "three"
+  elif n == 4:
+    print "four"
+  else:
+    print n
+for i in range(3):
+  print i
+for ch in "abc":
+  print ch

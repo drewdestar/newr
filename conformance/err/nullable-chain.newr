@@ -1,0 +1,4 @@
+# expect: E2001
+let x = 5
+let y = x?.to_string()
+print y

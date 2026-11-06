@@ -1,0 +1,13 @@
+let a: int? = 5
+let b: int? = none
+let c: str? = "hi"
+print a ?? 0
+print b ?? 42
+print c?.upper()
+fn maybe() -> int?:
+  return 7
+print maybe() ?? -1
+let d: int? = a ?? b
+print d ?? -9
+let e = a ?? b ?? 99
+print e

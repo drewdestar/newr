@@ -1,0 +1,5 @@
+bot "B":
+  description: "x"
+command c:
+  description: "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+  reply: "hi"

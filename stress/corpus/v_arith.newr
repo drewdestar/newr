@@ -1,0 +1,11 @@
+let a = 328
+let b = 7
+print a + b
+print a - b
+print a * b
+print a / b
+print a % b
+print a ** 2
+print -a
+print a == b
+print a < b

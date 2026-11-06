@@ -1,0 +1,8 @@
+# Nullability (SPEC.md §7.2, §9.2): T widens to T?, ?? accepts a
+# nullable right side, ?. on a nullable value is fine.
+let x: int? = 5
+let y: int? = none
+let z = x ?? 0
+let w = y ?? 7
+print z
+print w

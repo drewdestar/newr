@@ -1,0 +1,14 @@
+let v = 2
+match v:
+  1:
+    print "one"
+  2:
+    print "two"
+  _:
+    print "other"
+let w: int? = 5
+match w:
+  none:
+    print "none"
+  _:
+    print "some"

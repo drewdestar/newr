@@ -1,0 +1,3 @@
+# expect: E2001
+let x: int = "hello"
+print x

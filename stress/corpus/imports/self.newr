@@ -1,0 +1,2 @@
+import "self.newr"
+print 1

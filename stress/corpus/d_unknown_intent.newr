@@ -1,0 +1,4 @@
+bot "B":
+  intents: [guilds, nosuchintent]
+command ping:
+  reply: "hi"

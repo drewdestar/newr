@@ -1,0 +1,168 @@
+{
+  "dict": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.143
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.144
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.183
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.144
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.251
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.243
+      }
+    ],
+    "boundary": null
+  },
+  "interp": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.123
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.183
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.206
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.264
+      }
+    ],
+    "boundary": null
+  }
+}

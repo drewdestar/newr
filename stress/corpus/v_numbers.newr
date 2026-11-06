@@ -1,0 +1,9 @@
+print 0
+print 9223372036854775807
+print -9223372036854775808
+print 0x7FFFFFFFFFFFFFFF
+print 0b1010
+print 1_000_000
+print 3.14
+print 1.5e10
+print 1 / 2

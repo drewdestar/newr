@@ -1,0 +1,9 @@
+{
+  "name": "depth-if-4059",
+  "note": "first breaking depth for if",
+  "exit": 4,
+  "stdout": "error[E1001]: too deeply nested\n  --> /tmp/stress-depth/probe.newr:201:404\n    |\n201 |                                                                                                                                                                                                                                                                                                                                                                                                                 if true:\n    |                                                                                                                                                                                                                                                                                                                                                                                                                    ^^^^\n    |\n  = help: split the expression or block into smaller pieces \u2014 newr limits nesting to 200 levels so a bad input cannot exhaust the stack\n/tmp/stress-depth/probe.newr: 1 error(s), 0 warning(s)\n",
+  "stderr": "",
+  "wall_s": 26.099,
+  "peak_kb": 967508
+}

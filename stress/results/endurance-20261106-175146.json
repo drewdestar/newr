@@ -1,0 +1,3800 @@
+[
+  {
+    "iteration": 1,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 2,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 3,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 4,
+    "wall_s": 12.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 5,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 6,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 7,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 8,
+    "wall_s": 12.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 9,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 10,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 11,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 12,
+    "wall_s": 12.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 13,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 14,
+    "wall_s": 13.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 15,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 16,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 17,
+    "wall_s": 12.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 18,
+    "wall_s": 14.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 19,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 20,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 21,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 22,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 23,
+    "wall_s": 14.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 24,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 25,
+    "wall_s": 13.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 26,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 27,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 28,
+    "wall_s": 13.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 29,
+    "wall_s": 13.3,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 30,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 31,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 32,
+    "wall_s": 13.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 33,
+    "wall_s": 13.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 34,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 35,
+    "wall_s": 12.3,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 36,
+    "wall_s": 12.3,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 37,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 38,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 39,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 40,
+    "wall_s": 12.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 41,
+    "wall_s": 13.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 42,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 43,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 44,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 45,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 46,
+    "wall_s": 14.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 47,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 48,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 49,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 50,
+    "wall_s": 13.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 51,
+    "wall_s": 13.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 52,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 53,
+    "wall_s": 13.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 54,
+    "wall_s": 13.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 55,
+    "wall_s": 13.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 56,
+    "wall_s": 13.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 57,
+    "wall_s": 13.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 58,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 59,
+    "wall_s": 13.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 60,
+    "wall_s": 13.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 61,
+    "wall_s": 13.3,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 62,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 63,
+    "wall_s": 13.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 64,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 65,
+    "wall_s": 14.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 66,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 67,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 68,
+    "wall_s": 13.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 69,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 70,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 71,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 72,
+    "wall_s": 12.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 73,
+    "wall_s": 13.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 74,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 75,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 76,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 77,
+    "wall_s": 13.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 78,
+    "wall_s": 15.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 79,
+    "wall_s": 13.3,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 80,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 81,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 82,
+    "wall_s": 13.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 83,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 84,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 85,
+    "wall_s": 13.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 86,
+    "wall_s": 14.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 87,
+    "wall_s": 14.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 88,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 89,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 90,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 91,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 92,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 93,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 94,
+    "wall_s": 12.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 95,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 96,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 97,
+    "wall_s": 13.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 98,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 99,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 100,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 101,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 102,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 103,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 104,
+    "wall_s": 12.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 105,
+    "wall_s": 13.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 106,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 107,
+    "wall_s": 13.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 108,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 109,
+    "wall_s": 12.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 110,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 111,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 112,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 113,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 114,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 115,
+    "wall_s": 14.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 116,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 117,
+    "wall_s": 13.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 118,
+    "wall_s": 12.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 119,
+    "wall_s": 12.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 120,
+    "wall_s": 13.7,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 121,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 122,
+    "wall_s": 12.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 123,
+    "wall_s": 13.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 124,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 125,
+    "wall_s": 13.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 126,
+    "wall_s": 12.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 127,
+    "wall_s": 13.0,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 128,
+    "wall_s": 13.4,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 129,
+    "wall_s": 13.3,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 130,
+    "wall_s": 13.6,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 131,
+    "wall_s": 12.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 132,
+    "wall_s": 14.3,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 133,
+    "wall_s": 13.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 134,
+    "wall_s": 12.9,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 135,
+    "wall_s": 13.2,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  },
+  {
+    "iteration": 136,
+    "wall_s": 12.1,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 19,
+    "slice_bad": []
+  },
+  {
+    "iteration": 137,
+    "wall_s": 16.8,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": [
+      {
+        "file": "b_truncated_fn.newr",
+        "class": "CRASH",
+        "exit": 1
+      }
+    ]
+  },
+  {
+    "iteration": 138,
+    "wall_s": 13.5,
+    "suite_ok": true,
+    "suite_tail": "OK",
+    "examples": {
+      "hello.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "hello_bot.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "shop.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      },
+      "showcase.newr": {
+        "class": "CLEAN",
+        "exit": 0
+      }
+    },
+    "slice_size": 20,
+    "slice_bad": []
+  }
+]

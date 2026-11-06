@@ -1,0 +1,6 @@
+bot "B":
+  description: "x"
+command ping:
+  reply: "one"
+command ping:
+  reply: "two"

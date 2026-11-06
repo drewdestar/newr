@@ -1,0 +1,3 @@
+let a: str? = none
+let b: str? = "fallback"
+print a ?? b

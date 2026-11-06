@@ -1,0 +1,2 @@
+import "imp6.newr"
+pub let chain_val_5 = 5

@@ -1,0 +1,10 @@
+# shop_items.newr — price list for the shop bot (examples/shop.newr).
+# Imported with `import "shop_items.newr"` and used as
+# `shop_items.price_of(item)`.
+
+pub fn price_of(item: str) -> int:
+  if item == "brick":
+    return 118
+  if item == "potion":
+    return 250
+  return 0

@@ -1,0 +1,5 @@
+bot "B":
+  description: "x"
+command c:
+  do:
+    let x = 1

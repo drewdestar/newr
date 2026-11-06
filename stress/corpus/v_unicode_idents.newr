@@ -1,0 +1,9 @@
+let คะแนน = 10
+print คะแนน
+let Größe = 3
+print Größe
+let café = 1
+print café
+let s = "héllo 🎉 مرحبا"
+print s
+print len(s)

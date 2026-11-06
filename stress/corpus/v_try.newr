@@ -1,0 +1,14 @@
+try:
+  let content = file.read("nope.txt")
+  print content
+catch err:
+  log "read failed"
+  print err
+finally:
+  log "done"
+fn boom() -> int:
+  throw "kaboom"
+try:
+  print boom()
+catch err:
+  print "caught"

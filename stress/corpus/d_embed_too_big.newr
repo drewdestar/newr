@@ -1,0 +1,7 @@
+bot "B":
+  description: "x"
+command c:
+  do:
+    embed:
+      title: "ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"
+    reply "hi"

@@ -1,0 +1,682 @@
+"""The `newr` command-line tool (SPEC.md §19).
+
+M1: front end only — ``check`` and ``build --check`` run the pipeline
+parse -> resolve -> check (core + discord) and report diagnostics. There
+are no emitters yet, so ``build`` without ``--check`` is an error that
+tells the user to use ``--check`` (emitters land in M2).
+
+Exit codes (SPEC.md §19, v0 shape kept): 0 success, 1 usage error,
+2 environment error (unreadable file), 4 build/check error (diagnostics
+contain errors). Warnings never fail the build.
+
+Output modes:
+- human (default): rustc-style diagnostics on stdout + a one-line
+  summary; usage/environment errors on stderr.
+- ``--error-format=json``: stdout is a JSON array of diagnostics.
+- ``--json`` (v0 global flag): stdout is exactly one JSON object, the
+  envelope ``{ok, command, newr, data, warnings, error}``.
+
+``--fast`` (build only in spirit, accepted on check too): parse + name
+resolution only — the full type check AND all Discord validation are
+skipped. The run prints a warning that the result is not verified.
+
+No POSIX-only code: paths go through pathlib; reads use
+``encoding="utf-8"``.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+from . import __version__
+from .checker import check_program
+from .discord_check import check_discord, discord_providers
+from .errors import Diagnostic, NewrError
+from .resolver import resolve_source
+
+VERSION = __version__
+
+USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
+
+  check <file> [--fast]  verify a .newr program (parse, resolve, check);
+                         writes nothing
+  build <file> [--target py|js] [--check] [--fast]
+                         build a .newr program (M1: --check only; emitters
+                         land in M2, so build without --check is an error)
+  help [command]         show this help, or help for one command
+  version                print the newr version
+  explain <code>         explain a diagnostic code (also: --explain <code>)
+
+Global flags:
+  --json             machine-readable output: stdout is exactly one JSON
+                     object (the envelope), diagnostics go in data
+  --error-format=json
+                     diagnostics as a JSON array on stdout (no --json)
+  --explain <code>   explain a diagnostic code
+  -h, --help         show this help
+  -v, --version      print the newr version
+
+Exit codes: 0 success; 1 usage error; 2 environment error (unreadable
+file); 4 build/check error (the program has errors). Warnings never
+fail the build.
+"""
+
+COMMAND_HELP = {
+    "check": """Usage: newr check <file> [--fast]
+
+Verify a .newr program: parse it, resolve names and imports, and run
+the core checker plus the discord checker. Writes nothing. Exit 0 when
+the program has no errors (warnings are fine), 4 when it has errors,
+2 when the file cannot be read.
+
+  --fast   parse + name resolution only; skips the full type check AND
+           all Discord validation. The result is not verified — say so
+           in the output.
+""",
+    "build": """Usage: newr build <file> [--target py|js] [--check] [--fast]
+
+Build a .newr program into runnable code for one target (Python and
+TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2).
+
+M1: there are no emitters yet, so `build` without `--check` is an
+error — use `newr build --check <file>` to verify without emitting.
+`--check` runs the same pipeline as `newr check` and writes nothing.
+`--fast` parses + resolves only, skipping the full type check AND all
+Discord validation. The result is not verified.
+""",
+    "version": """Usage: newr version
+
+Print the newr version (currently 0.1.0).
+""",
+    "explain": """Usage: newr explain <code>   (also: newr --explain <code>)
+
+Print the long-form explanation of a diagnostic code, e.g. E2001.
+""",
+    "help": """Usage: newr help [command]
+
+Show the general help, or help for one command.
+""",
+}
+
+# ---------------------------------------------------------------- explain
+# Long-form explanations for every diagnostic code (SPEC.md §16).
+# One or two short paragraphs each: what it means, why it fires, how to
+# fix it. Written for humans, not generated from the codes.
+
+EXPLAIN: dict[str, str] = {
+    "E1001": """E1001: syntax error.
+
+The parser could not make sense of this line. Check for a missing
+colon after a block header, an indent that is not exactly 2 spaces per
+level, an unclosed string or bracket, or a keyword in the wrong place.
+The span points at the offending token.
+
+This code is also used for "too deeply nested": expressions, blocks,
+or types nested more than 200 levels deep are rejected instead of
+crashing the compiler. Split the expression or block into smaller
+pieces.""",
+    "E_BAD_ESCAPE": """E_BAD_ESCAPE: unknown or malformed escape.
+
+Only these escapes are allowed in a string: \\" \\\\ \\n \\t \\r and
+\\u{XXXX} (a Unicode code point in braces). Check the escape after
+the backslash — for \\u{...} the braces and the hex digits are both
+required.""",
+    "E_BAD_INDENT": """E_BAD_INDENT: wrong indentation.
+
+Indent by exactly 2 spaces per level, and dedent only to a level
+the block was opened at. Tabs are never allowed (see
+E_TAB_INDENT).""",
+    "E_BAD_LINE_ENDING": """E_BAD_LINE_ENDING: lone carriage return.
+
+A lone CR (carriage return) is not a line ending in newr. Lines end
+with LF, or with CRLF. Convert the file's line endings to LF or
+CRLF.""",
+    "E_BAD_NUMBER": """E_BAD_NUMBER: malformed number literal.
+
+The digits after 0x / 0b / 0o are not valid for that base, or the
+number has no digits at all (e.g. `0x` with nothing after it).
+Underscores group digits, so one must sit between two digits
+(`1_000`, `0xF_F`): a leading, trailing, or doubled underscore
+(`1__2`, `1_`, `0x_FF`) is an error. Write a valid literal, e.g.
+`0xFF`, `0b1010`, `0o17`.""",
+    "E_INT_OVERFLOW": """E_INT_OVERFLOW: integer literal out of range.
+
+`int` is a 64-bit signed integer on every target: -9223372036854775808
+to 9223372036854775807. This literal is outside that range. The one
+exception is the minimum itself, written as `-9223372036854775808`
+(the minus is part of the literal there). Use a smaller literal, or
+`float`.""",
+    "E_STRAY_BRACE": """E_STRAY_BRACE: stray } in a string.
+
+A `}` inside a string starts an interpolation only as `${...}`; a
+lone `}` is an error. Write `}}` for a literal `}`.""",
+    "E_TAB_INDENT": """E_TAB_INDENT: tab indentation.
+
+Tabs are not allowed for indentation in newr — indent by exactly 2
+spaces per level.""",
+    "E_UNEXPECTED_CHAR": """E_UNEXPECTED_CHAR: unexpected character.
+
+The character here is not part of the newr language. Check for a
+typo, or for a character pasted from elsewhere (for example a
+non-ASCII quote).""",
+    "E_UNTERMINATED_STRING": """E_UNTERMINATED_STRING: unterminated string.
+
+A string was opened but the file (or the line) ended before its
+closing quote. Add the closing `"` on the same line (a newline
+inside a string must be written as \\n).""",
+    "E2001": """E2001: mismatched types.
+
+The value here has a different type from the one that was expected.
+newr has no implicit numeric coercion: an int is never silently a
+float — write float(5) or 5.0 to convert explicitly. The diagnostic
+carries expected/found, so the mismatch is named, not guessed.""",
+    "E2002": """E2002: type annotation needed.
+
+An empty list, dict, or set has no element type for the checker to
+infer — there is nothing in it to infer from. Write the type
+explicitly, e.g. `let xs: list[int] = []`.""",
+    "E2003": """E2003: heterogeneous list/dict.
+
+Every element of a list (and every key, and every value, of a dict)
+must have the identical type. newr does not unify or coerce element
+types. Split the collection, or convert the elements to one type
+first.""",
+    "E2004": """E2004: non-boolean condition.
+
+An if/while condition or a match guard must be bool. If the condition
+is a comparison, check the operator; if it is a value, compare it
+explicitly (e.g. `if x != 0:` instead of `if x:`).""",
+    "E2005": """E2005: use before definition.
+
+A local variable was used before its `let` in the same block. Move
+the `let` above the use. Module-level names (functions, structs,
+top-level lets) may be forward-referenced, so this only fires for
+locals — and for a let's own right-hand side referring to itself
+(`let x = x + 1`).""",
+    "E2006": """E2006: non-exhaustive match.
+
+The match does not cover every possible value. For an enum scrutinee,
+add arms for the missing variants; for any other scrutinee, add a `_`
+arm. Exhaustiveness is an error in newr, not a warning: a match that
+can fall through is a bug waiting to happen.""",
+    "E2007": """E2007: break/continue/return in the wrong place.
+
+`break` and `continue` only make sense inside a loop, and `return`
+with a value only inside a function. A bare `return` at the top level
+exits the program; command/event handlers are not functions, so
+`return <value>` is not allowed in them either.""",
+    "E2008": """E2008: Discord rule violation.
+
+A rule of the discord module was broken: a bad or uppercase command
+name, a duplicate command, a description or reply over the length
+limit, a missing component timeout, a duplicate custom_id, an unknown
+intent, a store schema problem, and so on. The message names the
+rule. Only discord-module rules live here — core language errors use
+other codes, so a Discord API change can never move a core error.""",
+    "E2009": """E2009: i18n violation.
+
+A strings/t() rule was broken: a locale is missing a key that another
+locale defines, a t() key does not exist, or a t() call's arguments
+do not match the template's placeholders. Every locale must define
+the same key set.""",
+    "E2010": """E2010: not all paths answer.
+
+A command handler can finish without answering the interaction. Every
+branch of a handler must end in a reply, defer, edit, or followup (or
+throw). An `if` counts only with an `else` whose branches all answer;
+`for`/`while` never count, because they may run zero times.""",
+    "E3001": """E3001: undefined name.
+
+There is no binding with this name in scope. Check the spelling — the
+help names a similar name when one exists (difflib ratio >= 0.7) and
+the diagnostic carries a machine-applicable fix for it. A module name
+used as a value, and an unknown type in an annotation, are reported
+with this code too.""",
+    "E3002": """E3002: wrong number of arguments.
+
+The call passes a different number of arguments from the function's
+signature. Check the signature; keyword arguments must name real
+parameters.""",
+    "E3003": """E3003: duplicate definition.
+
+Two definitions in the same scope share a name. Rename one of them.
+Shadowing a name from an *outer* scope is only a warning (W1004);
+same-scope duplicates are errors.""",
+    "E3004": """E3004: import cycle.
+
+Module A imports module B, which (directly or through others) imports
+A again. Break the cycle by moving the shared declarations into a
+third module that both import.""",
+    "E3005": """E3005: name not exported.
+
+The name exists in the imported module but is not marked `pub`.
+Add `pub` to the declaration in the imported module, or use an
+exported name.""",
+    "E3006": """E3006: bot/command/event/task in an imported file.
+
+Imported files contribute functions, structs, enums, strings, and
+store tables only. Bot blocks, commands, events, tasks, and top-level
+statements must live in the main file — the file passed to
+`newr build`.""",
+    "E3007": """E3007: reserved name shadowed.
+
+Builtin names (print, len, t, err, log, ...) and handler bindings
+(user, guild, channel, bot, interaction, message, values) cannot be
+redefined. One exception: catch variables may shadow builtins —
+`catch err:` is the spec's own idiom.""",
+    "E3008": """E3008: unknown module / missing file.
+
+The import cannot be resolved. Named modules in v1: math, time,
+random, file, env, discord. `json` arrives in v1.1. File imports
+resolve relative to the importing file — check the path and the
+spelling.""",
+    "W1001": """W1001: unused variable / parameter / option.
+
+A `let`/`const`, parameter, or command option is never read. An
+unused binding is almost always a bug — a leftover, or a use that was
+typo'd (see also E3001's similar-name help). Parameters of `pub`
+functions do not warn: they are public API. Warnings never fail the
+build.""",
+    "W1002": """W1002: unused import.
+
+A module was imported but never referenced. Remove the import.
+`import discord` does not warn when the program has bot blocks —
+they implicitly import the discord module.""",
+    "W1003": """W1003: unreachable code.
+
+Statements after `return`, `throw`, `break`, or `continue` in the
+same block never run. Move them, or remove them.""",
+    "W1004": """W1004: shadowing.
+
+A declaration hides a name from an outer scope. It is legal, but
+easy to misread — rename it if the shadowing is not intentional.""",
+    "W1005": """W1005: always-true/false literal condition.
+
+An if/elif/while condition is a constant literal (`true`/`false`),
+so one branch can never run. If the literal is a placeholder, replace
+it with the real condition; if the branch is dead, remove it.""",
+    "W1006": """W1006: unbounded loop in a handler body.
+
+A handler that loops forever (or until a condition that may never
+arrive) will outlive the interaction token, which expires after 15
+minutes. This is a warning, not a ban — the core language allows
+`while`; the discord checker only warns that a handler is the wrong
+place for an unbounded loop.""",
+    "W1007": """W1007: extra t() argument.
+
+A t() call was given more arguments than its template has
+placeholders. The extras are ignored. (An argument whose *name* is
+not a template placeholder is an error, E2009, not this warning.)""",
+    "W1008": """W1008: (newr-specific warning) integer division in a float
+context.
+
+`1 / 2` is truncating integer division (0), not 0.5 — and it is
+flowing into a float context, where 0.5 was almost certainly meant.
+Write `1.0 / 2.0` or `float(1) / 2`. This warning is newr-specific:
+no other language is being quoted as doing it.""",
+    "W1009": """W1009: reply length cannot be verified.
+
+Part of a reply is an unknown-length `str`, so the 2000-character
+reply limit could not be checked statically. The reply may still be
+fine at runtime — but if the value can be long, guard it or shorten
+the fixed part.""",
+    "W1010": """W1010: privileged intent declared.
+
+A privileged intent (members, message_content, presences) was
+declared. Discord requires verification/approval for privileged
+intents in bots in 10,000+ servers. If the bot will stay small, the
+intent is fine; if it will grow, plan the verification early.""",
+}
+
+# ---------------------------------------------------------------- pipeline
+
+
+def _read_source(path: Path) -> str:
+    """Read a source file as UTF-8, or raise an environment error.
+
+    ``newline=""`` keeps the raw bytes' line endings in the text, so
+    the lexer's raw-byte spans (M-06) and its lone-CR detection (M-07)
+    see the file exactly as it is on disk. A non-UTF-8 file is an
+    environment error (exit 2), not a traceback (M-02).
+    """
+    try:
+        with open(path, encoding="utf-8", newline="") as fh:
+            return fh.read()
+    except UnicodeDecodeError as exc:
+        raise _EnvError(
+            f"cannot read {path}: not valid UTF-8 "
+            f"(SPEC.md §3.1 requires UTF-8; {exc})") from exc
+    except OSError as exc:
+        raise _EnvError(f"cannot read {path}: {exc}") from exc
+
+
+class _UsageError(Exception):
+    """Exit 1: bad command, flags, or arguments."""
+
+
+class _EnvError(Exception):
+    """Exit 2: the environment (missing/unreadable file)."""
+
+
+def _run_pipeline(path: Path, *, fast: bool) -> tuple[
+        object | None, list[Diagnostic], str]:
+    """Parse + resolve (+ check, unless ``fast``).
+
+    Returns (program, diagnostics, source_text). Parse errors raise
+    NewrError carrying the single diagnostic. The file is read once;
+    ``resolve_source`` parses that text (imports resolve relative to
+    the file's path).
+    """
+    source = _read_source(path)
+    resolved = resolve_source(source, str(path))
+    diagnostics: list[Diagnostic] = list(resolved.diagnostics)
+    if not fast:
+        providers = discord_providers(resolved.program)
+        core = check_program(resolved.program, providers=providers)
+        diagnostics += core.diagnostics
+        diagnostics += check_discord(resolved.program)
+    return resolved.program, diagnostics, source
+
+
+def _diag_json(diag: Diagnostic, source: str) -> dict:
+    return diag.to_json(source)
+
+
+def _source_cache(main_path: Path, main_source: str):
+    """file -> source text, for rendering diagnostics (which may come
+    from imported files, not just the main file)."""
+    cache: dict[str, str] = {str(main_path): main_source}
+
+    def get_source(file: str) -> str:
+        if file in cache:
+            return cache[file]
+        try:
+            with open(file, encoding="utf-8", newline="") as fh:
+                text = fh.read()
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        cache[file] = text
+        return text
+
+    return get_source
+
+
+def _envelope(command: str, data: dict | None,
+              diagnostics: list[Diagnostic]) -> dict:
+    """The --json envelope (v0 shape kept)."""
+    errors = [d for d in diagnostics if d.is_error()]
+    warnings = [d for d in diagnostics if not d.is_error()]
+    first = errors[0] if errors else None
+    return {
+        "ok": not errors,
+        "command": command,
+        "newr": VERSION,
+        "data": data,
+        "warnings": [w.to_json() for w in warnings],
+        "error": None if first is None else {
+            "code": first.code,
+            "message": first.message,
+            "hint": first.help or "",
+        },
+    }
+
+
+def _emit_diagnostics(diagnostics: list[Diagnostic], get_source, *,
+                      json_mode: bool, error_format_json: bool) -> None:
+    """Print diagnostics in the requested format (stdout only)."""
+    if json_mode:
+        return  # the envelope carries them; see _emit_envelope
+    if error_format_json:
+        print(json.dumps([d.to_json(get_source(d.span.file))
+                          for d in diagnostics]))
+        return
+    for d in diagnostics:
+        print(d.format(get_source(d.span.file)))
+
+
+def _check_or_build(args: list[str], *, command: str,
+                    json_mode: bool, error_format_json: bool,
+                    fast: bool) -> int:
+    """Shared body of `check` and `build --check`."""
+    if fast:
+        print("warning: --fast skips the full type check and all "
+              "Discord validation; the result is not verified",
+              file=sys.stderr)
+    unknown = [a for a in args if a.startswith("-")]
+    if unknown:
+        raise _UsageError(f"unknown flag(s) for `newr {command}`: "
+                          + ", ".join(unknown))
+    positional = [a for a in args if not a.startswith("-")]
+    if len(positional) != 1:
+        raise _UsageError(
+            f"`newr {command}` needs exactly one .newr file "
+            f"(got {len(positional)})")
+    path = Path(positional[0])
+    try:
+        program, diagnostics, source = _run_pipeline(path, fast=fast)
+    except NewrError as exc:
+        diagnostics = [exc.diagnostic]
+        try:
+            source = _read_source(path)
+        except _EnvError:
+            source = ""
+        program = None
+    except RecursionError:
+        # M-01 backstop: the depth guards should catch deep nesting
+        # first, but if anything still recurses (e.g. a pathological
+        # struct cycle), the failure is still a clean E1001, exit 4 —
+        # never a raw traceback, and --json still gets its envelope.
+        diagnostics = [Diagnostic(
+            span=Span(str(path), 0, 1), code="E1001",
+            message="too deeply nested",
+            help="split the expression or block into smaller pieces — "
+                 "newr limits nesting to 200 levels so a bad input "
+                 "cannot exhaust the stack")]
+        try:
+            source = _read_source(path)
+        except _EnvError:
+            source = ""
+        program = None
+    return _finish(command, path, program, diagnostics, source,
+                   json_mode=json_mode,
+                   error_format_json=error_format_json)
+
+
+def _finish(command: str, path: Path, program: object | None,
+            diagnostics: list[Diagnostic], source: str, *,
+            json_mode: bool, error_format_json: bool) -> int:
+    errors = [d for d in diagnostics if d.is_error()]
+    warnings = [d for d in diagnostics if not d.is_error()]
+    get_source = _source_cache(path, source)
+    if json_mode:
+        files = []
+        if program is not None:
+            files = list(getattr(program, "files", []))
+        data = {
+            "file": str(path),
+            "files": files,
+            "diagnostics": [d.to_json(get_source(d.span.file))
+                            for d in diagnostics],
+        }
+        print(json.dumps(_envelope(command, data, diagnostics)))
+        return 0 if not errors else 4
+    _emit_diagnostics(diagnostics, get_source, json_mode=json_mode,
+                      error_format_json=error_format_json)
+    if error_format_json:
+        # stdout is pure JSON in this mode; the exit code is the verdict.
+        return 0 if not errors else 4
+    if errors:
+        print(f"{path}: {len(errors)} error(s), "
+              f"{len(warnings)} warning(s)")
+        return 4
+    if warnings:
+        print(f"{path}: ok, {len(warnings)} warning(s)")
+    else:
+        print(f"{path}: ok")
+    return 0
+
+
+# ---------------------------------------------------------------- commands
+
+
+def _cmd_check(args: list[str], *, json_mode: bool,
+               error_format_json: bool) -> int:
+    fast = "--fast" in args
+    args = [a for a in args if a != "--fast"]
+    return _check_or_build(args, command="check", json_mode=json_mode,
+                           error_format_json=error_format_json, fast=fast)
+
+
+def _cmd_build(args: list[str], *, json_mode: bool,
+               error_format_json: bool) -> int:
+    target = None
+    rest: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--target" and i + 1 < len(args):
+            target = args[i + 1]
+            i += 2
+        elif arg.startswith("--target="):
+            target = arg.split("=", 1)[1]
+            i += 1
+        else:
+            rest.append(arg)
+            i += 1
+    if target is not None and target not in ("py", "js"):
+        raise _UsageError(
+            f"unknown target `{target}` (M1 targets: py, js)")
+    fast = "--fast" in rest
+    rest = [a for a in rest if a != "--fast"]
+    if "--check" not in rest:
+        raise _UsageError(
+            "newr build cannot emit yet — emitters land in M2. "
+            "Use `newr build --check <file>` to verify without emitting.")
+    rest = [a for a in rest if a != "--check"]
+    return _check_or_build(rest, command="build", json_mode=json_mode,
+                           error_format_json=error_format_json, fast=fast)
+
+
+def _cmd_help(args: list[str]) -> int:
+    if not args:
+        print(USAGE)
+        return 0
+    topic = args[0]
+    text = COMMAND_HELP.get(topic)
+    if text is None:
+        raise _UsageError(f"unknown command `{topic}`. Run `newr help`.")
+    print(text)
+    return 0
+
+
+def _cmd_version() -> int:
+    print(f"newr {VERSION}")
+    return 0
+
+
+def _cmd_explain(code: str) -> int:
+    text = EXPLAIN.get(code)
+    if text is None:
+        raise _UsageError(
+            f"unknown diagnostic code `{code}`. Run `newr --explain E2001`.")
+    print(text)
+    return 0
+
+
+# ---------------------------------------------------------------- entry point
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the CLI; return the process exit code."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    json_mode = "--json" in argv
+    argv = [a for a in argv if a != "--json"]
+    try:
+        error_format_json = False
+        rest: list[str] = []
+        i = 0
+        while i < len(argv):
+            arg = argv[i]
+            if arg == "--error-format=json":
+                error_format_json = True
+                i += 1
+            elif arg == "--error-format":
+                if i + 1 >= len(argv):
+                    raise _UsageError(
+                        "`--error-format` needs a value, e.g. "
+                        "`--error-format=json`")
+                if argv[i + 1] != "json":
+                    raise _UsageError(
+                        "--error-format only supports `json` in M1")
+                error_format_json = True
+                i += 2
+            else:
+                rest.append(arg)
+                i += 1
+        return _dispatch(rest, json_mode=json_mode,
+                         error_format_json=error_format_json)
+    except _UsageError as exc:
+        print(f"newr: {exc}", file=sys.stderr)
+        if json_mode:
+            print(json.dumps(_envelope("usage", None, [])))
+        return 1
+    except _EnvError as exc:
+        print(f"newr: {exc}", file=sys.stderr)
+        if json_mode:
+            print(json.dumps(_envelope("environment", None, [])))
+        return 2
+    except RecursionError:
+        # M-01 backstop for any path outside _check_or_build: a clean
+        # E1001 diagnostic, exit 4 — never a raw traceback.
+        diag = Diagnostic(span=Span("newr", 0, 1), code="E1001",
+                          message="too deeply nested",
+                          help="split the expression or block into "
+                               "smaller pieces — newr limits nesting to "
+                               "200 levels so a bad input cannot exhaust "
+                               "the stack")
+        print(f"newr: {diag.message}", file=sys.stderr)
+        if json_mode:
+            print(json.dumps(_envelope("error", None, [diag])))
+        elif error_format_json:
+            print(json.dumps([diag.to_json("")]))
+        return 4
+
+
+def _dispatch(argv: list[str], *, json_mode: bool,
+              error_format_json: bool) -> int:
+    # --explain is a global flag (also available as a subcommand).
+    if argv and argv[0] == "--explain":
+        if len(argv) < 2:
+            raise _UsageError("`newr --explain` needs a code, e.g. E2001")
+        return _cmd_explain(argv[1])
+    if not argv or argv[0] in ("-h", "--help"):
+        print(USAGE)
+        return 0
+    cmd, args = argv[0], argv[1:]
+    if cmd in ("-v", "--version"):
+        if json_mode:
+            print(json.dumps(_envelope(
+                "version", {"version": VERSION}, [])))
+            return 0
+        return _cmd_version()
+    if cmd == "help":
+        return _cmd_help(args)
+    if cmd == "version":
+        if json_mode:
+            print(json.dumps(_envelope(
+                "version", {"version": VERSION}, [])))
+            return 0
+        return _cmd_version()
+    if cmd == "explain":
+        if len(args) < 1:
+            raise _UsageError("`newr explain` needs a code, e.g. E2001")
+        return _cmd_explain(args[0])
+    if cmd == "check":
+        return _cmd_check(args, json_mode=json_mode,
+                          error_format_json=error_format_json)
+    if cmd == "build":
+        return _cmd_build(args, json_mode=json_mode,
+                          error_format_json=error_format_json)
+    raise _UsageError(f"unknown command `{cmd}`. Run `newr help`.")

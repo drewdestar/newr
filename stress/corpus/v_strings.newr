@@ -1,0 +1,12 @@
+let who = "world"
+print "Hello, {who}!"
+print "sum={1 + 2}!"
+let s = "  padded  "
+print s.strip()
+print s.upper()
+print s.lower()
+print "abc".contains("b")
+print "a,b,c".split(",")
+print "x".join(["a", "b"])
+print "tab\tnl\nquote\"end"
+print "emoji 🎉 ok"

@@ -1,0 +1,210 @@
+[
+  {
+    "name": "cli-nonutf8-plain",
+    "class": "CLEAN",
+    "exit": 2,
+    "wall_s": 0.122,
+    "stdout_head": "",
+    "stderr_tail": "newr: cannot read /tmp/stress-cli/nonutf8.newr: not valid UTF-8 (SPEC.md \u00a73.1 requires UTF-8; 'utf-8' codec can't decode byte 0xff in position 11: invalid start byte)\n"
+  },
+  {
+    "name": "cli-nonutf8-json",
+    "class": "CLEAN",
+    "exit": 2,
+    "wall_s": 0.13,
+    "stdout_head": "{\"ok\": true, \"command\": \"environment\", \"newr\": \"0.1.0\", \"data\": null, \"warnings\": [], \"error\": null}\n",
+    "stderr_tail": "newr: cannot read /tmp/stress-cli/nonutf8.newr: not valid UTF-8 (SPEC.md \u00a73.1 requires UTF-8; 'utf-8' codec can't decode byte 0xff in position 11: invalid start byte)\n"
+  },
+  {
+    "name": "cli-empty-plain",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.142,
+    "stdout_head": "/tmp/stress-cli/empty.newr: ok\n",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-empty-json",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.122,
+    "stdout_head": "{\"ok\": true, \"command\": \"check\", \"newr\": \"0.1.0\", \"data\": {\"file\": \"/tmp/stress-cli/empty.newr\", \"files\": [\"/tmp/stress-cli/empty.newr\"], \"diagnostics\": []}, \"warnings\": [], \"error\": null}\n",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-lone-cr-plain",
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.122,
+    "stdout_head": "error[E_BAD_LINE_ENDING]: a lone carriage return (CR) is not a line ending; use LF or CRLF\n  --> /tmp/stress-cli/lone-cr.newr:1:10\n  |\n1 | print \"a\"\rprint \"b\"\n  |          ^\n  |\n/tmp/stress-cli/lone-c",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-lone-cr-json",
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.143,
+    "stdout_head": "{\"ok\": false, \"command\": \"check\", \"newr\": \"0.1.0\", \"data\": {\"file\": \"/tmp/stress-cli/lone-cr.newr\", \"files\": [], \"diagnostics\": [{\"file\": \"/tmp/stress-cli/lone-cr.newr\", \"start_byte\": 9, \"end_byte\": 1",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-crlf-err-plain",
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.145,
+    "stdout_head": "error[E3001]: undefined name `nosuchvar`\n  --> /tmp/stress-cli/crlf-err.newr:2:7\n  |\n2 | print nosuchvar\r\n  |       ^^^^^^^^^\n  |\n/tmp/stress-cli/crlf-err.newr: 1 error(s), 0 warning(s)\n",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-crlf-err-json",
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.164,
+    "stdout_head": "{\"ok\": false, \"command\": \"check\", \"newr\": \"0.1.0\", \"data\": {\"file\": \"/tmp/stress-cli/crlf-err.newr\", \"files\": [\"/tmp/stress-cli/crlf-err.newr\"], \"diagnostics\": [{\"file\": \"/tmp/stress-cli/crlf-err.newr",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-bom-plain",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.146,
+    "stdout_head": "/tmp/stress-cli/bom.newr: ok\n",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-bom-json",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.164,
+    "stdout_head": "{\"ok\": true, \"command\": \"check\", \"newr\": \"0.1.0\", \"data\": {\"file\": \"/tmp/stress-cli/bom.newr\", \"files\": [\"/tmp/stress-cli/bom.newr\"], \"diagnostics\": []}, \"warnings\": [], \"error\": null}\n",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-cesu8-plain",
+    "class": "CLEAN",
+    "exit": 2,
+    "wall_s": 0.143,
+    "stdout_head": "",
+    "stderr_tail": "newr: cannot read /tmp/stress-cli/cesu8.newr: not valid UTF-8 (SPEC.md \u00a73.1 requires UTF-8; 'utf-8' codec can't decode byte 0xed in position 7: invalid continuation byte)\n"
+  },
+  {
+    "name": "cli-cesu8-json",
+    "class": "CLEAN",
+    "exit": 2,
+    "wall_s": 0.123,
+    "stdout_head": "{\"ok\": true, \"command\": \"environment\", \"newr\": \"0.1.0\", \"data\": null, \"warnings\": [], \"error\": null}\n",
+    "stderr_tail": "newr: cannot read /tmp/stress-cli/cesu8.newr: not valid UTF-8 (SPEC.md \u00a73.1 requires UTF-8; 'utf-8' codec can't decode byte 0xed in position 7: invalid continuation byte)\n"
+  },
+  {
+    "name": "cli-nul-plain",
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.129,
+    "stdout_head": "error[E_UNEXPECTED_CHAR]: NUL byte is not allowed in a string literal\n  --> /tmp/stress-cli/nul.newr:1:9\n  |\n1 | print \"a\u0000b\"\n  |         ^\n  |\n  = help: write \\u{0} for a NUL character\n/tmp/stress-cli",
+    "stderr_tail": ""
+  },
+  {
+    "name": "cli-nul-json",
+    "class": "CLEAN",
+    "exit": 4,
+    "wall_s": 0.175,
+    "stdout_head": "{\"ok\": false, \"command\": \"check\", \"newr\": \"0.1.0\", \"data\": {\"file\": \"/tmp/stress-cli/nul.newr\", \"files\": [], \"diagnostics\": [{\"file\": \"/tmp/stress-cli/nul.newr\", \"start_byte\": 8, \"end_byte\": 9, \"code\"",
+    "stderr_tail": ""
+  },
+  {
+    "name": "inv-bad-flag",
+    "class": "CLEAN",
+    "exit": 1,
+    "wall_s": 0.121,
+    "stdout_head": "",
+    "stderr_tail": "newr: unknown command `--nope`. Run `newr help`.\n"
+  },
+  {
+    "name": "inv-check-no-file",
+    "class": "CLEAN",
+    "exit": 1,
+    "wall_s": 0.109,
+    "stdout_head": "",
+    "stderr_tail": "newr: `newr check` needs exactly one .newr file (got 0)\n"
+  },
+  {
+    "name": "inv-check-missing-file",
+    "class": "CLEAN",
+    "exit": 2,
+    "wall_s": 0.125,
+    "stdout_head": "",
+    "stderr_tail": "newr: cannot read /nonexistent/x.newr: [Errno 2] No such file or directory: '/nonexistent/x.newr'\n"
+  },
+  {
+    "name": "inv-build-no-check",
+    "class": "CLEAN",
+    "exit": 1,
+    "wall_s": 0.141,
+    "stdout_head": "",
+    "stderr_tail": "newr: newr build cannot emit yet \u2014 emitters land in M2. Use `newr build --check <file>` to verify without emitting.\n"
+  },
+  {
+    "name": "inv-explain-unknown",
+    "class": "CLEAN",
+    "exit": 1,
+    "wall_s": 0.149,
+    "stdout_head": "",
+    "stderr_tail": "newr: unknown diagnostic code `E9999`. Run `newr --explain E2001`.\n"
+  },
+  {
+    "name": "inv-explain-lexer-code",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.112,
+    "stdout_head": "E_BAD_ESCAPE: unknown or malformed escape.\n\nOnly these escapes are allowed in a string: \\\" \\\\ \\n \\t \\r and\n\\u{XXXX} (a Unicode code point in braces). Check the escape after\nthe backslash \u2014 for \\u{...}",
+    "stderr_tail": ""
+  },
+  {
+    "name": "inv-explain-e1001",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.132,
+    "stdout_head": "E1001: syntax error.\n\nThe parser could not make sense of this line. Check for a missing\ncolon after a block header, an indent that is not exactly 2 spaces per\nlevel, an unclosed string or bracket, or ",
+    "stderr_tail": ""
+  },
+  {
+    "name": "inv-unknown-command",
+    "class": "CLEAN",
+    "exit": 1,
+    "wall_s": 0.139,
+    "stdout_head": "",
+    "stderr_tail": "newr: unknown command `frobnicate`. Run `newr help`.\n"
+  },
+  {
+    "name": "inv-bare-newr",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.193,
+    "stdout_head": "Usage: newr [--json] [--error-format=json] <command> [args]\n\n  check <file> [--fast]  verify a .newr program (parse, resolve, check);\n                         writes nothing\n  build <file> [--target p",
+    "stderr_tail": ""
+  },
+  {
+    "name": "inv-fast-ok",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.181,
+    "stdout_head": "examples/hello.newr: ok\n",
+    "stderr_tail": "warning: --fast skips the full type check and all Discord validation; the result is not verified\n"
+  },
+  {
+    "name": "inv-json-ok",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.129,
+    "stdout_head": "{\"ok\": true, \"command\": \"check\", \"newr\": \"0.1.0\", \"data\": {\"file\": \"examples/hello.newr\", \"files\": [\"examples/hello.newr\"], \"diagnostics\": []}, \"warnings\": [], \"error\": null}\n",
+    "stderr_tail": ""
+  },
+  {
+    "name": "inv-json-showcase",
+    "class": "CLEAN",
+    "exit": 0,
+    "wall_s": 0.13,
+    "stdout_head": "{\"ok\": true, \"command\": \"check\", \"newr\": \"0.1.0\", \"data\": {\"file\": \"examples/showcase.newr\", \"files\": [\"examples/showcase.newr\"], \"diagnostics\": []}, \"warnings\": [], \"error\": null}\n",
+    "stderr_tail": ""
+  }
+]

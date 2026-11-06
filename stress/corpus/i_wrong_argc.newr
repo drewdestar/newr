@@ -1,0 +1,3 @@
+fn f(a: int) -> int:
+  return a
+print f(1, 2)

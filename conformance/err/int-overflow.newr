@@ -1,0 +1,3 @@
+# expect: E_INT_OVERFLOW
+let x = 0xFFFFFFFFFFFFFFFFFF
+print x

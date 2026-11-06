@@ -1,0 +1,59 @@
+# shop.newr — ping + economy buy + button confirm, in newr v1.
+# Prices live in shop_items.newr; the shop itself lives here.
+# Build it with: newr build examples/shop.newr
+
+import "shop_items.newr"
+
+bot "ShopBot":
+  description: "A tiny shop"
+  intents: [guilds, members]
+
+strings en:
+  "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
+  "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
+  "buy.poor": "Not enough gold — {item} costs {price}, you have {balance}."
+strings id:
+  "buy.ok": "Membeli {item} seharga {price} gold. Saldo: {balance}."
+  "buy.poor": "Gold tidak cukup — {item} harganya {price}, kamu punya {balance}."
+
+store economy:
+  table balances (user: str, balance: int)
+  ledger true
+
+command ping:
+  description: "Answer with pong"
+  reply: "Pong! Hello {user}"
+
+command buy:
+  description: "Buy an item from the shop"
+  option item: str (required, choices: ["brick", "potion"])
+  option amount: int (default: 1, min: 1, max: 99)
+  do:
+    let price: int = shop_items.price_of(item) * amount
+    let bal: int = economy.balance(user)
+    if bal < price:
+      reply t("buy.poor", price: price, balance: bal) ephemeral
+    else:
+      economy.credit(user, -price, key: "buy-{user.id}-{item}-{amount}")
+      reply t("buy.ok", item: item, price: price, balance: bal - price)
+      button "Buy again" (style: primary, id: "buy-again", timeout: 60s):
+        only: author
+        do:
+          reply "Use /buy again, {user}!"
+        on_timeout:
+          reply "Offer expired."
+
+command balance:
+  description: "Show your balance"
+  do:
+    reply "Balance: {economy.balance(user)} gold."
+
+event ready:
+  log: "{bot} is online"
+
+event member_join:
+  reply: "Welcome to {guild}, {user}!"
+
+task every 1h:
+  do:
+    log "Hourly shop check ran"é

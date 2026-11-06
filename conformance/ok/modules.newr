@@ -1,0 +1,7 @@
+# Named modules without an import (SPEC.md §12.2) + int64 minimum.
+let root = math.sqrt(2.0)
+let day = time.format(0, "%Y-%m-%d")
+let minimum = -9223372036854775808
+print root
+print day
+print minimum

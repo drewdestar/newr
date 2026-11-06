@@ -1,0 +1,31 @@
+# showcase.newr — a bot written in the newr language.
+# It shows off several .newr features in one small file:
+# a bot description, four commands (one ephemeral, one with no
+# description so it defaults to its name), and both events.
+# Build it with: newr build examples/showcase.newr
+# Then run it with: DISCORD_TOKEN=... python examples/showcase.py
+
+bot "ShowcaseBot":
+  description: "A showcase bot that shows off the newr language"
+
+command ping:
+  description: "Answer with pong"
+  reply: "Pong! Hello {user}"
+
+command whereami:
+  description: "Tell you where you are right now"
+  reply: "You are {user} in {channel} on {guild}!"
+
+command secret:
+  description: "A private reply only you can see"
+  reply: "Shh, {user} — only you can see this."
+  ephemeral: true
+
+command rules:
+  reply: "Be kind, {user} — this is {guild}!"
+
+event ready:
+  log: "{bot} is online"
+
+event member_join:
+  reply: "Welcome to {guild}, {user}!"

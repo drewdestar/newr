@@ -1,0 +1,2 @@
+import "cyc_a.newr"
+print a_val

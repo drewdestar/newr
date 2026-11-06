@@ -1,0 +1,9 @@
+bot "MiniBot":
+  description: "minimal"
+
+command ping:
+  description: "Answer with pong"
+  reply: "Pong! Hello {user}"
+
+event ready:
+  log: "{bot} is online"

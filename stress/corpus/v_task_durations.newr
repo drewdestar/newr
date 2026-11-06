@@ -1,0 +1,9 @@
+bot "T":
+  description: "x"
+
+task every 1h:
+  do:
+    log "hourly tick"
+task every 60s:
+  do:
+    log "minutely tick"

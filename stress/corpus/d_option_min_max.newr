@@ -1,0 +1,6 @@
+bot "B":
+  description: "x"
+command buy:
+  option amount: int (min: 99, max: 1)
+  do:
+    reply "ok"

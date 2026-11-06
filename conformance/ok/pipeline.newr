@@ -1,0 +1,6 @@
+# Pipeline (SPEC.md §9.2): the piped value is the first argument.
+fn double(n: int) -> int:
+  return n * 2
+
+let y = 5 |> double
+print y

@@ -1,0 +1,6 @@
+fn withdraw(balance: int, amount: int) -> int:
+  requires amount > 0
+  requires amount <= balance
+  ensures result >= 0
+  return balance - amount
+print withdraw(100, 30)

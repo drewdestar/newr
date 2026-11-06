@@ -1,0 +1,571 @@
+[
+  {
+    "name": "v_hello",
+    "file": "v_hello.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_arith",
+    "file": "v_arith.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_fn",
+    "file": "v_fn.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_control",
+    "file": "v_control.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_strings",
+    "file": "v_strings.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_collections",
+    "file": "v_collections.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_nullable",
+    "file": "v_nullable.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_contracts",
+    "file": "v_contracts.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_try",
+    "file": "v_try.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_match",
+    "file": "v_match.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_struct_enum",
+    "file": "v_struct_enum.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_numbers",
+    "file": "v_numbers.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_unicode_idents",
+    "file": "v_unicode_idents.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_stdlib",
+    "file": "v_stdlib.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_ternary_pipe",
+    "file": "v_ternary_pipe.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_bot_minimal",
+    "file": "v_bot_minimal.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "v_task_durations",
+    "file": "v_task_durations.newr",
+    "category": "v",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "i_unterminated_string",
+    "file": "i_unterminated_string.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_stray_brace",
+    "file": "i_stray_brace.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_bad_escape",
+    "file": "i_bad_escape.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_tab_indent",
+    "file": "i_tab_indent.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_bad_indent",
+    "file": "i_bad_indent.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_missing_colon",
+    "file": "i_missing_colon.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_bad_number",
+    "file": "i_bad_number.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_unexpected_char",
+    "file": "i_unexpected_char.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_type_mismatch",
+    "file": "i_type_mismatch.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_wrong_argc",
+    "file": "i_wrong_argc.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_undefined_name",
+    "file": "i_undefined_name.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_use_before_def",
+    "file": "i_use_before_def.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_redefine_builtin",
+    "file": "i_redefine_builtin.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_duplicate_top",
+    "file": "i_duplicate_top.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_bad_nullable_recv",
+    "file": "i_bad_nullable_recv.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_overflow_decimal",
+    "file": "i_overflow_decimal.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_overflow_hex",
+    "file": "i_overflow_hex.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_overflow_binary",
+    "file": "i_overflow_binary.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_int64_min_ok",
+    "file": "i_int64_min_ok.newr",
+    "category": "i",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "i_qq_nullable_rhs",
+    "file": "i_qq_nullable_rhs.newr",
+    "category": "i",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "i_nullable_assign",
+    "file": "i_nullable_assign.newr",
+    "category": "i",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "i_div_zero",
+    "file": "i_div_zero.newr",
+    "category": "i",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "i_index_oob_type",
+    "file": "i_index_oob_type.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_call_non_fn",
+    "file": "i_call_non_fn.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_return_outside_fn",
+    "file": "i_return_outside_fn.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "i_break_outside_loop",
+    "file": "i_break_outside_loop.newr",
+    "category": "i",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_desc_101",
+    "file": "d_desc_101.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_desc_100_ok",
+    "file": "d_desc_100_ok.newr",
+    "category": "d",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "d_reply_2001",
+    "file": "d_reply_2001.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_reply_2000_ok",
+    "file": "d_reply_2000_ok.newr",
+    "category": "d",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "d_reply_placeholders_ok",
+    "file": "d_reply_placeholders_ok.newr",
+    "category": "d",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "d_reply_placeholders_over",
+    "file": "d_reply_placeholders_over.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_cmd_name_33",
+    "file": "d_cmd_name_33.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_cmd_name_32_ok",
+    "file": "d_cmd_name_32_ok.newr",
+    "category": "d",
+    "expected": "valid",
+    "bytes": false
+  },
+  {
+    "name": "d_cmd_name_bad_chars",
+    "file": "d_cmd_name_bad_chars.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_bot_name_33",
+    "file": "d_bot_name_33.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_dup_command",
+    "file": "d_dup_command.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_unknown_intent",
+    "file": "d_unknown_intent.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_option_min_max",
+    "file": "d_option_min_max.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_too_many_options",
+    "file": "d_too_many_options.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_no_answer_path",
+    "file": "d_no_answer_path.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "d_embed_too_big",
+    "file": "d_embed_too_big.newr",
+    "category": "d",
+    "expected": "error",
+    "bytes": false
+  },
+  {
+    "name": "b_nonutf8",
+    "file": "b_nonutf8.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "non-UTF-8 bytes must be a clean env error naming the file (M-02)"
+  },
+  {
+    "name": "b_empty",
+    "file": "b_empty.newr",
+    "category": "bytes",
+    "expected": "valid",
+    "bytes": true,
+    "notes": "empty file"
+  },
+  {
+    "name": "b_only_comments",
+    "file": "b_only_comments.newr",
+    "category": "bytes",
+    "expected": "valid",
+    "bytes": true,
+    "notes": "comments only"
+  },
+  {
+    "name": "b_lone_cr",
+    "file": "b_lone_cr.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "lone CR must be E_BAD_LINE_ENDING (M-07)"
+  },
+  {
+    "name": "b_crlf_error",
+    "file": "b_crlf_error.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "CRLF file, error on line 2 \u2014 JSON offsets must match raw bytes (M-06)"
+  },
+  {
+    "name": "b_mixed_endings",
+    "file": "b_mixed_endings.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "mixed CRLF + lone CR"
+  },
+  {
+    "name": "b_bom",
+    "file": "b_bom.newr",
+    "category": "bytes",
+    "expected": "valid",
+    "bytes": true,
+    "notes": "UTF-8 BOM stripped"
+  },
+  {
+    "name": "b_truncated_string",
+    "file": "b_truncated_string.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "EOF inside string"
+  },
+  {
+    "name": "b_truncated_block",
+    "file": "b_truncated_block.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "EOF after colon, empty block"
+  },
+  {
+    "name": "b_truncated_fn",
+    "file": "b_truncated_fn.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "EOF mid-return"
+  },
+  {
+    "name": "b_cesu8_surrogate",
+    "file": "b_cesu8_surrogate.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "CESU-8 lone surrogate bytes \u2014 must not crash"
+  },
+  {
+    "name": "b_nul_byte",
+    "file": "b_nul_byte.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "NUL byte inside string"
+  },
+  {
+    "name": "b_nul_outside",
+    "file": "b_nul_outside.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "NUL byte outside string"
+  },
+  {
+    "name": "b_only_ws",
+    "file": "b_only_ws.newr",
+    "category": "bytes",
+    "expected": "valid",
+    "bytes": true,
+    "notes": "whitespace only"
+  },
+  {
+    "name": "b_crlf_ok",
+    "file": "b_crlf_ok.newr",
+    "category": "bytes",
+    "expected": "valid",
+    "bytes": true,
+    "notes": "CRLF valid file"
+  },
+  {
+    "name": "b_cr_only_file",
+    "file": "b_cr_only_file.newr",
+    "category": "bytes",
+    "expected": "error",
+    "bytes": true,
+    "notes": "file is one lone-CR line"
+  },
+  {
+    "name": "imports_chain20",
+    "file": "imports/main_chain.newr",
+    "category": "imports",
+    "expected": "valid",
+    "notes": "20-file import chain, value from the last file"
+  },
+  {
+    "name": "imports_cycle",
+    "file": "imports/main_cycle.newr",
+    "category": "imports",
+    "expected": "error",
+    "notes": "import cycle a<->b must be a clean error"
+  },
+  {
+    "name": "imports_self",
+    "file": "imports/self.newr",
+    "category": "imports",
+    "expected": "error",
+    "notes": "self-import must be a clean error"
+  },
+  {
+    "name": "imports_missing",
+    "file": "imports/main_missing.newr",
+    "category": "imports",
+    "expected": "error",
+    "notes": "missing import target"
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "fuzz": {
+    "n": 3000,
+    "seed": 20261107,
+    "counts": {
+      "CLEAN": 2999,
+      "CRASH": 1,
+      "TIMEOUT": 0,
+      "BAD_JSON": 0,
+      "WRONG_EXIT": 0
+    },
+    "exits": {
+      "0": 955,
+      "4": 2044,
+      "1": 1
+    },
+    "bad_cases": [
+      {
+        "i": 1429,
+        "class": "CRASH",
+        "exit": 1,
+        "wall_s": 0.142,
+        "stderr_tail": "^^^^^\n  File \"/home/hatch/workspace/newr/compiler/parser.py\", line 1809, in _parse_postfix\n    expr = self._parse_call(expr)\n           ^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/hatch/workspace/newr/compiler/parser.py\", line 1842, in _parse_call\n    self.err(args[1].span,\n  File \"/home/hatch/workspace/newr/compiler/parser.py\", line 132, in err\n    raise NewrError(Diagnostic(span=tok.span, code=\"E1001\",\n                                    ^^^^^^^^\nAttributeError: 'Span' object has no attribute 'span'\n"
+      }
+    ]
+  }
+}

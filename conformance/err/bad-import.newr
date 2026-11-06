@@ -1,0 +1,4 @@
+# expect: E3008
+import "no_such_module.newr"
+
+print "unreachable"

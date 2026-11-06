@@ -1,0 +1,31 @@
+bot "B":
+  description: "x"
+command big:
+  option o0: str
+  option o1: str
+  option o2: str
+  option o3: str
+  option o4: str
+  option o5: str
+  option o6: str
+  option o7: str
+  option o8: str
+  option o9: str
+  option o10: str
+  option o11: str
+  option o12: str
+  option o13: str
+  option o14: str
+  option o15: str
+  option o16: str
+  option o17: str
+  option o18: str
+  option o19: str
+  option o20: str
+  option o21: str
+  option o22: str
+  option o23: str
+  option o24: str
+  option o25: str
+  do:
+    reply "ok"

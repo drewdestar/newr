@@ -1,0 +1,832 @@
+{
+  "parens": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.128
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.147
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.267
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.183
+      }
+    ],
+    "boundary": null
+  },
+  "if": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.143
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.143
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.144
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.184
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.203
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.244
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.264
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.488
+      }
+    ],
+    "boundary": null
+  },
+  "binop": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.183
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.123
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.145
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.183
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.225
+      }
+    ],
+    "boundary": null
+  },
+  "calls": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.183
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.209
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.165
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.206
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.186
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.144
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.203
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.165
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.228
+      }
+    ],
+    "boundary": null
+  },
+  "list": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.123
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.182
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.243
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.144
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.185
+      }
+    ],
+    "boundary": null
+  },
+  "dict": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.164
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.203
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.207
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.185
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.203
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.244
+      }
+    ],
+    "boundary": null
+  },
+  "unary": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.164
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.147
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.144
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.166
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.187
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.123
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      }
+    ],
+    "boundary": null
+  },
+  "ternary": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.124
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.144
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.165
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.185
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.223
+      }
+    ],
+    "boundary": null
+  },
+  "blocks": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.142
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.144
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.162
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.183
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.224
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.264
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.446
+      }
+    ],
+    "boundary": null
+  },
+  "interp": {
+    "grid": [
+      {
+        "n": 100,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 150,
+        "class": "CLEAN",
+        "exit": 0,
+        "wall_s": 0.122
+      },
+      {
+        "n": 200,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 250,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.162
+      },
+      {
+        "n": 300,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.142
+      },
+      {
+        "n": 400,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.122
+      },
+      {
+        "n": 500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.146
+      },
+      {
+        "n": 750,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 1000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.143
+      },
+      {
+        "n": 1500,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.163
+      },
+      {
+        "n": 2000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.162
+      },
+      {
+        "n": 3000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.203
+      },
+      {
+        "n": 5000,
+        "class": "CLEAN",
+        "exit": 4,
+        "wall_s": 0.243
+      }
+    ],
+    "boundary": null
+  }
+}

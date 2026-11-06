@@ -1,0 +1,18 @@
+{
+  "fuzz": {
+    "n": 3000,
+    "seed": 20261107,
+    "counts": {
+      "CLEAN": 3000,
+      "CRASH": 0,
+      "TIMEOUT": 0,
+      "BAD_JSON": 0,
+      "WRONG_EXIT": 0
+    },
+    "exits": {
+      "0": 955,
+      "4": 2045
+    },
+    "bad_cases": []
+  }
+}

@@ -1,0 +1,2 @@
+import "imp17.newr"
+pub let chain_val_16 = 16

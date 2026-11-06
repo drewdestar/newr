@@ -1,0 +1,210 @@
+# CI for newr.
+#
+# Cross-platform checklist (enforced below, not just documented):
+# - encoding="utf-8" on every read_text()/open() in the compiler (grep step).
+# - CRLF source handling: a CRLF copy of hello.newr must check clean.
+# - Case-only module-collision test: Foo.newr vs foo.newr must stay two
+#   distinct files. This runs on LINUX ONLY: macOS (APFS) and Windows
+#   (NTFS) default filesystems are case-insensitive, so the second file
+#   would overwrite the first and the step would be red by design on
+#   those runners — not because the compiler is wrong, but because the
+#   filesystem cannot represent the case. The compiler rule itself
+#   (imports are case-sensitive, SPEC.md SS3.3) is tested in the suite.
+# - No Unix-exec-bit assumptions: nothing here relies on a file being
+#   executable; the launcher is always invoked via `python newr ...`.
+# - A Linux-built .pyz runs on the Windows and macOS runners: the
+#   build-zipapp job builds the .pyz once on ubuntu and uploads it as
+#   an artifact; the zipapp-diff matrix job downloads that same artifact
+#   on every OS and runs the checks through it. (Building a fresh .pyz
+#   per runner would not prove cross-OS portability at all.)
+#
+# Per-target emitter jobs land in M2+. When they do, each target gets its
+# own job, and a failure in one target's job never blocks another
+# target's release.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  front-end:
+    name: front-end suite (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Front-end test suite
+        run: python -m unittest discover -s tests
+
+      # Cross-platform: every text read_text()/open() must say
+      # encoding="utf-8" explicitly (binary-mode opens are exempt —
+      # none exist yet). `python` (not `python3`) is the command on
+      # all three OSes after setup-python; `python3` is not guaranteed
+      # on windows-latest.
+      - name: Check encoding="utf-8" on every read_text()/open()
+        shell: bash
+        run: |
+          if grep -rn -E "(read_text|open)\(" compiler/ --include="*.py" | grep -v 'encoding='; then
+            echo "::error::read_text()/open() without encoding= found in compiler/ — use encoding=\"utf-8\""
+            exit 1
+          fi
+
+      # Cross-platform: CRLF sources must check clean.
+      - name: CRLF source handling
+        shell: bash
+        run: |
+          python -c "data = open('examples/hello.newr', 'rb').read().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'); open('hello-crlf.newr', 'wb').write(data)"
+          python newr check hello-crlf.newr
+
+      # Cross-platform: two modules differing only by case must stay
+      # distinct. Linux only — see the header comment for why macOS
+      # and Windows cannot run this step.
+      - name: Case-only module-collision test
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p casecheck
+          printf 'print "upper"\n' > casecheck/Foo.newr
+          printf 'print "lower"\n' > casecheck/foo.newr
+          python -c "
+          import os
+          names = os.listdir('casecheck')
+          assert 'Foo.newr' in names and 'foo.newr' in names, f'case-only modules collided: {names}'
+          print('case-only modules are distinct:', sorted(names))
+          "
+
+  v0-conformance:
+    name: v0 conformance (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # All four must exit 0.
+      - name: Check examples through the newr launcher
+        shell: bash
+        run: |
+          python newr check examples/hello_bot.newr
+          python newr check examples/showcase.newr
+          python newr check examples/hello.newr
+          python newr check examples/shop.newr
+
+  build-zipapp:
+    name: build zipapp (ubuntu, Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Build the zipapp ONCE, from the repo package. The `newr`
+      # launcher supplies the __main__.py entry point; the .pyz is
+      # invoked the same way as the launcher, via `python newr.pyz ...`.
+      # This artifact is what the zipapp-diff matrix job downloads on
+      # every OS — a .pyz built on Linux must run unchanged on
+      # Windows/macOS.
+      - name: Build zipapp
+        run: python -m zipapp . -o newr.pyz -p "/usr/bin/env python3"
+
+      - name: Upload zipapp artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: newr-pyz
+          path: newr.pyz
+
+  zipapp-diff:
+    name: zipapp behavior-diff (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    needs: build-zipapp
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The SAME .pyz built on ubuntu (build-zipapp job), not a fresh
+      # local build — that is the whole point of the cross-OS check.
+      - name: Download the ubuntu-built zipapp
+        uses: actions/download-artifact@v4
+        with:
+          name: newr-pyz
+
+      # Same checks as v0-conformance, through the zipapp. Verdicts
+      # must match the launcher runs exactly: exit 0 for all four.
+      - name: Check examples through the zipapp
+        shell: bash
+        run: |
+          python newr.pyz check examples/hello_bot.newr
+          python newr.pyz check examples/showcase.newr
+          python newr.pyz check examples/hello.newr
+          python newr.pyz check examples/shop.newr
+
+  golden-rebuild:
+    name: golden rebuild check (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The v0 golden files must exist and be byte-identical to the v0
+      # originals. The hashes below are the v0 originals' SHA-256.
+      # Emitter golden comparison (regenerating goldens from the .newr
+      # sources and diffing) lands in M2, when the emitters do.
+      - name: v0 golden files exist and match the v0 originals
+        shell: bash
+        run: |
+          test -f examples/hello.py
+          test -f examples/showcase.py
+          python -c "
+          import hashlib, sys
+          expected = {
+              'examples/hello.py': '1eb3265be38e2639a1fe1339d121c5feedfa1ace413749a20e67f7b997543f00',
+              'examples/showcase.py': 'a8222f1be0f901ac9994c3978ed92dfeb38b2695830baba098dbc9206bf504d7',
+          }
+          for path, want in expected.items():
+              got = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+              if got != want:
+                  print(f'{path}: MISMATCH\n  got {got}\n  want {want}')
+                  sys.exit(1)
+              print(f'{path}: matches v0 original')
+          "
