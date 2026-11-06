@@ -1,0 +1,17 @@
+# Ternary expressions (right-associative in the else branch).
+let passed = true
+let a = 5
+let b = 10
+let bigger = a > b ? a : b
+if bigger != 10:
+  passed = false
+let label = a > 3 ? "big" : "small"
+if label != "big":
+  passed = false
+let nested = a > 10 ? "x" : b > 5 ? "y" : "z"
+if nested != "y":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

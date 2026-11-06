@@ -1,0 +1,9 @@
+# expect: E2006
+# A match on a non-enum scrutinee with no `_` arm is a
+# compile error (exhaustiveness is checked, not deferred).
+let x = 99
+match x:
+  1:
+    print "one"
+  2:
+    print "two"

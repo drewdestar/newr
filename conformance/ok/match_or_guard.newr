@@ -1,0 +1,21 @@
+# Match or-patterns and guards.
+let passed = true
+fn word(n: int) -> str:
+  match n:
+    1 | 2 | 3:
+      return "small"
+    x if x > 100:
+      return "big"
+    _:
+      return "mid"
+
+if word(2) != "small":
+  passed = false
+if word(150) != "big":
+  passed = false
+if word(50) != "mid":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

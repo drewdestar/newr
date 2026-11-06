@@ -1,0 +1,17 @@
+# str() of lists/dicts/sets (P8).
+let passed = true
+if str([1, 2, 3]) != "[1, 2, 3]":
+  passed = false
+if str([true, false]) != "[true, false]":
+  passed = false
+if str({"k": 1, "j": 2}) != "{{k: 1, j: 2}}":
+  passed = false
+if str(set(["a"])) != "{{a}}":
+  passed = false
+let empty: list[int] = []
+if str(empty) != "[]":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

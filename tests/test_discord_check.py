@@ -70,6 +70,16 @@ class TestEveryPathAnswers(unittest.TestCase):
     def test_defer_answers(self):
         self.assertEqual(errs(full(cmd('    defer\n'))), [])
 
+    def test_modal_answers(self):
+        # BUG-M2-3: a modal sends a response directly (send_modal),
+        # so it answers the interaction — unlike a button/select,
+        # which only attach to a reply. A command whose only action
+        # is showing a modal must not be E2010.
+        body = ('    modal "Feedback" (timeout: 120s):\n'
+                '      text_input "name" (style: short, required):\n'
+                '      do:\n        reply "thanks {name}"\n')
+        self.assertEqual(errs(full(cmd(body))), [])
+
 
 class TestComponents(unittest.TestCase):
     def test_button_without_timeout_is_E2008(self):

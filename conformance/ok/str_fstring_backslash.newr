@@ -1,0 +1,14 @@
+# P1: a backslash-containing expression in a replacement field
+# is hoisted to a temp (Python 3.10 forbids backslashes in
+# f-string fields).
+let passed = true
+let parts = ["a", "b"]
+let joined = "\n".join(parts)
+if joined != "a\nb":
+  passed = false
+if "{joined}" != "a\nb":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

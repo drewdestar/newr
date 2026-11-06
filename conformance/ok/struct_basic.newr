@@ -1,0 +1,22 @@
+# Struct construction, field access, value semantics (P12).
+struct Point:
+  x: int
+  y: int
+
+let passed = true
+let p = Point(x: 1, y: 2)
+if p.x != 1:
+  passed = false
+if p.y != 2:
+  passed = false
+let q = Point(x: 9, y: p.y)
+if p.x != 1:
+  passed = false
+if q.x != 9:
+  passed = false
+if str(p) != "Point(x: 1, y: 2)":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

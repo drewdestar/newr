@@ -1,0 +1,4 @@
+# expect: E2001
+# A string cannot be indexed (SPEC.md §9.2).
+let s = "abc"
+print s[0]

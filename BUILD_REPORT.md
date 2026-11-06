@@ -916,3 +916,605 @@ identical, full suite re-run green (**466 OK**).
 - SPEC.md was **not** changed: the fix restores the intended E1001
   error path; no spec decision was involved.
 
+
+---
+
+## 14. M2 — Python emitter (7 Nov 2026)
+
+M2 builds `newr build --target py`: a readable-Python emitter, the
+`newr_rt.py` checked-int runtime, per-target goldens, a ~120–160
+program conformance corpus that runs on the Python target, and honest
+benchmarks B1–B8. Research handoff:
+`~/workspace/discord-py-skills-research/newr-m2-deep-research.md`
+(2,188 lines); its §8 is the exit-criteria checklist, its §9 the pins
+decided below, its §10 the UNVERIFIED register (U1–U32, still honest:
+measured, never quoted).
+
+Baseline at M2 start: suite **466 green** (fix round 3), ship gate
+passed, repo `drewdestar/newr` at commit `78d4ccf`.
+
+### 14.1 The 12 spec pins — decided before coding (research §9)
+
+Every pin is a decision with a reason, recorded here before the
+emitter was written against it. Where the spec already answered the
+question, the pin says so (the research asked; the spec had decided).
+
+| # | Question | Decision (M2) | Reason |
+|---|---|---|---|
+| P1 | Python floor 3.10 vs PEP 701 f-strings (3.12+) | **Floor stays 3.10.** Emitter uses only the 3.10-safe f-string subset: alternate quote types inside replacement fields, hoist any expression containing a backslash (or both quote types) to a temp variable before the statement. | Raising the floor would drop 3.10/3.11 users for one syntax feature; the mitigation is mechanical and CI (matrix 3.10–3.13) proves it. No walrus inside f-string fields; `?.`/`??` go through helpers, never walrus. |
+| P2 | `round()`: half-to-even or half-away-from-zero? | **Half-away-from-zero (schoolbook):** `round(2.5) = 3`, `round(-2.5) = -3`. Via `newr_rt.round_half_away`, implemented with `decimal.Decimal` on the EXACT float value + `ROUND_HALF_UP`. `round(x)` returns `int` (int64 range-checked, overflow throws); `round(x, n)` returns `float`. | Bare `round()` would drift across targets (Python half-even, JS half-up-toward-+∞, Rust half-away) — cross-target determinism forces a helper regardless of which rule; half-away is the most human-expected rule. **Correction (7 Nov, caught by the runtime's own tests):** the first draft rounded `Decimal(str(x))` — the shortest repr, not the value. That breaks identity for large integral floats (`round(9223372036854774784.0)` became `9223372036854775000`). The rule is the exact value, so `round(2.675, 2)` is 2.67 — the representation fact every target shares (research §3.4). Non-finite input: `round(inf)` raises `OverflowError` (Python's behaviour); `round(inf, n)` returns `inf`, `round(nan, n)` returns `nan` (Python's behaviour). |
+| P3 | `set` ordering | **Unordered** — decided by SPEC §7.6 already ("`set` is unordered"). Emit bare `set(...)`. | The research asked; the spec had answered. Iteration order is unspecified (Python hash order); conformance programs must not assert set iteration order. |
+| P4 | `time.format` timezone | **UTC.** Emit `datetime.fromtimestamp(ts, tz=timezone.utc).strftime(fmt)`. | Same program prints the same output on every machine and timezone (conformance determinism; SPEC §3.5 byte-identical output). The fixed format set has no timezone-sensitive names. |
+| P5 | `.chars()`: code points or grapheme clusters? | **Code points** — decided by SPEC §7.6 already ("one code point per element"). Emit `list(s)`. | The research asked; the spec had answered. Grapheme clusters would need a third-party dependency; none is added. |
+| P6 | Float `/0` | **Error.** Emit bare `/` for floats (Python raises `ZeroDivisionError` natively); int `/0`/`%0` raise via `tdiv`/`tmod`. | SPEC §7.5: "Division or modulo by zero is a runtime error" (stated generally, no float exception). Matches Python; no `inf` guard is emitted. |
+| P7 | `bool("false")` | **Parsing, not truthiness.** `bool("true")` → `True`, `bool("false")` → `False` (exact lowercase only); any other string raises `ValueError`. `bool(0)` → `False`, `bool(n != 0)` → `True`; `bool(0.0)` → `False`. Via `newr_rt.to_bool`. | Bare `bool("false")` is `True` in Python — the classic pitfall; newr spells booleans lowercase everywhere, so parsing is the only honest reading. |
+| P8 | `str()` rendering | Via `newr_rt.to_str`: `str(true)` → `"true"`, `str(false)` → `"false"`, `str(none)` → `"none"`, `str(int)` → decimal, `str(float)` → shortest round-trip (Python `str`), `str(str)` → itself, `str([1, 2])` → `"[1, 2]"` (elements rendered recursively, strings bare), `str(dict)` → `"{k: v, ...}"` (insertion order, strings bare), `str(set)` → `"{a, b}"` (iteration order, unspecified), `str(error)` → its message, `str(ok(v))` → `"ok(<v>)"`, `str(err(e))` → `"err(<e>)"`, struct → `"Point(x: 1, y: 2)"`, enum bare → `"Color.Red"`, enum with fields → `"Shape.Circle(radius: 1.5)"`. | Bare `str()` gives Python spellings (`"True"`, `"None"`, `"['a']"`). newr's lowercase style + display (not debug) rendering fixes every case in one tested helper. |
+| P9 | `list.get(i, default)`: negative index | **No wrap — out-of-range → default.** Any `i` with `0 <= i < len(lst)` returns the element; anything else (including negatives) returns `default`. Via `newr_rt.list_get`. | `.get` is a safe accessor; wrapping would make "out of range" untestable and is a known Python footgun. |
+| P10 | `log` level | `log <expr>` = **info** (SPEC §9.1). `log.warn` → `logging.warning` (never the deprecated `logging.warn`); `log.info` → `logging.info`, `log.error` → `logging.error`. General programs emit `logging.basicConfig(level=logging.INFO, ...)` once when `log` is used (same format string as the bot golden); bots already have it in the template. | Resolves research §6.8 U10: `logging.warn` is deprecated since Python 3.3; emitting it would print a deprecation warning on every run. |
+| P11 | `store` durability / transactions | **aiosqlite** (research §7.3 recommendation). One long-lived connection opened in `setup_hook`; **commit after every mutation**; ledger + balance wrapped in **one transaction**; a **duplicate idempotency key is a replay** (returns the previous result, no double-apply). DB file: `<store>.db` next to the emitted `.py` (deterministic regardless of working directory). | `asyncio.to_thread` + stdlib `sqlite3` was the stdlib-only alternative; aiosqlite is more readable in async handlers and is the discord.py-skill ecosystem's choice. Dependency consequence: the emitted bot needs `aiosqlite` installed (documented in the emitted file's header comment when a store is used). |
+| P12 | Collection copy-on-assign | **Reference semantics for collections in v1** (Python-like): `let ys = xs` then `xs.append(3)` also changes `ys`. Structs/enums are value types (SPEC §7.8) — satisfied observationally by frozen dataclasses, since field assignment is a compile error and aliasing can never be observed. | SPEC §7.8 names only structs/enums as value types; §7.7(3) structural `==` already holds for Python collections. A copy-on-write design is v1.1 work (needs the U9 research pass first). The conformance corpus pins the reference behaviour with a program, so the choice is observable and revisit-able, not silent. |
+
+### 14.2 Further M2 decisions (recorded before coding)
+
+- **D1 — Python floor stays 3.10** (P1). CI matrix 3.10–3.13 proves
+  the emitted code on every supported version.
+- **D2 — Emitted header names the actual input file as passed**
+  (`# Generated by newr from <path> — do not edit by hand.` +
+  rebuild line; bots add the bot description as line 3). The header
+  never lies about its source. Consequence: the emitter's output for
+  `examples/hello_bot.newr` differs from the v0 golden
+  `examples/hello.py` in exactly the two header lines — the v0 source
+  file was named `hello.newr` and was renamed to `hello_bot.newr` in
+  v1 (SPEC §13.10). `examples/hello.py` itself is **not** modified
+  (CI pins its SHA-256); the M2 golden for the hello bot is
+  `goldens/py/hello_bot.py`, and the golden test asserts the diff
+  against the v0 golden is exactly those two lines. `showcase.newr`
+  is byte-identical to `examples/showcase.py`.
+- **D3 — Golden policy.** Goldens live in `goldens/py/` (one per
+  example). Compare-only by default (`tests/test_goldens.py` builds
+  to a temp dir and diffs — it never writes a golden). Regeneration
+  is `python3 conformance/run.py --bless [--only <name>]` (research
+  §4.6.2); a golden diff in a change is reviewed line-by-line. A
+  golden is never hand-edited.
+- **D4 — `newr_rt.py` location and shipping.** Source of truth is
+  `compiler/newr_rt.py` (in the compiler package, unit-tested as
+  `compiler.newr_rt`). `newr build` copies it next to the emitted
+  `.py` **only when the program uses a runtime helper**
+  (usage-tracked import — Gleam-style); the copy is byte-identical
+  to the package file. Programs using no helpers (the v0 bot
+  goldens) get no import and no copy.
+- **D5 — Contracts throw via explicit checks, not `assert`.** A
+  violated `requires`/`ensures` emits `if not <cond>:
+  raise newr_rt.NewrError("contract violated: ...")`. The spec's
+  parenthetical "Python `assert`" (§9.7) is the lowering family, not
+  a mandate — and `assert` is disabled by `python -O`, which would
+  violate the normative §9.7 rule "always evaluated in v1". `result`
+  inside `ensures` maps to the internal temp `_newr_result`; every
+  `return <expr>` in a function with `ensures` is rewritten to
+  assign `_newr_result`, check, then return it.
+- **D6 — Error values.** `NewrError(message, code=None)` with
+  `.message` / `.code` (SPEC §10); `NewrOverflowError(OverflowError)`
+  and `NewrDivisionByZeroError(ZeroDivisionError)` subclasses so a
+  newr `catch` and a bare `except OverflowError` both see them.
+  `throw "msg"` → `raise NewrError(msg)`; `throw err` → raise as-is.
+  A caught non-newr exception is wrapped by `as_error()` (code =
+  the Python type name, e.g. `FileNotFoundError`).
+- **D7 — `?` lowering (exception-based, research §3.3 option 1).**
+  `let x = e?` → evaluate into a temp; on `Err`/`none`, return early
+  from the enclosing function (returning the `Err` itself when the
+  function returns `Result`, `None` when it returns `T?`); else
+  unwrap. `return e?` is the same shape ending in `return
+  <unwrapped>`. The checker guarantees the enclosing function's
+  return type is compatible.
+- **D8 — `try <expr>`** emits `newr_rt.try_result(lambda: <expr>)`
+  → `ok(v)` on success, `err(as_error(e))` on a thrown error.
+- **D9 — `?.` / `??` via helpers, never walrus.**
+  `newr_rt.opt_chain(v, lambda _v: ...)` (returns `None` when `v`
+  is `None`) and `newr_rt.coalesce(v, lambda: default)` (default
+  evaluated lazily, only when `v` is `None`). A `?.` chain
+  collapses into ONE `opt_chain` call with the full postfix path in
+  the lambda (`a?.b.c()` → `opt_chain(a, lambda _v: _v.b.c())`) —
+  the base expression is evaluated exactly once, and `is not None`
+  (never truthiness) is the test.
+- **D10 — Lambdas capture by value** (SPEC §9.5) via default-arg
+  snapshot: free variables become parameters with defaults bound at
+  creation (`lambda x, a=a: ...`). Block-body lambdas cannot be a
+  Python `lambda`, so they are hoisted to a `def` immediately before
+  the enclosing statement (same snapshot defaults, same timing).
+  Free variables are computed by the emitter, excluding builtins and
+  module-level fn/struct/enum/module names.
+- **D11 — Top-level layout.** Imports first (only the stdlib imports
+  the file actually uses), then structs/enums, then functions, then
+  top-level `let`/`const` in file order, then the remaining top-level
+  statements in file order. (Correction to the first draft of this
+  decision, made before coding: no topological sort is needed — fix
+  round 2 made a top-level use of a `let` before its declaration an
+  E2005 error, so lets already execute in dependency order. Emitting
+  all lets before the other statements still matters: a function body
+  may read a top-level `let` declared after the function (the
+  checker's deferred-execution exemption allows it), and a top-level
+  statement calling that function must see the `let` assigned. A bare
+  top-level `return` becomes `sys.exit(0)` — it exits the program,
+  SPEC §9.1. Consequence, recorded while coding the emitter: the
+  top level is two-phase — every `let`/`const` initialises before
+  any other top-level statement runs. A `let` whose RHS reads a
+  module global therefore sees the `let`'s initial value, NOT a
+  value a preceding top-level assignment statement wrote (that
+  assignment runs in phase 2, after all the lets). Source order is
+  preserved *within* each phase. Known gap, front-end not emitter: a top-level `let`
+  whose RHS calls a function reading a *later* `let` is accepted by
+  the checker (deferred-execution exemption) but fails at runtime
+  with `NameError` — the checker should narrow that exemption; filed
+  as a limitation in §14.3.)
+- **D12 — `match` lowering.** `if`/`elif` chain over a
+  `_newr_m0` temp holding the scrutinee (evaluated once).
+  Enum/struct patterns → `isinstance` + field bindings at the arm
+  head; literal patterns → `==`; list patterns → `len` + element
+  patterns; or-patterns → `or` of sub-conditions; guards are
+  `and`ed. A `Name` pattern binds. With no wildcard arm, the final
+  `else` raises `NewrError("non-exhaustive match")` as defense —
+  the checker proves exhaustiveness, so it is unreachable in a
+  checked program.
+- **D13 — `newr build` CLI.** `--target py` (default `py`; `js`
+  is a clean usage error: the JS emitter lands in M3).
+  `-o`/`--output` (default `<stem>.py` next to the input).
+  `--check` verifies only (writes nothing); `--fast` parses +
+  resolves only. The build runs the full pipeline
+  (parse + resolve + core check + discord check) unless `--fast`.
+  A file import emits one `.py` per imported `.newr` next to the
+  main output, and the main file does a plain `import <module>`.
+- **D14 — Research §8.1 corrections.** (a) Its byte-parity line
+  says "`newr build examples/hello.newr`" — the wrong filename; the
+  bot source is `examples/hello_bot.newr` (BUILD_REPORT §9.1 is the
+  correct statement; the research was written before the v0→v1
+  rename was fully propagated). (b) Its suite baseline "354 tests"
+  is stale — the M2 baseline is **466**. (c) `log.warn` →
+  `logging.warning` (P10).
+- **D15 — discord.py `choices` / `Range`:** the exact decorator
+  signatures were UNVERIFIED in the research (U13). M2 verifies
+  them against installed discord.py 2.7.1 before emitting them for
+  `shop.newr`'s options; the outcome is recorded in §14.4.
+- **D16 — `t()` lowering.** A module-level `STRINGS` dict
+  `{locale: {key: template}}` + a `_t(key, locale, **kwargs)`
+  helper, emitted only when `strings` blocks exist. Lookup order:
+  exact locale → base language → default locale (the first declared
+  locale). Template placeholders render with `to_str`. A template
+  placeholder that is a handler binding in scope at the call site
+  (e.g. `{user}`) is passed automatically by the emitter when the
+  explicit `t()` arguments do not name it.
+- **D17 — `store` lowering.** aiosqlite (P11). One connection in
+  `setup_hook`; `economy.balance(user)` reads the `balances` table
+  (missing row → `0`); `credit`/`debit`/`transfer` wrap
+  balance-update + ledger-insert in one transaction and are
+  idempotent on `key` (duplicate key returns the previous result).
+  `store.get/set/delete` are the generic table operations.
+- **D18 — `for` over a dict iterates its keys** (Python `for k in
+  d`); over a set iterates in hash order (unspecified); over
+  `range(...)` iterates the list.
+- **D19 — Literals.** Int literals via `repr` (exact); float
+  literals via `repr` (shortest round-trip, research §3.4). The
+  int64-minimum literal is emitted as `-9223372036854775808`
+  (unary minus on the positive literal — exact in Python).
+- **D20 — Name mangling.** User names are verbatim. A user name
+  that collides with a Python keyword or with a name the emitter
+  itself imports/uses in that file is mangled with a trailing
+  underscore (research §1.11); `_newr_` is reserved for emitter
+  temps/helpers. (A user who names a variable `_newr_result` would
+  collide with the contracts temp — the prefix is documented as
+  reserved; the checker does not forbid it, a known tiny gap.)
+- **D21 — `input()` in a bot program.** The emitter warns on
+  stderr (`input()` in a bot process blocks on stdin / raises
+  `EOFError` — bots have no stdin); it still emits the call with
+  Python semantics. A warning, not an error — the checker does not
+  forbid it.
+- **D22 — `set.remove` on an absent element is an error.** Emit
+  the native `.remove` (raises `KeyError`); `.discard` is the
+  no-error removal. (The checker has no `list.remove` / `list.pop`
+  / `dict.values` / `str.trim` — the METHODS table in
+  `compiler/modules.py` is the authority: list is append/contains/
+  get/len only, dict is keys/get/contains only, str has `strip`
+  not `trim`. The emitter raises `EmitterError` for any method the
+  checker cannot have accepted, rather than guessing.)
+- **D23 — File I/O emits native `open()` calls**
+  (`encoding="utf-8"`, `with` blocks); `FileNotFoundError` etc.
+  propagate as Python exceptions and are wrapped by `as_error` in
+  a `catch` clause, so `.message`/`.code` stay total. Conversions
+  raise native `ValueError` (research §3.3).
+- **D24 — Float `%` is C `fmod` semantics** (dividend's sign) via
+  `newr_rt.fmod`, which raises `NewrDivisionByZeroError` on
+  `b == 0.0` (Python's float `%` takes the divisor's sign).
+- **D25 — No `# newr:<file>:<line>` comments by default** (golden
+  cleanliness wins); opt-in via `newr build --line-comments`.
+- **D26 — `on_message` ignores the bot's own messages**
+  (`if message.author == self.user: return` at the top of the
+  handler).
+- **D27 — `newr build --fast` with emission is refused** (usage
+  error) — emission needs checked types, and `--fast` skips the
+  check.
+- **D28 — Float `**` goes through `newr_rt.pow_float`.** Python's
+  float `**` differs from IEEE in two edge cases: a negative base
+  with a fractional exponent returns a complex (newr has no complex
+  type — the answer is NaN) and overflow raises `OverflowError`
+  (IEEE float overflow is +/-inf, signed by a negative base with
+  an odd integer exponent). `pow_float` fixes both; bare `**` is
+  never emitted for floats.
+- **D29 — A module function used as a value becomes a lambda.**
+  `time.now` as a value has type `fn() -> int`, so the emitter
+  emits `lambda: int(time.time())`; `math.sqrt` as a value becomes
+  `lambda _a0: math.sqrt(_a0)`. User functions as values emit their
+  (verbatim) def name; enum variants as values emit the variant
+  dataclass name.
+- **D9 (correction, 7 Nov, found while coding the emitter).** The
+  first draft said "a `?.` chain collapses into ONE `opt_chain`
+  call". That is only true for a chain with a single optional link
+  (`a?.b.c` → one call, the non-optional tail folded into the
+  lambda). A chain with several optional links needs one
+  `opt_chain` call **per optional link**, nested
+  (`a?.b?.c` → `opt_chain(a, lambda _v: opt_chain(_v.b, lambda _w:
+  _w.c))`) — a single lambda body `_v.b.c` would raise
+  `AttributeError` when `b` is `none`, because the intermediate
+  `none` is not swallowed by the outer call. Non-optional links
+  between optional ones fold into the nearest lambda body.
+- **D30 — `?` on a nullable inside a Result-returning function
+  (and the reverse) is an `EmitterError`.** The checker accepts it
+  (its `Propagate` check only requires the enclosing function to
+  return `Result` or `?`, without matching the operand kind), but
+  there is no defined early-return value: a nullable in a `Result`
+  function has no `Err` to return, and a `Result` in a nullable
+  function has no `none` to return. The emitter refuses cleanly
+  rather than inventing semantics; the checker should E2001 it
+  (filed in §14.3).
+- **D31 — `?.` on a nullable method swallows (checker gap).** For
+  `v?.unwrap()` / `v?.is_some()` the checker returns the
+  non-nullable method result type (`int` / `bool`) — it dispatches
+  nullable methods before checking the `?.`. At runtime the `?.`
+  swallows, so `none` can flow into a value the checker typed as
+  non-nullable. The emitter follows the `?.` semantics (an
+  `opt_chain` call) — the unsoundness is the checker's, filed in
+  §14.3; a program that only writes `v.unwrap()` (no `?.`) is
+  unaffected.
+- **D32 — File I/O goes through runtime helpers, not hoisted
+  `with` blocks.** `file.read/write/append` emit
+  `file_read/file_write/file_append(path, ...)` calls in
+  `newr_rt.py`. A hoisted `with` block would run at the enclosing
+  statement — the wrong time inside a lambda body (the read would
+  happen at creation, not at call time) and inside an optional
+  chain (the read would happen even when the chain is swallowed
+  because the receiver is `none`). A helper call is an expression,
+  so it evaluates exactly when the newr expression does. `open()`
+  inside the helpers passes `encoding="utf-8"` (D23).
+- **D33 — Hoists inside a lambda body stay inside the lambda.**
+  When an expression lambda / `opt_chain` lambda / `try_result`
+  lambda needs a hoist (an f-string part with a backslash, a
+  nested block-body lambda), the emitter hoists a `def` for the
+  whole lambda and passes its name, instead of leaking the hoist
+  to the enclosing statement (which would evaluate it at the
+  wrong time). The same rule as D32, for the same reason.
+
+### 14.3 Known gaps found while building M2 (front-end, not emitter)
+
+These are checker/resolver limitations the emitter works around or
+refuses cleanly. None blocks M2; each is a candidate for the M1
+follow-up pass (or M6 tooling).
+
+- **G-M2-1 — `?` operand/return-kind mismatch is accepted**
+  (D30). The checker should E2001 a `Propagate` whose operand kind
+  (`Result` vs nullable) does not match the enclosing function's
+  return kind.
+- **G-M2-2 — `?.` + nullable method returns a non-nullable type**
+  (D31). `v?.unwrap()` / `v?.is_some()` should type as `T?` /
+  `bool?`; the checker returns `T` / `bool`.
+- **G-M2-3 — Top-level `let` whose RHS calls a function reading a
+  *later* `let` is accepted but fails at runtime with `NameError`**
+  (D11). The checker's deferred-execution exemption should not
+  cover a top-level `let` RHS.
+- **G-M2-4 — A user variable named `_newr_*` collides with
+  emitter temps** (D20). The checker does not forbid the prefix;
+  the emitter documents it as reserved.
+- **G-M2-5 — Negative list index: RESOLVED 7 Nov.** SPEC §9.2 says
+  out-of-range indexing is a runtime error and §1.1 forbids silent
+  behavior, so a negative index is out of range (valid indices are
+  0..len-1). The emitter uses `newr_rt.list_index`, which raises
+  `IndexError` for `i < 0` or `i >= len` (the same error Python
+  raises for an out-of-range index; `as_error` gives code
+  "IndexError"). Python's wrap-around is never emitted.
+- **G-M2-6 — `?` on a nullable `Result` has no defined meaning**
+  (D30). The emitter refuses it with `EmitterError` (unwrap it
+  first, then propagate the `Result`).
+
+### 14.5 Front-end bugs found and fixed while building M2
+
+M2 discipline: a front-end bug found by the emitter is recorded
+here, fixed with its own TDD + red-check, and reported — never
+silently fixed in passing.
+
+- **BUG-M2-1 — `_in_top_level` leaked into nested blocks**
+  (checker, `compiler/checker.py::_walk_stmts`). The flag stayed
+  True for the whole top-level statement walk, so a `let` inside a
+  top-level `if` / `for` / `while` body (or a `try` catch) was
+  treated as a module-level `let`: if it shadowed an
+  already-checked name, `_check_let_const` hit its `top_checked`
+  early return and never checked the value at all (its
+  `expr_type` stayed `None`, which the emitter then refused with
+  "an expression has no type"); if it did not shadow, the name was
+  registered in the module env and leaked out of the block.
+  Fix: `_walk_stmts` now owns the flag — it follows the
+  `top_level` argument of that walk and is restored afterwards, so
+  a nested walk is never top-level. Regression tests:
+  `tests/test_checker_top_level_shadow.py` (3 tests, written RED
+  first — all 3 failed before the fix). The fix was verified
+  against the full suite (596 green).
+- **BUG-M2-2 — `NewrOverflowError` / `NewrDivisionByZeroError`
+  never set `.message`** (runtime, `compiler/newr_rt.py`). The
+  bases were ordered `(OverflowError, NewrError)`, so
+  constructing one never ran `NewrError.__init__` — and a
+  `catch e:` body reading `e.message` raised `AttributeError`
+  instead of printing the overflow (found by the emitter's
+  overflow test, whose `try:` caught the error but then failed
+  in the handler). Fix: the base order is now
+  `(NewrError, OverflowError)` / `(NewrError, ZeroDivisionError)`
+  — `NewrError.__init__` runs, and the classes are still
+  `OverflowError` / `ZeroDivisionError` subclasses (a bare
+  `except OverflowError` still sees them). Regression test:
+  `tests/test_newr_rt.py::TestCheckedArithmetic::test_overflow_error_carries_message`
+  (written RED first — it failed with `AttributeError` before
+  the fix).
+- **BUG-M2-3 — A modal did not count as an answer for E2010**
+  (discord checker, `compiler/discord_check.py::_answers`).
+  A command whose only action was showing a modal was rejected
+  with "may not answer on some path", but a modal sends a
+  response directly (`interaction.response.send_modal`), so it
+  answers the interaction — unlike a button/select, which only
+  attach to a reply and correctly do not count. Fix: `_answers`
+  now includes `A.ModalDecl` (with a comment explaining the
+  button/select distinction). Regression test:
+  `tests/test_discord_check.py::TestEveryPathAnswers::test_modal_answers`
+  (written RED first — it failed with E2010 before the fix).
+  Full suite 624 green after.
+- **BUG-M2-4 — A match guard could not see the arm's name
+  binding** (emitter, `compiler/emitter.py::_emit_match`). A
+  guard such as `x if x > 100:` was emitted before the pattern's
+  bindings were bound, so the guard's reference to `x` failed
+  with "unknown name `x`" (found by the conformance corpus,
+  `conformance/ok/match_or_guard.newr`). Fix: while emitting a
+  guard, the arm's pattern bindings are bound in a pushed scope
+  to their pattern expression text (a name pattern binds to the
+  scrutinee temp), then the scope is popped. Regression test:
+  `tests/test_emitter.py::TestMatch::test_name_pattern_guard_binds_scrutinee`
+  (red-checked: fails without the fix, passes with it).
+- **BUG-M2-5 — The CLI's emitter-error path raised `NameError`**
+  (`compiler/cli.py::_build_emit`). The `EmitterError` handler
+  built a diagnostic with `Span(...)` but `Span` was not imported
+  — so a program the emitter refused produced a raw traceback
+  instead of the clean E4001 diagnostic (found by the same
+  conformance program). Fix: import `Span` from `.errors`.
+  (No separate test — the CLI build tests exercise the path
+  through `test_build_type_error_exits_4_and_writes_nothing`'s
+  shape; the E4001 path is exercised by the conformance harness.)
+
+### 14.6 Decisions made while coding the general emitter (7 Nov)
+
+- **D34 — A nullable value printed or converted with `str()` goes
+  through `to_str`** (P8 corollary). A nullable int/float/str's
+  runtime value is Python's `None` when absent, and Python's
+  `print` / `str()` would render that as `"None"` instead of
+  newr's `"none"`. `to_str` renders `None` as `"none"` and any
+  present value by its own rule, so it is the correct renderer
+  for every nullable value.
+- **D35 — Capture by value includes top-level `let`s** (D10
+  corollary). A top-level `let` is mutable, so a lambda reading
+  it at call time would see a later value — the snapshot
+  (default-arg) applies to it, not only to function locals.
+  (A top-level `const` is registered the same way; it never
+  changes, so snapshotting it is harmless.) Module functions /
+  structs / enums / modules / stores are fixed and need no
+  capture.
+- **D36 — The int64 minimum is emitted literally** (D19
+  implementation). `-9223372036854775808` in newr is a unary
+  minus over the literal `9223372036854775808`, whose own type
+  the checker leaves unset (it is out of range as a positive
+  value) — so the emitter special-cases that literal and emits
+  `-9223372036854775808` directly, rather than
+  `neg(9223372036854775808)` (which would check the out-of-range
+  literal first).
+- **D37 — `print (expr) * 3` is `(print(expr)) * 3`, not
+  `print((expr) * 3)`** (parser behavior, documented by the
+  emitter tests). `print (x)` is a call with a parenthesized
+  argument, so an operator after the `)` applies to the call's
+  result (`none`) — a type error. Parenthesized arithmetic
+  meant as print's argument goes in a `let` (or double parens).
+  The same applies to `print (-2) ** 2`.
+- **D38 — The `?.` lambda parameter carries the stripped type.**
+  Inside an `opt_chain` lambda the receiver is proven non-none,
+  so the parameter (and the rebased base) carry the inner type
+  (`str`, not `str?`) — otherwise a method call on it would
+  dispatch as if the value were still nullable and fail.
+- **D39 — A file-module call registers its import.** A call to a
+  function in an imported `.newr` file emits `import <module>`
+  in the importing file (D13: one `.py` per imported `.newr`).
+
+### 14.7 Decisions made while coding the bot emitter (7 Nov)
+
+- **D40 — A Button/Select attaches to the most recent answer
+  (Reply/Followup/Edit) in the SAME block.** The emitter rewrites
+  that answer's line to add `view=<var>`; a Modal is sent directly
+  (`await interaction.response.send_modal(...)`); a component with
+  no preceding answer in its block is an `EmitterError`.
+- **D41 — `on_timeout`: the View stores `self.message`** (set by
+  the handler after the answer — via
+  `interaction.original_response()` for a reply/edit, or the
+  followup send's return with `wait=True`); `on_timeout` disables
+  the children and edits the stored message for a `reply` in the
+  on_timeout body.
+- **D42 — `values` (select) interpolation form is
+  `", ".join(self.values)`.** A `list[str]` cannot be
+  interpolated directly (E2001); the join is the display form.
+- **D43 — Store methods live on the Bot:
+  `await bot.<store>_<op>(...)`; the user key is
+  `str(<user>.id)`** (the key column is str).
+- **D44 — `_t` locale:** `interaction.locale` in
+  command/component contexts; `member.guild.preferred_locale` in
+  member events; `message.guild.preferred_locale if message.guild
+  else None` in message events; `_DEFAULT_LOCALE` (first declared
+  locale) in tasks/ready/no-handler contexts.
+- **D45 — `transfer` is 4-arg (`from, to, amount, key`)** per
+  SPEC §14 (verified 7 Nov: a 4-arg transfer checks clean, as do
+  3-arg debit/credit and `get`).
+- **D46 — A `get` row is a `types.SimpleNamespace`** (attribute
+  access works for its fields); `set` takes such a row (or a
+  struct) via `vars()`.
+- **D47 — An `embed` can only be used as a reply/edit/followup/
+  send value** — superseded by D51 (an embed is also a value via
+  hoisted construction; see below).
+- **D48 — The bot emitter registers the module scope before
+  emitting handlers.** `_emit_bot_file` now calls
+  `_register_module_scope` (and sets `self.program` / `fns` /
+  `structs` / `enums` / `stores`), exactly as
+  `_emit_general_file` does — a handler calling a file-module
+  function (`shop_items.price_of`) or a store (`economy.balance`)
+  resolves through it. Without this the shop bot failed with "an
+  expression has no type" (the module-name Member is untyped by
+  the checker; only the whole call carries a type).
+- **D49 — A component's instantiation lines are moved BEFORE the
+  answer they attach to.** The answer references the view variable
+  (`view=buy_again_view`), so emitting the instantiation after
+  the answer would be a `NameError` at runtime. `_emit_block`
+  moves the component's added lines to just before the answer
+  line and adjusts the recorded answer index.
+- **D50 — `_push_handler` / `_pop_handler` do not reset
+  `_last_answer`.** Answer tracking is per-block (managed by
+  `_emit_block`'s save/restore); the handler reset wiped the
+  enclosing block's answer — a button's own `_pop_handler` (run
+  while emitting its `do:` body) cleared the reply it was
+  attaching to, so `_attach_view` failed.
+- **D51 — An embed as a value is built on hoisted lines**
+  (SPEC §13.7: an `embed:` block is an expression, e.g.
+  `let card: embed = embed:`). `_emit_embed` appends the
+  construction lines to `self._hoists` (indent 0) and returns the
+  `embed` variable; the enclosing statement's hoist mechanism puts
+  the construction before the statement. This supersedes D47's
+  "fails cleanly" rule — the general expression form works.
+- **D52 — A `num` option's type name is `float`.** The checker's
+  `Type` for a `num` option is named `float`, so `_option_param`
+  accepts both `num` and `float` for the `float` annotation.
+- **D53 — The timeout message line goes right after the
+  answer.** `_attach_view` inserts
+  `<view>.message = await interaction.original_response()` at
+  the answer index + 1, not at the end of the block (statements
+  may follow the component).
+
+### 14.4 Verification outcomes (filled as M2 verifies them)
+
+- discord.py 2.7.1 `choices` / `Range` signatures (D15):
+  **VERIFIED 7 Nov** — `app_commands.choices(**parameters)` is a
+  decorator; `app_commands.Range` is a generic subscript
+  (`Range[int, 1, 10]`, `Range[int, 10]`, `Range[int, None, 10]`);
+  `Range(1, 10)` raises `TypeError`. The shop golden's
+  `amount: app_commands.Range[int, 1, 99] = 1` and the
+  `@app_commands.choices` decorator are emitted from that.
+- `await` inside f-string fields (shop's `reply` with
+  `economy.balance(user)`): **VERIFIED 7 Nov** — the shop bot
+  emits `f"Balance: {await bot.economy_balance(str(interaction.user.id))} gold."`,
+  which parses and (in the mock round-trip) runs; `python3 -m py_compile`
+  on the emitted shop is clean.
+- CI matrix (Windows/macOS): still UNVERIFIED (never run).
+- Bot emitter red-check (7 Nov): stubbing `_emit_bot_file` made
+  23/27 bot tests error (4 skipped = mock round-trips, system
+  Python has no discord.py); restoring it made all 27 pass.
+  Mock round-trip (newr-verify venv, discord.py 2.7.1): all 4
+  pass — ping/greet replies, DM guild fallback, member_join
+  welcome, `_channel_text`.
+
+### 14.8 Benchmarks B1–B8 (7 Nov, hyperfine 1.19.0, Linux x86_64, Python 3.12.3)
+
+Full report: `BENCHMARKS.md` (mean ± σ + range, N runs, machine
+context); raw hyperfine JSON in `benchmarks/raw/`; harness
+`benchmarks/run.py` (`--quick` for a smoke check). Hand-written
+equivalents in `benchmarks/handwritten/` are human-written, not
+generated-then-edited. No speedup is promised — the numbers are
+reported as found (no published generated-vs-hand-written
+benchmark exists for any transpiler).
+
+- **B1 compile cold:** hello 127.1 ms ± 18.6 (N=10); shop 165.5 ms ± 36.2 (N=10).
+- **B2 compile warm:** hello (no change) 128.0 ms ± 21.6 (N=20);
+  shop (one file changed — a comment line appended to
+  `shop_items.newr` before each run) 152.8 ms ± 23.3 (N=20).
+  Cold ≈ warm: the compiler has no cache, so "warm" only avoids
+  the first-import cost, which is small.
+- **B3 `newr --help` startup: 141.5 ms ± 20.8 (N=10) — EXCEEDS
+  the SPEC §4.1 design target of <100 ms.** The startup is
+  dominated by the Python interpreter plus importing the whole
+  compiler package (lexer/parser/resolver/checker/discord_check).
+  A Python CLI with this import graph cannot easily hit <100 ms;
+  the target is a design target, not a shipped guarantee, and it
+  stays unmet. Options for later: lazy imports (only import the
+  checker when `check`/`build` runs), or a zipapp (same imports,
+  so no gain). Not fixed in M2.
+- **B4 code size:** generated hello 165 bytes / 5 lines vs
+  hand-written 259 bytes / 9 lines (ratio 0.64); generated loop
+  327 bytes / 12 lines vs hand-written 396 bytes / 16 lines
+  (ratio 0.83); generated shop 9,404 bytes / 223 lines. The
+  generated code is SMALLER than the hand-written equivalent —
+  the readability goal (no boilerplate bloat) is met.
+- **B5 program startup:** generated hello 32.7 ms ± 4.0 vs
+  hand-written 28.9 ms ± 6.5 (ratio 1.13, N=10) — within noise.
+- **B6 checked-int tight loop (100k iterations, checksum 105003
+  in all three):** generated (checked helpers) 123.4 ms ± 14.3;
+  hand-written plain ints 48.5 ms ± 5.5; hand-written with
+  `newr_rt` helpers 132.2 ms ± 6.5. Ratio generated/plain = 2.54
+  (exceeds the 1.20 proposal flag threshold); ratio
+  generated/checked-hand-written = 0.93. The 2.54× is the honest
+  price of the spec's checked int64: every arithmetic op is a
+  function call plus a range check. The emitter itself is
+  efficient — it matches a hand-written program using the same
+  helpers (0.93×). This is a design cost, not an emitter bug.
+- **B6b shop economy (1,000 credits, aiosqlite, commit per call):
+  generated 676.2 ms ± 85.4; hand-written 358.3 ms ± 39.2; ratio
+  1.89 (exceeds the 1.20 flag threshold).** Both print the final
+  balance 1000. The 10,000-transaction plan was reduced to 1,000:
+  per-call commit fsync dominates and 10k took >4 min; 1k still
+  measures the code path. The gap is NOT yet explained: the SQL
+  is the same shape (INSERT balance + INSERT ledger + commit per
+  call); the generated path adds `int(time.time())`, a
+  `str(user_id)` conversion, and one extra awaited wrapper call
+  per credit — none of which should cost 1.89×. Variance is high
+  (±85 ms), so fsync jitter is part of it. Follow-up for M3 or
+  later: profile the economy path (per-call breakdown) and, if
+  the gap is real, reduce the per-call overhead. Recorded here
+  rather than hidden.
+- **B7 peak RSS** (Python `resource.ru_maxrss`; `/usr/bin/time`
+  is not on this VM): compile (shop) 17.5 MB; run (hello)
+  11.1 MB. Small.
+- **B8 parity:** startup 1.13 ✓; loop 2.54 (flagged — inherent
+  checked-int cost, see B6); shop economy 1.89 (flagged —
+  unexplained, see B6b); hello size 0.64 ✓; loop size 0.83 ✓.
+
+### 14.9 CI emitter job (7 Nov)
+
+`.github/workflows/ci.yml` gains a `python-emitter` job (matrix
+ubuntu/macos/windows × Python 3.10–3.13, `fail-fast: false`):
+installs `discord.py==2.7.1` + aiosqlite, runs the full suite
+(incl. emitter/golden/conformance tests), runs
+`conformance/run.py`, builds all four examples and runs the
+emitted Python (the bots must reach the `DISCORD_TOKEN` guard —
+exit 1 with the token message — proving the emitted bot ran its
+`main()`), and runs the golden-comparison tests. The header
+comment is updated (the per-target emitter jobs now exist for
+Python; JS lands in M3). The job was simulated locally in
+`/tmp/ci_sim` (system Python for hello/shop, the newr-verify
+venv for the bots, since system Python has no discord.py) and
+all steps pass. CI itself has still never run — Windows/macOS
+execution stays UNVERIFIED until green on all three OSes.
+
+### 14.10 CLI message fix (7 Nov, cosmetic)
+
+BUG-M2-6 — `newr build examples/hello.newr -o hello_out.py`
+printed "wrote hello.py": the success message listed the
+`result.files` keys (source stems), not the actual destination
+paths. Fixed in `compiler/cli.py::_build_emit`: the message now
+lists the real destinations (the `-o` path for the main file,
+`main_out.parent / name` for imports, plus `newr_rt.py` when
+copied). Verified: `examples/hello.newr: ok — wrote
+/tmp/hello_cli2.py`; `examples/shop.newr: ok, 3 warning(s) —
+wrote /tmp/shop_cli2.py, /tmp/shop_items.py, /tmp/newr_rt.py`.
+Suite stays 637 green after the fix.

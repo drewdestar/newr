@@ -18,9 +18,10 @@
 #   on every OS and runs the checks through it. (Building a fresh .pyz
 #   per runner would not prove cross-OS portability at all.)
 #
-# Per-target emitter jobs land in M2+. When they do, each target gets its
-# own job, and a failure in one target's job never blocks another
-# target's release.
+# Per-target emitter jobs: the Python emitter job (python-emitter)
+# landed in M2. The JS emitter job lands in M3 with its own job,
+# and a failure in one target's job never blocks another target's
+# release.
 
 name: CI
 
@@ -208,3 +209,68 @@ jobs:
                   sys.exit(1)
               print(f'{path}: matches v0 original')
           "
+
+  # M2: the Python emitter job. One job per target (the JS emitter
+  # lands in M3 with its own job); a failure here never blocks the
+  # front-end jobs, and vice versa.
+  python-emitter:
+    name: python emitter (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # discord.py + aiosqlite are needed for the bot emitter
+      # round-trip tests (tests/test_emitter_bot.py) and the shop
+      # economy benchmark driver. The pin matches the M2 research.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program, runs the
+      # emitted Python, and requires a PASS verdict from each.
+      - name: Conformance corpus
+        run: python conformance/run.py
+
+      # Build every example and run the emitted Python. The bots
+      # (hello_bot, showcase, shop) stop at the DISCORD_TOKEN guard
+      # when no token is set: exit 1 with the token message — that
+      # is the expected behaviour here, and it proves the emitted
+      # bot got far enough to run its main().
+      - name: Build + run the examples
+        shell: bash
+        run: |
+          python newr build examples/hello.newr -o hello_out.py
+          python hello_out.py
+          python newr build examples/shop.newr -o shop_out.py
+          python -m py_compile shop_out.py shop_items.py
+          python newr build examples/hello_bot.newr -o hello_bot_out.py
+          if python hello_bot_out.py 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build examples/showcase.newr -o showcase_out.py
+          if python showcase_out.py 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M2 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison
+        run: python -m unittest tests.test_goldens -v

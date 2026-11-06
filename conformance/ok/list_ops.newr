@@ -1,0 +1,22 @@
+# List operations (SPEC.md §12.1): append/get/len/contains.
+let passed = true
+let xs = [1, 2, 3]
+xs.append(4)
+if xs.len() != 4:
+  passed = false
+if xs.get(0, -1) != 1:
+  passed = false
+if xs.get(3, -1) != 4:
+  passed = false
+if xs.get(9, -1) != -1:
+  passed = false
+if xs.get(-1, -1) != -1:
+  passed = false
+if xs.contains(3) != true:
+  passed = false
+if xs.contains(9) != false:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

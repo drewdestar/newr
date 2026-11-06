@@ -1,8 +1,15 @@
 # Nullability (SPEC.md §7.2, §9.2): T widens to T?, ?? accepts a
 # nullable right side, ?. on a nullable value is fine.
+let passed = true
 let x: int? = 5
 let y: int? = none
 let z = x ?? 0
 let w = y ?? 7
-print z
-print w
+if z != 5:
+  passed = false
+if w != 7:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

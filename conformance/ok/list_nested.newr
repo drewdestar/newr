@@ -1,0 +1,17 @@
+# Nested lists and iteration.
+let passed = true
+let grid = [[1, 2], [3, 4]]
+if grid.len() != 2:
+  passed = false
+if grid.get(1, [0]).get(0, -1) != 3:
+  passed = false
+let total = 0
+for row in grid:
+  for v in row:
+    total = total + v
+if total != 10:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

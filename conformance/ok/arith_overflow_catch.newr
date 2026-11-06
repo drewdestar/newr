@@ -1,0 +1,16 @@
+# Checked overflow is a runtime error, catchable with try/catch.
+let passed = true
+let caught = false
+try:
+  let big = 4611686018427387904 * 4
+  print big
+catch e:
+  caught = true
+  if e.message == "":
+    passed = false
+if caught != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

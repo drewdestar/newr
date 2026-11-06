@@ -1,0 +1,25 @@
+# Enum bare variants and payload variants, str() rendering (P8).
+enum Color:
+  Red
+  Green
+  Blue
+
+enum Shape:
+  Circle(radius: float)
+  Square(side: float)
+
+let passed = true
+let c = Color.Red
+if str(c) != "Color.Red":
+  passed = false
+let s = Shape.Circle(radius: 1.5)
+if str(s) != "Shape.Circle(radius: 1.5)":
+  passed = false
+if not (c == Color.Red):
+  passed = false
+if (c == Color.Blue):
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

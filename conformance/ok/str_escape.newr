@@ -1,0 +1,25 @@
+# The shared escape corpus (conformance/README.md): quotes,
+# braces, backslashes, newlines, emoji, RTL text.
+let passed = true
+let q = "she said \"hi\""
+if q != "she said \"hi\"":
+  passed = false
+let brace = "{{not a placeholder}}"
+if len(brace) != 19:
+  passed = false
+let back = "a\\b"
+if len(back) != 3:
+  passed = false
+let nl = "line1\nline2"
+if nl.split("\n").len() != 2:
+  passed = false
+let emoji = "hi \u{1F600}"
+if emoji.chars().len() != 4:
+  passed = false
+let rtl = "\u{645}\u{631}\u{62D}\u{628}"
+if rtl.chars().len() != 4:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

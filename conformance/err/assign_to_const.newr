@@ -1,0 +1,5 @@
+# expect: E2001
+# A const cannot be assigned to.
+const x = 1
+x = 2
+print x

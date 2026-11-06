@@ -1,0 +1,19 @@
+# ?? is not Python's `or`: a present-but-falsy value (0, "")
+# does NOT take the default (SPEC.md §7.2).
+let passed = true
+let zero: int? = 0
+if (zero ?? 5) != 0:
+  passed = false
+let empty: str? = ""
+if (empty ?? "d") != "":
+  passed = false
+let missing: int? = none
+if (missing ?? 5) != 5:
+  passed = false
+let f: bool? = false
+if (f ?? true) != false:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

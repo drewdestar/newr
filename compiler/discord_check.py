@@ -577,7 +577,10 @@ class DiscordChecker:
     def _answers(self, body: list) -> bool:
         for st in body:
             if isinstance(st, (A.Reply, A.Defer, A.Edit, A.Followup,
-                               A.Throw)):
+                               A.Throw, A.ModalDecl)):
+                # A modal answers: it sends a response directly
+                # (send_modal). A button/select does not — it only
+                # attaches to a reply. (BUG-M2-3.)
                 return True
             if isinstance(st, A.If):
                 if st.else_body is None:

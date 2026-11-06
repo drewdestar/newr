@@ -1,9 +1,13 @@
-# Contracts (SPEC.md §9.7): `result` is bound inside `ensures`.
-fn absolute(n: int) -> int:
-  requires n != 0
-  ensures result >= 0
-  if n < 0:
-    return -n
-  return n
+# Contracts (SPEC.md §10): requires/ensures are runtime checks.
+fn twice(n: int) -> int:
+  requires n > 0
+  ensures result > n
+  return n * 2
 
-print absolute(-3)
+let passed = true
+if twice(3) != 6:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

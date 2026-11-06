@@ -1,0 +1,16 @@
+# The random module: values stay in range (non-deterministic,
+# so only the range is asserted).
+let passed = true
+let r = random.int(1, 10)
+if r < 1:
+  passed = false
+if r > 10:
+  passed = false
+let xs = [1, 2, 3]
+let pick = random.choice(xs)
+if xs.contains(pick) != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

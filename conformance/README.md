@@ -4,11 +4,15 @@ The corpus in `conformance/` is the single definition of "correct
 behavior" for newr. A target that cannot pass it does not ship.
 
 **Seeded in M1 (6 ok + 6 err programs, with expected verdicts asserted
-by `tests/test_conformance.py`).** The seed covers the front end only:
-`newr check` verdicts. It becomes the full definition as it grows —
-once the emitters land in M2, the same programs run through every
-target and the outputs are compared (Gleam model below), and the
-bot-mock round-trip and golden-file sections below apply.
+by `tests/test_conformance.py`). Grown in M2 to 68 ok + 22 err programs
+(90 total).** The seed covered the front end only: `newr check`
+verdicts. In M2 the same programs run through the Python emitter:
+`python3 conformance/run.py` builds every ok program, runs the
+emitted Python, and requires exit 0 with `PASS` as the last stdout
+line — each ok program self-verifies (the honest equivalent of
+Gleam's model, since v1 has no in-language test framework). The err
+programs assert their `# expect: <CODE>` diagnostic code via
+`newr check`.
 
 ## The Gleam model
 

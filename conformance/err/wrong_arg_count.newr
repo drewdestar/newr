@@ -1,0 +1,5 @@
+# expect: E3002
+# A call with the wrong number of arguments.
+fn f(a: int) -> int:
+  return a
+print f(1, 2)

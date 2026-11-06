@@ -1,0 +1,4 @@
+# expect: E2001
+# ?. on a non-nullable receiver is a compile error.
+let x = 5
+print x?.to_string()

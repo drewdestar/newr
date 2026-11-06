@@ -1,0 +1,23 @@
+# A violated `requires` raises a runtime error (catchable).
+fn withdraw(balance: int, amount: int) -> int:
+  requires amount > 0
+  requires amount <= balance
+  return balance - amount
+
+let passed = true
+if withdraw(100, 30) != 70:
+  passed = false
+let caught = false
+try:
+  let v = withdraw(100, 200)
+  print v
+catch e:
+  caught = true
+  if e.message == "":
+    passed = false
+if caught != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

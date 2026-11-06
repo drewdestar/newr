@@ -1,0 +1,4 @@
+# expect: E2003
+# A list's elements must all have the same type.
+let xs = [1, "a"]
+print xs

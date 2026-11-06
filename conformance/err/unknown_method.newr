@@ -1,0 +1,4 @@
+# expect: E3001
+# A method that does not exist on the receiver.
+let s = "abc"
+print s.upperr()

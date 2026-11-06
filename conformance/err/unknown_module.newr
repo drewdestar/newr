@@ -1,0 +1,4 @@
+# expect: E3008
+# An unknown named module.
+import nosuchmodule
+print nosuchmodule.x

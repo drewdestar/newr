@@ -1,0 +1,17 @@
+# Lambdas capture by value (D10): a later change to the
+# captured variable does not change the lambda's snapshot.
+let passed = true
+let a = 1
+let f = fn() -> int: a
+a = 2
+if f() != 1:
+  passed = false
+let b = 10
+let g = fn(x: int) -> int: x + b
+b = 20
+if g(1) != 11:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

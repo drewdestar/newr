@@ -1,0 +1,18 @@
+# The file module: write/read/append/exists (D32 — runtime
+# helpers, so the read happens at call time, not at creation).
+let passed = true
+let path = "conformance_tmp.txt"
+file.write(path, "hello")
+if file.exists(path) != true:
+  passed = false
+if file.read(path) != "hello":
+  passed = false
+file.append(path, " world")
+if file.read(path) != "hello world":
+  passed = false
+if file.exists("no_such_file_xyz.newr") != false:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

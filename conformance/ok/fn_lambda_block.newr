@@ -1,0 +1,17 @@
+# A block-body lambda (hoisted to a def before the statement).
+let passed = true
+let f = fn(x: int) -> int:
+  let y = x * 3
+  return y + 1
+if f(5) != 16:
+  passed = false
+let items = [1, 2, 3]
+let total = 0
+for v in items:
+  total = total + f(v)
+if total != 21:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

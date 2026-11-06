@@ -1,0 +1,29 @@
+# try/catch: throw, e.message, e.code, as_error wrapping.
+let passed = true
+let caught_msg = ""
+let caught_code = ""
+try:
+  throw "boom"
+catch e:
+  caught_msg = e.message
+  caught_code = e.code ?? ""
+if caught_msg != "boom":
+  passed = false
+if caught_code != "":
+  passed = false
+let caught2 = false
+try:
+  let x = 1 / 0
+  print x
+catch e:
+  caught2 = true
+  if e.message != "integer division by zero":
+    passed = false
+  if e.code.is_none() != true:
+    passed = false
+if caught2 != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

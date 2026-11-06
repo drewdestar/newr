@@ -1,0 +1,14 @@
+# P1: f-string quote alternation — a template containing both
+# quote kinds must still emit valid Python on 3.10.
+let passed = true
+let name = "Ada"
+let q = "she said 'hi' to {name}"
+if q != "she said 'hi' to Ada":
+  passed = false
+let d = "he said \"yo\" to {name}"
+if d != "he said \"yo\" to Ada":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,26 @@
+# Optional chaining (SPEC.md §9.2): ?. short-circuits the whole
+# postfix chain; a chain with several optional links needs one
+# opt_chain per link (D9).
+struct Inner:
+  name: str
+
+struct Outer:
+  inner: Inner?
+
+let passed = true
+let o: Outer? = Outer(inner: Inner(name: "x"))
+let n1 = o?.inner?.name
+if (n1 ?? "") != "x":
+  passed = false
+let none_o: Outer? = none
+let n2 = none_o?.inner?.name
+if n2.is_none() != true:
+  passed = false
+let o2 = Outer(inner: none)
+let n3 = o2.inner?.name
+if n3.is_none() != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

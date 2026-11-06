@@ -1,0 +1,19 @@
+# while loops, break, continue.
+let passed = true
+let n = 0
+let total = 0
+while n < 10:
+  n = n + 1
+  if n == 3:
+    continue
+  if n == 8:
+    break
+  total = total + n
+if total != 25:
+  passed = false
+if n != 8:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

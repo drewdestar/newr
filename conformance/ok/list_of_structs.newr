@@ -1,0 +1,20 @@
+# A list of structs, iterated and read.
+struct Point:
+  x: int
+  y: int
+
+let passed = true
+let pts = [Point(x: 1, y: 2), Point(x: 3, y: 4)]
+if pts.len() != 2:
+  passed = false
+if pts.get(0, Point(x: 0, y: 0)).x != 1:
+  passed = false
+let total = 0
+for p in pts:
+  total = total + p.x + p.y
+if total != 10:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -33,7 +33,7 @@ from pathlib import Path
 from . import __version__
 from .checker import check_program
 from .discord_check import check_discord, discord_providers
-from .errors import Diagnostic, NewrError
+from .errors import Diagnostic, NewrError, Span
 from .resolver import resolve_source
 
 VERSION = __version__
@@ -42,9 +42,9 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
 
   check <file> [--fast]  verify a .newr program (parse, resolve, check);
                          writes nothing
-  build <file> [--target py|js] [--check] [--fast]
-                         build a .newr program (M1: --check only; emitters
-                         land in M2, so build without --check is an error)
+  build <file> [--target py|js] [-o <out>] [--line-comments] [--check] [--fast]
+                         build a .newr program into runnable Python
+                         (default --target py; js lands in M3)
   help [command]         show this help, or help for one command
   version                print the newr version
   explain <code>         explain a diagnostic code (also: --explain <code>)
@@ -75,16 +75,20 @@ the program has no errors (warnings are fine), 4 when it has errors,
            all Discord validation. The result is not verified — say so
            in the output.
 """,
-    "build": """Usage: newr build <file> [--target py|js] [--check] [--fast]
+    "build": """Usage: newr build <file> [--target py|js] [-o <out>] [--line-comments] [--check] [--fast]
 
 Build a .newr program into runnable code for one target (Python and
 TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2).
 
-M1: there are no emitters yet, so `build` without `--check` is an
-error — use `newr build --check <file>` to verify without emitting.
-`--check` runs the same pipeline as `newr check` and writes nothing.
-`--fast` parses + resolves only, skipping the full type check AND all
-Discord validation. The result is not verified.
+M2: `--target py` (the default) emits Python — one `.py` per `.newr`
+file, written next to the input (or to `-o` for the main file), plus a
+copy of the runtime module `newr_rt.py` when the program uses a
+runtime helper. `--target js` is a usage error until the JavaScript
+emitter lands in M3. `--check` runs the same pipeline as `newr check`
+and writes nothing. `--line-comments` adds `# newr:<file>:<line>`
+comments to the emitted code. `--fast` parses + resolves only,
+skipping the full type check AND all Discord validation — it cannot
+be combined with emission (use `--fast --check` to verify only).
 """,
     "version": """Usage: newr version
 
@@ -531,7 +535,9 @@ def _cmd_check(args: list[str], *, json_mode: bool,
 
 def _cmd_build(args: list[str], *, json_mode: bool,
                error_format_json: bool) -> int:
-    target = None
+    target = "py"
+    output = None
+    line_comments = False
     rest: list[str] = []
     i = 0
     while i < len(args):
@@ -542,21 +548,139 @@ def _cmd_build(args: list[str], *, json_mode: bool,
         elif arg.startswith("--target="):
             target = arg.split("=", 1)[1]
             i += 1
+        elif arg in ("-o", "--output") and i + 1 < len(args):
+            output = args[i + 1]
+            i += 2
+        elif arg.startswith("--output="):
+            output = arg.split("=", 1)[1]
+            i += 1
+        elif arg == "--line-comments":
+            line_comments = True
+            i += 1
         else:
             rest.append(arg)
             i += 1
-    if target is not None and target not in ("py", "js"):
+    if target not in ("py", "js"):
         raise _UsageError(
-            f"unknown target `{target}` (M1 targets: py, js)")
+            f"unknown target `{target}` (M2 targets: py, js)")
+    if target == "js":
+        raise _UsageError(
+            "the JavaScript emitter lands in M3 — use `--target py` "
+            "for now")
     fast = "--fast" in rest
     rest = [a for a in rest if a != "--fast"]
-    if "--check" not in rest:
+    if "--check" in rest:
+        rest = [a for a in rest if a != "--check"]
+        return _check_or_build(rest, command="build", json_mode=json_mode,
+                               error_format_json=error_format_json,
+                               fast=fast)
+    if fast:
+        # D27: --fast + emission is refused — emission needs
+        # checked types.
         raise _UsageError(
-            "newr build cannot emit yet — emitters land in M2. "
-            "Use `newr build --check <file>` to verify without emitting.")
-    rest = [a for a in rest if a != "--check"]
-    return _check_or_build(rest, command="build", json_mode=json_mode,
-                           error_format_json=error_format_json, fast=fast)
+            "`newr build --fast` cannot emit — emission needs the "
+            "full type check. Use `newr build --fast --check` to "
+            "verify only, or drop `--fast` to build.")
+    return _build_emit(rest, output=output, line_comments=line_comments,
+                       json_mode=json_mode,
+                       error_format_json=error_format_json)
+
+
+def _build_emit(args: list[str], *, output: str | None,
+                line_comments: bool, json_mode: bool,
+                error_format_json: bool) -> int:
+    """`newr build <file>` — verify, then emit Python (M2)."""
+    unknown = [a for a in args if a.startswith("-")]
+    if unknown:
+        raise _UsageError("unknown flag(s) for `newr build`: "
+                          + ", ".join(unknown))
+    positional = [a for a in args if not a.startswith("-")]
+    if len(positional) != 1:
+        raise _UsageError(
+            f"`newr build` needs exactly one .newr file "
+            f"(got {len(positional)})")
+    path = Path(positional[0])
+    try:
+        program, diagnostics, source = _run_pipeline(path, fast=False)
+    except NewrError as exc:
+        diagnostics = [exc.diagnostic]
+        try:
+            source = _read_source(path)
+        except _EnvError:
+            source = ""
+        program = None
+    errors = [d for d in diagnostics if d.is_error()]
+    get_source = _source_cache(path, source)
+    if errors or program is None:
+        # Same reporting as check (exit 4, no files written).
+        return _finish("build", path, program, diagnostics, source,
+                       json_mode=json_mode,
+                       error_format_json=error_format_json)
+    # Emit. An emitter error is a clean exit-4 diagnostic, never a
+    # traceback (the program checked clean, so this is an emitter
+    # limitation, not a user error — say so).
+    from .emitter import EmitterError, emit_program
+    try:
+        sources = {f: get_source(f) for f in program.files}
+        result = emit_program(program, main_path=str(path),
+                              sources=sources,
+                              line_comments=line_comments)
+    except EmitterError as exc:
+        diag = Diagnostic(span=Span(str(path), 0, 1), code="E4001",
+                          message=f"cannot emit this program: {exc}",
+                          help="the emitter does not support this "
+                               "construct yet — see BUILD_REPORT.md §14")
+        return _finish("build", path, program, [diag], source,
+                       json_mode=json_mode,
+                       error_format_json=error_format_json)
+    out_dir = Path(output).parent if output else path.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    main_out = (Path(output) if output
+                else path.with_suffix(".py"))
+    for name, text in result.files.items():
+        if output and name == result.main_file:
+            dest = main_out
+        else:
+            dest = main_out.parent / name
+        dest.write_text(text, encoding="utf-8")
+    if result.uses_rt:
+        # Copy compiler/newr_rt.py next to the output (D4) — read
+        # via the package so the zipapp build keeps working.
+        import importlib.resources as _res
+        try:
+            rt_text = (_res.files("compiler") / "newr_rt.py"
+                       ).read_text(encoding="utf-8")
+        except Exception:
+            rt_text = (Path(__file__).parent / "newr_rt.py"
+                       ).read_text(encoding="utf-8")
+        (main_out.parent / "newr_rt.py").write_text(
+            rt_text, encoding="utf-8")
+    if json_mode:
+        data = {"file": str(path),
+                "files": sorted(str(main_out.parent / n)
+                                for n in result.files),
+                "diagnostics": [d.to_json(get_source(d.span.file))
+                                for d in diagnostics]}
+        print(json.dumps(_envelope("build", data, diagnostics)))
+        return 0
+    warnings = [d for d in diagnostics if not d.is_error()]
+    # Report the ACTUAL destination paths (the -o path for the main
+    # file, main_out.parent / name for imports), not the source stems.
+    dests = []
+    for name in sorted(result.files):
+        if output and name == result.main_file:
+            dests.append(str(main_out))
+        else:
+            dests.append(str(main_out.parent / name))
+    if result.uses_rt:
+        dests.append(str(main_out.parent / "newr_rt.py"))
+    names = ", ".join(dests)
+    if warnings:
+        print(f"{path}: ok, {len(warnings)} warning(s) — "
+              f"wrote {names}")
+    else:
+        print(f"{path}: ok — wrote {names}")
+    return 0
 
 
 def _cmd_help(args: list[str]) -> int:

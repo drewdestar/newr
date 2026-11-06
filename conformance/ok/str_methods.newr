@@ -1,0 +1,25 @@
+# String methods (SPEC.md §12.1).
+let passed = true
+let s = "  Hello World  "
+if s.strip() != "Hello World":
+  passed = false
+if s.upper() != "  HELLO WORLD  ":
+  passed = false
+if s.lower() != "  hello world  ":
+  passed = false
+if "a,b,c".split(",").len() != 3:
+  passed = false
+if "-".join(["a", "b"]) != "a-b":
+  passed = false
+if "hello".contains("ell") != true:
+  passed = false
+if "hello".starts_with("he") != true:
+  passed = false
+if "hello".ends_with("lo") != true:
+  passed = false
+if "abc".chars().len() != 3:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

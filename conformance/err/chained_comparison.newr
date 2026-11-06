@@ -1,0 +1,7 @@
+# expect: E1001
+# Comparison operators are non-associative.
+let a = 1
+let b = 2
+let c = 3
+if a < b < c:
+  print "yes"

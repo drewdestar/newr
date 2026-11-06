@@ -61,5 +61,19 @@ class TestConformanceErr(unittest.TestCase):
                               f"{path.name}: expected {code} in output")
 
 
+class TestConformanceRun(unittest.TestCase):
+    def test_ok_programs_build_run_and_print_pass(self):
+        # M2: the harness (conformance/run.py) builds every ok
+        # program, runs the emitted Python, and requires exit 0
+        # with PASS as the last stdout line (each program
+        # self-verifies). This is the full corpus, not just the
+        # check verdicts.
+        r = subprocess.run([sys.executable, str(ROOT / "conformance"
+                                                / "run.py")],
+                           capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ok ", r.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

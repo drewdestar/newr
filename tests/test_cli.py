@@ -114,12 +114,90 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_build_without_check_is_exit_1_with_guidance(self):
+        # M2: `build` without --check now EMITS (the M1 guidance is
+        # obsolete). This test is replaced by test_build_emits_py.
+        raise unittest.SkipTest("M1-only; replaced by test_build_emits_py")
+
+    def test_build_emits_py_next_to_input(self):
         with tempfile.TemporaryDirectory() as d:
             f = write(d, "hello.newr", 'print "Hello, world!"\n')
             r = run_cli("build", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            out = Path(d) / "hello.py"
+            self.assertTrue(out.is_file())
+            self.assertIn("Hello, world!", out.read_text(encoding="utf-8"))
+            # The emitted program runs.
+            run = subprocess.run([sys.executable, str(out)],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(run.stdout, "Hello, world!\n")
+
+    def test_build_output_flag(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            out = Path(d) / "sub" / "greeting.py"
+            r = run_cli("build", str(f), "-o", str(out))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue(out.is_file())
+
+    def test_build_js_target_is_exit_1(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", "--target", "js", str(f))
             self.assertEqual(r.returncode, 1)
-            self.assertIn("--check", r.stderr)
-            self.assertIn("M2", r.stderr)
+            self.assertIn("M3", r.stderr)
+
+    def test_build_fast_emit_is_exit_1(self):
+        # D27: --fast + emission is refused (emission needs checked
+        # types).
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", "--fast", str(f))
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("--fast", r.stderr)
+
+    def test_build_type_error_exits_4_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "bad.newr", "let x: float = 5\nprint x\n")
+            r = run_cli("build", str(f))
+            self.assertEqual(r.returncode, 4)
+            self.assertFalse((Path(d) / "bad.py").exists())
+
+    def test_build_copies_runtime_when_used(self):
+        with tempfile.TemporaryDirectory() as d:
+            # int arithmetic needs the checked helpers (uses_rt).
+            f = write(d, "calc.newr",
+                      "let x: int = 2 + 3\nprint x\n")
+            r = run_cli("build", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue((Path(d) / "newr_rt.py").is_file())
+            run = subprocess.run([sys.executable, str(Path(d) / "calc.py")],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.stdout, "5\n")
+
+    def test_build_no_runtime_when_unused(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertFalse((Path(d) / "newr_rt.py").exists())
+
+    def test_build_file_import_emits_both_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "items.newr",
+                  'pub fn price(item: str) -> int:\n'
+                  '  if item == "brick":\n'
+                  '    return 118\n'
+                  '  return 0\n')
+            f = write(d, "main.newr",
+                      'import "items.newr"\nprint items.price("brick")\n')
+            r = run_cli("build", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue((Path(d) / "main.py").is_file())
+            self.assertTrue((Path(d) / "items.py").is_file())
+            run = subprocess.run([sys.executable, str(Path(d) / "main.py")],
+                                 capture_output=True, text=True, cwd=d)
+            self.assertEqual(run.stdout, "118\n", run.stderr)
 
     def test_build_unknown_target_is_exit_1(self):
         with tempfile.TemporaryDirectory() as d:

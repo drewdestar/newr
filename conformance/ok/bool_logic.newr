@@ -1,0 +1,22 @@
+# Boolean logic: and/or/not, short-circuit evaluation.
+let passed = true
+if true and true != true:
+  passed = false
+if true and false != false:
+  passed = false
+if false or true != true:
+  passed = false
+if not true != false:
+  passed = false
+if not false != true:
+  passed = false
+let x = false and (1 / 0 == 0)
+if x != false:
+  passed = false
+let y = true or (1 / 0 == 0)
+if y != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

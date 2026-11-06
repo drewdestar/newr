@@ -1,0 +1,4 @@
+# expect: E2003
+# A dict's values must all have the same type.
+let d = {"a": 1, "b": "x"}
+print d

@@ -1,0 +1,23 @@
+# Dict operations (SPEC.md §12.1): keys/get/contains, iteration
+# over keys (D18).
+let passed = true
+let d = {"a": 1, "b": 2}
+if d.get("a", 0) != 1:
+  passed = false
+if d.get("z", 0) != 0:
+  passed = false
+if d.contains("b") != true:
+  passed = false
+if d.contains("z") != false:
+  passed = false
+if d.keys().len() != 2:
+  passed = false
+let total = 0
+for k in d:
+  total = total + d.get(k, 0)
+if total != 3:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

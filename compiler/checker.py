@@ -1772,32 +1772,48 @@ class Checker:
 
     def _walk_stmts(self, stmts: list, top_level: bool = False,
                     allow_contracts: bool = False) -> None:
-        seen_non_contract = False
-        terminated = False
-        for i, st in enumerate(stmts):
-            if terminated:
-                self._warn(st.span, "W1003",
-                           "unreachable code",
-                           help="this statement can never run -- remove it, "
-                                "or move it before the `return` / `throw` / "
-                                "`break` above")
-            if isinstance(st, (A.Require, A.Ensure)):
-                if not allow_contracts or seen_non_contract or \
-                        self._return_type is None:
-                    self._error(st.span, "E2001",
-                                "`requires` / `ensures` must be the first "
-                                "statements of a function body",
-                                help="move the contract to the top of the "
-                                     "function body")
-                self._walk_contract(st)
-                if isinstance(st, A.Require):
-                    pass
-                # A contract is not a "non-contract" statement.
-            else:
-                seen_non_contract = True
-            self._walk_stmt(st)
-            if self._stmt_terminates(st):
-                terminated = True
+        # BUG-M2-1: `_in_top_level` is a flag, not a parameter —
+        # nested bodies walked from a top-level statement (an
+        # `if` / `for` / `while` body, a `try` catch ...) used to
+        # inherit it, so a `let` inside one was treated as a
+        # module-level `let`. If it shadowed an already-checked
+        # name, `_check_let_const` hit its `top_checked` early
+        # return and never checked the value at all (its
+        # `expr_type` stayed None, which the emitter then refused
+        # to emit). The flag follows the `top_level` argument of
+        # THIS walk and is restored afterwards, so a nested walk
+        # is never top-level.
+        was_top = self._in_top_level
+        self._in_top_level = top_level
+        try:
+            seen_non_contract = False
+            terminated = False
+            for i, st in enumerate(stmts):
+                if terminated:
+                    self._warn(st.span, "W1003",
+                               "unreachable code",
+                               help="this statement can never run -- remove it, "
+                                    "or move it before the `return` / `throw` / "
+                                    "`break` above")
+                if isinstance(st, (A.Require, A.Ensure)):
+                    if not allow_contracts or seen_non_contract or \
+                            self._return_type is None:
+                        self._error(st.span, "E2001",
+                                    "`requires` / `ensures` must be the first "
+                                    "statements of a function body",
+                                    help="move the contract to the top of the "
+                                         "function body")
+                    self._walk_contract(st)
+                    if isinstance(st, A.Require):
+                        pass
+                    # A contract is not a "non-contract" statement.
+                else:
+                    seen_non_contract = True
+                self._walk_stmt(st)
+                if self._stmt_terminates(st):
+                    terminated = True
+        finally:
+            self._in_top_level = was_top
 
     def _walk_contract(self, st) -> None:
         if isinstance(st, A.Ensure) and self._return_type is not None:

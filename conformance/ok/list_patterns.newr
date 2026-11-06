@@ -1,0 +1,17 @@
+# Match with list patterns (SPEC.md §9.4).
+let passed = true
+let xs = [1, 2, 3]
+let word = ""
+match xs:
+  [1, b, c]:
+    word = "one-two-three"
+  [a]:
+    word = "single"
+  _:
+    word = "other"
+if word != "one-two-three":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

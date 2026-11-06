@@ -1,0 +1,4 @@
+# expect: E2005
+# A top-level let used before its definition.
+print x
+let x = 1

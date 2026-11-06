@@ -1,0 +1,13 @@
+# Empty strings and empty interpolation.
+let passed = true
+let e = ""
+if len(e) != 0:
+  passed = false
+if not (e == ""):
+  passed = false
+if "{e}x" != "x":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

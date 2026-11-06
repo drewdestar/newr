@@ -1,0 +1,4 @@
+# expect: E2002
+# An empty list needs a type annotation.
+let xs = []
+print xs

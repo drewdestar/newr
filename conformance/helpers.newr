@@ -1,0 +1,6 @@
+# Helper file module for the conformance corpus.
+pub fn triple(n: int) -> int:
+  return n * 3
+
+pub fn greet(name: str) -> str:
+  return "Hello, {name}"

@@ -1,0 +1,22 @@
+# Mutual recursion (even/odd).
+fn is_even(n: int) -> bool:
+  if n == 0:
+    return true
+  return is_odd(n - 1)
+
+fn is_odd(n: int) -> bool:
+  if n == 0:
+    return false
+  return is_even(n - 1)
+
+let passed = true
+if is_even(10) != true:
+  passed = false
+if is_odd(7) != true:
+  passed = false
+if is_even(3) != false:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

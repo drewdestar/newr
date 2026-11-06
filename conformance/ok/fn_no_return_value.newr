@@ -1,0 +1,14 @@
+# A fn returning none, called for its side effect.
+let seen = 0
+fn bump():
+  seen = seen + 1
+
+let passed = true
+bump()
+bump()
+if seen != 2:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,26 @@
+# Nullable methods: is_some / is_none / unwrap.
+let passed = true
+let a: int? = 5
+let b: int? = none
+if a.is_some() != true:
+  passed = false
+if a.is_none() != false:
+  passed = false
+if b.is_some() != false:
+  passed = false
+if b.is_none() != true:
+  passed = false
+if a.unwrap() != 5:
+  passed = false
+let caught = false
+try:
+  let v = b.unwrap()
+  print v
+catch e:
+  caught = true
+if caught != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

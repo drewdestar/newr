@@ -1,0 +1,5 @@
+# expect: E2001
+# A return value of the wrong type.
+fn f() -> int:
+  return "x"
+print f()

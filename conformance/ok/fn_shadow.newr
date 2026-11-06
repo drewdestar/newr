@@ -1,0 +1,15 @@
+# A local shadows a module-level name without leaking.
+let x = 100
+fn get() -> int:
+  let x = 5
+  return x
+
+let passed = true
+if get() != 5:
+  passed = false
+if x != 100:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

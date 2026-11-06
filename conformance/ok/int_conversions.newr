@@ -1,0 +1,26 @@
+# Conversions: int/float/bool/str (P7, P8).
+let passed = true
+if int("42") != 42:
+  passed = false
+if int(3.7) != 3:
+  passed = false
+if float(2) != 2.0:
+  passed = false
+if bool("true") != true:
+  passed = false
+if bool("false") != false:
+  passed = false
+if bool(0) != false:
+  passed = false
+if bool(1) != true:
+  passed = false
+if str(42) != "42":
+  passed = false
+if str(true) != "true":
+  passed = false
+if str(none) != "none":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

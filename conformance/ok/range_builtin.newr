@@ -1,0 +1,23 @@
+# range() emits as a list.
+let passed = true
+let a = range(3)
+if a.len() != 3:
+  passed = false
+if a.get(0, -1) != 0:
+  passed = false
+if a.get(2, -1) != 2:
+  passed = false
+let b = range(1, 4)
+if b.len() != 3:
+  passed = false
+if b.get(0, -1) != 1:
+  passed = false
+let c = range(0, 10, 3)
+if c.len() != 4:
+  passed = false
+if c.get(3, -1) != 9:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

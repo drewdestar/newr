@@ -1,0 +1,21 @@
+# A violated `ensures` raises a runtime error (catchable).
+fn bad_double(n: int) -> int:
+  requires n > 0
+  ensures result > n
+  return n - 1
+
+let passed = true
+let caught = false
+try:
+  let v = bad_double(5)
+  print v
+catch e:
+  caught = true
+  if e.message == "":
+    passed = false
+if caught != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

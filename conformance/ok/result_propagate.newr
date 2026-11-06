@@ -1,0 +1,19 @@
+# `?` propagates a Result (D7): an Err early-returns the Err.
+fn div(a: int, b: int) -> Result[int, error]:
+  return try a / b
+
+fn half(x: int) -> Result[int, error]:
+  let h = div(10, x)?
+  return ok(h)
+
+let passed = true
+let r1 = half(2)
+if r1.unwrap() != 5:
+  passed = false
+let r2 = half(0)
+if r2.is_err() != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

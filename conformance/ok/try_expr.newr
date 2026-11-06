@@ -1,0 +1,14 @@
+# try <expr> is a value-form Result (D8).
+let passed = true
+let r1 = try 6 / 2
+if r1.is_ok() != true:
+  passed = false
+if r1.unwrap() != 3:
+  passed = false
+let r2 = try 6 / 0
+if r2.is_err() != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

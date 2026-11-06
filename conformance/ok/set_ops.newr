@@ -1,0 +1,24 @@
+# Set operations (SPEC.md §12.1): add/remove/contains.
+let passed = true
+let s = set([1, 2, 2, 3])
+if s.contains(2) != true:
+  passed = false
+if s.contains(9) != false:
+  passed = false
+s.add(4)
+if s.contains(4) != true:
+  passed = false
+s.remove(1)
+if s.contains(1) != false:
+  passed = false
+let caught = false
+try:
+  s.remove(99)
+catch e:
+  caught = true
+if caught != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

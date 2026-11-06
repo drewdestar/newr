@@ -1,0 +1,22 @@
+# Division by zero is a runtime error (int and float).
+let passed = true
+let caught_int = false
+let caught_float = false
+try:
+  let x = 1 / 0
+  print x
+catch e:
+  caught_int = true
+try:
+  let y = 1.0 / 0.0
+  print y
+catch e:
+  caught_float = true
+if caught_int != true:
+  passed = false
+if caught_float != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

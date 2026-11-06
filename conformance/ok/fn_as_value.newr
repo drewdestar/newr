@@ -1,0 +1,18 @@
+# A function used as a value (D29: a module fn becomes a
+# lambda; a user fn emits its def name).
+fn double(n: int) -> int:
+  return n * 2
+
+fn apply(f: fn(int) -> int, x: int) -> int:
+  return f(x)
+
+let passed = true
+if apply(double, 21) != 42:
+  passed = false
+let inc = fn(n: int) -> int: n + 1
+if apply(inc, 41) != 42:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

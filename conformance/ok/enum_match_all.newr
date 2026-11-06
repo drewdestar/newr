@@ -1,0 +1,24 @@
+# An enum match covering every variant needs no wildcard.
+enum Traffic:
+  Red
+  Yellow
+  Green
+
+fn go(light: Traffic) -> bool:
+  match light:
+    Traffic.Red:
+      return false
+    Traffic.Yellow:
+      return false
+    Traffic.Green:
+      return true
+
+let passed = true
+if go(Traffic.Green) != true:
+  passed = false
+if go(Traffic.Red) != false:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

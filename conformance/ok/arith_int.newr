@@ -1,0 +1,26 @@
+# Integer arithmetic: checked ops, truncating div, dividend-sign mod.
+let passed = true
+if 2 + 3 != 5:
+  passed = false
+if 10 - 4 != 6:
+  passed = false
+if 3 * 4 != 12:
+  passed = false
+if 7 / 2 != 3:
+  passed = false
+if -7 / 2 != -3:
+  passed = false
+if 7 % 3 != 1:
+  passed = false
+if -7 % 3 != -1:
+  passed = false
+if 2 ** 10 != 1024:
+  passed = false
+if 5 == 5 and 5 != 6 and 5 < 6 and 6 > 5 and 5 <= 5 and 5 >= 5:
+  passed = passed
+else:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,21 @@
+# A struct returned from a fn and passed to a fn.
+struct Point:
+  x: int
+  y: int
+
+fn origin() -> Point:
+  return Point(x: 0, y: 0)
+
+fn move(p: Point, dx: int, dy: int) -> Point:
+  return Point(x: p.x + dx, y: p.y + dy)
+
+let passed = true
+let p = move(origin(), 3, 4)
+if p.x != 3:
+  passed = false
+if p.y != 4:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

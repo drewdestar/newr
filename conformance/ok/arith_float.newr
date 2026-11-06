@@ -1,0 +1,14 @@
+# Float arithmetic: f64, float div, fmod, pow.
+let passed = true
+if 1.5 + 2.5 != 4.0:
+  passed = false
+if 7.0 / 2.0 != 3.5:
+  passed = false
+if 2.0 ** 3.0 != 8.0:
+  passed = false
+if 0.1 + 0.2 == 0.3:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

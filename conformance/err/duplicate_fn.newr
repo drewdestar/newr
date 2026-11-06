@@ -1,0 +1,7 @@
+# expect: E3003
+# Two functions with the same name.
+fn f() -> int:
+  return 1
+fn f() -> int:
+  return 2
+print f()

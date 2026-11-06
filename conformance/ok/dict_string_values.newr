@@ -1,0 +1,13 @@
+# A dict with string values.
+let passed = true
+let d = {"en": "hello", "id": "halo"}
+if d.get("en", "") != "hello":
+  passed = false
+if d.get("id", "") != "halo":
+  passed = false
+if d.get("fr", "none") != "none":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

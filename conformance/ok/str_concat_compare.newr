@@ -1,0 +1,16 @@
+# String concatenation and comparison.
+let passed = true
+if "a" + "b" != "ab":
+  passed = false
+if not ("abc" == "abc"):
+  passed = false
+if not ("a" < "b"):
+  passed = false
+if not ("b" > "a"):
+  passed = false
+if len("abc") != 3:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,4 @@
+# expect: E3007
+# `t` is a builtin name and cannot be redefined.
+let t = 1
+print t

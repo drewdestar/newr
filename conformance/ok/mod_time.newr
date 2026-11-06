@@ -1,0 +1,14 @@
+# The time module: now() is an int, format() is UTC (P4).
+let passed = true
+let now = time.now()
+if now < 1700000000:
+  passed = false
+let s = time.format(now, "%Y-%m-%d")
+if len(s) != 10:
+  passed = false
+if s.split("-").len() != 3:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,20 @@
+# Interpolation: every type renders by its str() rule (P8).
+let passed = true
+let n = 42
+let f = 2.5
+let b = true
+let s = "hi"
+if "n={n}" != "n=42":
+  passed = false
+if "f={f}" != "f=2.5":
+  passed = false
+if "b={b}" != "b=true":
+  passed = false
+if "s={s}" != "s=hi":
+  passed = false
+if "{n + 1} and {s.upper()}" != "43 and HI":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,12 @@
+# A file module imported by path (D13, D39).
+import "../helpers.newr"
+
+let passed = true
+if helpers.triple(7) != 21:
+  passed = false
+if helpers.greet("Ada") != "Hello, Ada":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

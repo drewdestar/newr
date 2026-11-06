@@ -1,0 +1,24 @@
+# Out-of-range indexing is a runtime error (SPEC.md §9.2),
+# catchable with try/catch. Negative indices never wrap (G-M2-5).
+let passed = true
+let xs = [1, 2, 3]
+let caught_high = false
+let caught_neg = false
+try:
+  let v = xs[3]
+  print v
+catch e:
+  caught_high = true
+try:
+  let v = xs[-1]
+  print v
+catch e:
+  caught_neg = true
+if caught_high != true:
+  passed = false
+if caught_neg != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

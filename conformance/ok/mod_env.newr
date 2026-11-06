@@ -1,0 +1,15 @@
+# The env module: args is sys.argv 1:1, get reads the env.
+let passed = true
+let args = env.args
+if args.len() < 1:
+  passed = false
+let missing = env.get("NEWR_CONFORMANCE_NO_SUCH_VAR_XYZ")
+if missing.is_none() != true:
+  passed = false
+let with_default = env.get("NEWR_CONFORMANCE_NO_SUCH_VAR_XYZ", "dflt")
+if with_default != "dflt":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

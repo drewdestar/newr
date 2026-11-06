@@ -1,0 +1,21 @@
+# for over a list, a string, and a set.
+let passed = true
+let total = 0
+for x in [1, 2, 3, 4]:
+  total = total + x
+if total != 10:
+  passed = false
+let letters = ""
+for c in "abc":
+  letters = letters + c
+if letters != "abc":
+  passed = false
+let count = 0
+for v in set([1, 2, 3]):
+  count = count + 1
+if count != 3:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

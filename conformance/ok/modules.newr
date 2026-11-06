@@ -1,7 +1,10 @@
-# Named modules without an import (SPEC.md §12.2) + int64 minimum.
-let root = math.sqrt(2.0)
-let day = time.format(0, "%Y-%m-%d")
-let minimum = -9223372036854775808
-print root
-print day
-print minimum
+# Modules (SPEC.md §12): a named module used without an import.
+let passed = true
+if math.sqrt(9.0) != 3.0:
+  passed = false
+if math.floor(2.7) != 2:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

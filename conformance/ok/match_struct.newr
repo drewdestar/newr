@@ -1,0 +1,29 @@
+# Match on a struct pattern.
+struct Point:
+  x: int
+  y: int
+
+fn where_is(p: Point) -> str:
+  match p:
+    Point(x: 0, y: 0):
+      return "origin"
+    Point(x: 0, y: y):
+      return "on y axis"
+    Point(x: x, y: 0):
+      return "on x axis"
+    _:
+      return "elsewhere"
+
+let passed = true
+if where_is(Point(x: 0, y: 0)) != "origin":
+  passed = false
+if where_is(Point(x: 0, y: 5)) != "on y axis":
+  passed = false
+if where_is(Point(x: 7, y: 0)) != "on x axis":
+  passed = false
+if where_is(Point(x: 1, y: 1)) != "elsewhere":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

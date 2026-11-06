@@ -1,0 +1,23 @@
+# Precedence traps: -a + b is -(a + b) in newr (unlike Python);
+# -a ** 2 is -(a ** 2); not a == b is not (a == b);
+# ** is right-associative.
+let passed = true
+let a = 2
+let b = 3
+if -a + b != -5:
+  passed = false
+if -a ** 2 != -4:
+  passed = false
+let nb = not a == b
+if nb != true:
+  passed = false
+if 2 ** 3 ** 2 != 512:
+  passed = false
+if 1 + 2 * 3 != 7:
+  passed = false
+if (1 + 2) * 3 != 9:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

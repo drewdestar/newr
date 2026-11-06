@@ -1,0 +1,22 @@
+# A struct holding a struct and a list.
+struct Point:
+  x: int
+  y: int
+
+struct Rect:
+  top_left: Point
+  bottom_right: Point
+  tags: list[str]
+
+let passed = true
+let r = Rect(top_left: Point(x: 0, y: 0), bottom_right: Point(x: 3, y: 4), tags: ["a", "b"])
+if r.bottom_right.x != 3:
+  passed = false
+if r.tags.len() != 2:
+  passed = false
+if r.tags.get(1, "") != "b":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"
