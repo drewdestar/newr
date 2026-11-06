@@ -108,9 +108,10 @@ task every 1h:
 """
 
 
-def emit_shop_text():
-    """Emit SHOP from a real temp dir so its `import \"shop_items.newr\"`
-    resolves (the shop_items source is copied from examples/)."""
+def _emit_shop_result():
+    """Emit SHOP from a real temp dir so its `import "shop_items.newr"`
+    resolves (the shop_items source is copied from examples/).
+    Returns the full EmitResult (all emitted files)."""
     root = Path(__file__).resolve().parent.parent
     items = (root / "examples" / "shop_items.newr").read_text(encoding="utf-8")
     with tempfile.TemporaryDirectory() as d:
@@ -129,9 +130,58 @@ def emit_shop_text():
             str(main): SHOP,
             str(Path(d) / "shop_items.newr"): items,
         }
-        result = emit_program(resolved.program, main_path=str(main),
-                              sources=sources)
-        return result.files[result.main_file]
+        return emit_program(resolved.program, main_path=str(main),
+                            sources=sources)
+
+
+def _run_shop_bot(scenario):
+    """Emit SHOP into a temp dir, import it there, and run
+    ``scenario(bot)`` (an async function taking the Bot instance).
+
+    The temp dir is the CWD while the scenario runs, so the
+    `economy.db` file lands there instead of in the repo. The db
+    is closed before the dir is removed.
+    """
+    import importlib.util
+    import os
+    files = _emit_shop_result().files
+    root = Path(__file__).resolve().parent.parent
+    rt = (root / "compiler" / "newr_rt.py").read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as d:
+        for name, text in files.items():
+            (Path(d) / name).write_text(text, encoding="utf-8")
+        (Path(d) / "newr_rt.py").write_text(rt, encoding="utf-8")
+        sys.path.insert(0, d)
+        old_cwd = os.getcwd()
+        os.chdir(d)
+        try:
+            spec = importlib.util.spec_from_file_location(
+                "shop_economy_test", Path(d) / "shop.py")
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules["shop_economy_test"] = mod
+            spec.loader.exec_module(mod)
+
+            async def _wrapped():
+                bot = mod.bot
+                try:
+                    return await scenario(bot)
+                finally:
+                    if bot.economy_db is not None:
+                        await bot.economy_db.close()
+            return asyncio.run(_wrapped())
+        finally:
+            os.chdir(old_cwd)
+            sys.path.remove(d)
+            sys.modules.pop("shop_economy_test", None)
+            sys.modules.pop("shop_items", None)
+            sys.modules.pop("newr_rt", None)
+
+
+def emit_shop_text():
+    """Emit SHOP from a real temp dir so its `import \"shop_items.newr\"`
+    resolves (the shop_items source is copied from examples/)."""
+    result = _emit_shop_result()
+    return result.files[result.main_file]
 
 
 class TestBotStructure(unittest.TestCase):
@@ -360,6 +410,22 @@ class TestBotStore(unittest.TestCase):
         self.assertIn('await bot.economy_credit(str(interaction.user.id), neg(price), key=f"buy-{interaction.user.id}-{item}-{amount}")',
                       text)
 
+    def test_economy_uses_lock_and_explicit_transactions(self):
+        # M2 evaluation must-fix #2: the economy ops must be atomic
+        # — one explicit transaction per op, serialised by a lock
+        # (aiosqlite runs all ops in one thread, so a second
+        # coroutine's BEGIN IMMEDIATE would block it).
+        text = emit_shop_text()
+        self.assertIn("import asyncio", text)
+        self.assertIn("self.economy_lock = None", text)
+        self.assertIn("self.economy_lock = asyncio.Lock()", text)
+        self.assertIn("BEGIN IMMEDIATE", text)
+        self.assertIn("ROLLBACK", text)
+        self.assertIn("async with self.economy_lock:", text)
+        # No more two separate _apply calls for one transfer.
+        self.assertNotIn("await self._economy_apply(from_id, -amount",
+                         text)
+
 
 class TestBotComponents(unittest.TestCase):
     def test_button_view(self):
@@ -560,6 +626,115 @@ class TestBotMockRoundTrip(unittest.TestCase):
                                "hello_bot_chan_mock")
         self.assertEqual(mod._channel_text(_FakeChannel()), "#general")
         self.assertEqual(mod._channel_text(None), "")
+
+    def test_transfer_fresh_replay_and_insufficient(self):
+        async def scenario(bot):
+            await bot._economy_connect()
+            await bot.economy_credit("alice", 100)
+            self.assertTrue(await bot.economy_transfer(
+                "alice", "bob", 50, key="K1"))
+            self.assertEqual(await bot.economy_balance("alice"), 50)
+            self.assertEqual(await bot.economy_balance("bob"), 50)
+            # Replay: same key is a no-op, still success.
+            self.assertTrue(await bot.economy_transfer(
+                "alice", "bob", 50, key="K1"))
+            self.assertEqual(await bot.economy_balance("alice"), 50)
+            self.assertEqual(await bot.economy_balance("bob"), 50)
+            # Insufficient: no money moves, returns False.
+            self.assertFalse(await bot.economy_transfer(
+                "alice", "bob", 60, key="K2"))
+            self.assertEqual(await bot.economy_balance("alice"), 50)
+            self.assertEqual(await bot.economy_balance("bob"), 50)
+        _run_shop_bot(scenario)
+
+    def test_transfer_without_key_is_atomic(self):
+        async def scenario(bot):
+            await bot._economy_connect()
+            await bot.economy_credit("alice", 100)
+            self.assertTrue(await bot.economy_transfer("alice", "bob", 40))
+            self.assertEqual(await bot.economy_balance("alice"), 60)
+            self.assertEqual(await bot.economy_balance("bob"), 40)
+        _run_shop_bot(scenario)
+
+    def test_transfer_crash_between_legs_then_retry_heals(self):
+        # M2 evaluation must-fix #2: seed alice 100, simulate a
+        # crash between the two legs (out-leg committed, in-leg
+        # never ran), then retry — the retry must HEAL the transfer
+        # (credit bob the missing 50), not report success on a
+        # half-done transfer. Total money is conserved (100).
+        async def scenario(bot):
+            await bot._economy_connect()
+            await bot.economy_credit("alice", 100)
+            async with bot.economy_db.execute(
+                    "INSERT INTO balances (user, balance) VALUES (?, ?) "
+                    "ON CONFLICT(user) DO UPDATE SET balance = "
+                    "balance + excluded.balance", ("alice", -50)):
+                pass
+            async with bot.economy_db.execute(
+                    "INSERT INTO ledger (user, amount, key, created_at) "
+                    "VALUES (?, ?, ?, ?)", ("alice", -50, "K:out", 0)):
+                pass
+            await bot.economy_db.commit()
+            self.assertTrue(await bot.economy_transfer(
+                "alice", "bob", 50, key="K"))
+            self.assertEqual(await bot.economy_balance("alice"), 50)
+            self.assertEqual(await bot.economy_balance("bob"), 50)
+            # A second retry is an idempotent no-op.
+            self.assertTrue(await bot.economy_transfer(
+                "alice", "bob", 50, key="K"))
+            self.assertEqual(await bot.economy_balance("alice"), 50)
+            self.assertEqual(await bot.economy_balance("bob"), 50)
+        _run_shop_bot(scenario)
+
+    def test_transfer_with_in_leg_poisoned_then_retry_heals(self):
+        # The other poisoning: a synthetic `K:in` row (amount 0)
+        # with no money moved. The retry must still move the full
+        # 50 in both legs.
+        async def scenario(bot):
+            await bot._economy_connect()
+            await bot.economy_credit("alice", 100)
+            async with bot.economy_db.execute(
+                    "INSERT INTO ledger (user, amount, key, created_at) "
+                    "VALUES (?, ?, ?, ?)", ("bob", 0, "K:in", 0)):
+                pass
+            await bot.economy_db.commit()
+            self.assertTrue(await bot.economy_transfer(
+                "alice", "bob", 50, key="K"))
+            self.assertEqual(await bot.economy_balance("alice"), 50)
+            self.assertEqual(await bot.economy_balance("bob"), 50)
+        _run_shop_bot(scenario)
+
+    def test_concurrent_debits_cannot_overdraw(self):
+        # Two concurrent debits of 60 against a balance of 100:
+        # exactly one succeeds; the balance ends at 40, never -20
+        # (the balance check is inside the transaction, and the
+        # lock serialises the ops).
+        async def scenario(bot):
+            await bot._economy_connect()
+            await bot.economy_credit("alice", 100)
+            results = await asyncio.gather(
+                bot.economy_debit("alice", 60, key="D1"),
+                bot.economy_debit("alice", 60, key="D2"))
+            self.assertEqual(sorted(results), [False, True])
+            self.assertEqual(await bot.economy_balance("alice"), 40)
+        _run_shop_bot(scenario)
+
+    def test_credit_idempotent_on_key(self):
+        async def scenario(bot):
+            await bot._economy_connect()
+            await bot.economy_credit("alice", 100, key="C1")
+            await bot.economy_credit("alice", 100, key="C1")
+            self.assertEqual(await bot.economy_balance("alice"), 100)
+        _run_shop_bot(scenario)
+
+    def test_debit_replay_returns_true_without_double_debit(self):
+        async def scenario(bot):
+            await bot._economy_connect()
+            await bot.economy_credit("alice", 100)
+            self.assertTrue(await bot.economy_debit("alice", 30, key="D1"))
+            self.assertTrue(await bot.economy_debit("alice", 30, key="D1"))
+            self.assertEqual(await bot.economy_balance("alice"), 70)
+        _run_shop_bot(scenario)
 
 
 if __name__ == "__main__":

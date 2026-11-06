@@ -1046,6 +1046,18 @@ question, the pin says so (the research asked; the spec had decided).
   the checker (deferred-execution exemption) but fails at runtime
   with `NameError` — the checker should narrow that exemption; filed
   as a limitation in §14.3.)
+  **CORRECTION 7 Nov 2026 (M2 fix round, item 1): the two-phase
+  layout is GONE.** It silently computed the wrong value whenever
+  an assignment sat between two lets (the evaluation's repro
+  printed `1` instead of `5`), violating SPEC §8. The emitter now
+  emits structs/enums/functions first (definitions are hoisted — a
+  fn body reads module globals at call time), then ALL top-level
+  statements in file order. The D11 rationale (fn bodies reading
+  later lets) is preserved by the defs-first order, not by
+  hoisting lets. The companion gap is closed by fix-round item 3
+  (the resolver now rejects a top-level call to a fn that reads a
+  later let), so the two fixes agree: no program can observe a
+  let before its declaration, by any path the front end accepts.
 - **D12 — `match` lowering.** `if`/`elif` chain over a
   `_newr_m0` temp holding the scrutinee (evaluated once).
   Enum/struct patterns → `isinstance` + field bindings at the arm
@@ -1200,17 +1212,21 @@ follow-up pass (or M6 tooling).
 - **G-M2-1 — `?` operand/return-kind mismatch is accepted**
   (D30). The checker should E2001 a `Propagate` whose operand kind
   (`Result` vs nullable) does not match the enclosing function's
-  return kind.
+  return kind. **RESOLVED 7 Nov 2026 (M2 fix round, item 4).**
 - **G-M2-2 — `?.` + nullable method returns a non-nullable type**
   (D31). `v?.unwrap()` / `v?.is_some()` should type as `T?` /
-  `bool?`; the checker returns `T` / `bool`.
+  `bool?`; the checker returns `T` / `bool`. **RESOLVED 7 Nov 2026
+  (M2 fix round, item 5).**
 - **G-M2-3 — Top-level `let` whose RHS calls a function reading a
   *later* `let` is accepted but fails at runtime with `NameError`**
   (D11). The checker's deferred-execution exemption should not
-  cover a top-level `let` RHS.
+  cover a top-level `let` RHS. **RESOLVED 7 Nov 2026 (M2 fix round,
+  item 3 — in the resolver, which owns E2005, not the checker).**
 - **G-M2-4 — A user variable named `_newr_*` collides with
   emitter temps** (D20). The checker does not forbid the prefix;
-  the emitter documents it as reserved.
+  the emitter documents it as reserved. **RESOLVED 7 Nov 2026 (M2
+  fix round, nice-to-have: the resolver's `_declare` rejects
+  `_newr_*` names with E3001).**
 - **G-M2-5 — Negative list index: RESOLVED 7 Nov.** SPEC §9.2 says
   out-of-range indexing is a runtime error and §1.1 forbids silent
   behavior, so a negative index is out of range (valid indices are
@@ -1220,7 +1236,10 @@ follow-up pass (or M6 tooling).
   "IndexError"). Python's wrap-around is never emitted.
 - **G-M2-6 — `?` on a nullable `Result` has no defined meaning**
   (D30). The emitter refuses it with `EmitterError` (unwrap it
-  first, then propagate the `Result`).
+  first, then propagate the `Result`). **Checker side RESOLVED 7 Nov
+  2026 (M2 fix round, item 4): the checker now E2001s it too, so
+  the disagreement is closed from both ends; the emitter's refusal
+  stays as defense-in-depth.**
 
 ### 14.5 Front-end bugs found and fixed while building M2
 
@@ -1469,25 +1488,30 @@ benchmark exists for any transpiler).
   efficient — it matches a hand-written program using the same
   helpers (0.93×). This is a design cost, not an emitter bug.
 - **B6b shop economy (1,000 credits, aiosqlite, commit per call):
-  generated 676.2 ms ± 85.4; hand-written 358.3 ms ± 39.2; ratio
-  1.89 (exceeds the 1.20 flag threshold).** Both print the final
+  generated 718.6 ms ± 79.8; hand-written 583.5 ms ± 30.5; ratio
+  1.23 (just over the 1.20 flag threshold).** Both print the final
   balance 1000. The 10,000-transaction plan was reduced to 1,000:
   per-call commit fsync dominates and 10k took >4 min; 1k still
-  measures the code path. The gap is NOT yet explained: the SQL
-  is the same shape (INSERT balance + INSERT ledger + commit per
-  call); the generated path adds `int(time.time())`, a
-  `str(user_id)` conversion, and one extra awaited wrapper call
-  per credit — none of which should cost 1.89×. Variance is high
-  (±85 ms), so fsync jitter is part of it. Follow-up for M3 or
-  later: profile the economy path (per-call breakdown) and, if
-  the gap is real, reduce the per-call overhead. Recorded here
-  rather than hidden.
+  measures the code path. CORRECTED 7 Nov 2026 (M2 fix #6): the
+  published 1.89 was a benchmark-methodology artifact — the
+  generated driver imports the whole shop bot (`import discord`,
+  ~300-700 ms one-time) while the hand-written driver imported
+  only aiosqlite (~78 ms). The hand-written driver now imports
+  discord too, so the comparison measures the economy loop, not
+  interpreter startup (re-measured B6b only, 10 runs, warmup 1;
+  raw JSON in benchmarks/raw/b6b_shop_*.json). The remaining 1.23
+  is the honest price of the atomicity template (M2 fix #2): a
+  lock acquire + explicit BEGIN IMMEDIATE / COMMIT per credit,
+  vs the hand-written plain commit() — about 0.14 ms extra per
+  credit. The cProfile loop-only check (evaluator, old template)
+  was 1.07×; the new template was not re-profiled in isolation.
 - **B7 peak RSS** (Python `resource.ru_maxrss`; `/usr/bin/time`
   is not on this VM): compile (shop) 17.5 MB; run (hello)
   11.1 MB. Small.
 - **B8 parity:** startup 1.13 ✓; loop 2.54 (flagged — inherent
-  checked-int cost, see B6); shop economy 1.89 (flagged —
-  unexplained, see B6b); hello size 0.64 ✓; loop size 0.83 ✓.
+  checked-int cost, see B6); shop economy 1.23 (flagged — the
+  atomicity template's per-call cost, see B6b); hello size 0.64 ✓;
+  loop size 0.83 ✓.
 
 ### 14.9 CI emitter job (7 Nov)
 
@@ -1518,3 +1542,321 @@ copied). Verified: `examples/hello.newr: ok — wrote
 /tmp/hello_cli2.py`; `examples/shop.newr: ok, 3 warning(s) —
 wrote /tmp/shop_cli2.py, /tmp/shop_items.py, /tmp/newr_rt.py`.
 Suite stays 637 green after the fix.
+
+## 15. M2 fix round — cold-evaluation must-fix items (7 Nov 2026)
+
+The cold evaluation after M2 returned NEEDS FIXES with 6 must-fix
+items. All 6 are fixed here, TDD + one red-check per fix, suite
+green throughout. Baseline before this round: 637 tests (5
+skipped), conformance 68 ok + 22 err. After: **675 tests
+(5 skipped)** — 38 new unit tests — conformance **69 ok + 25 err**.
+The shop golden changed (item 2's economy template + the
+`asyncio`/`types` import grouping) and was regenerated with
+`--bless` after a line-by-line diff review, never hand-edited.
+
+### 15.1 Item 1 — Top-level statements execute in file order (SPEC §8)
+
+Repro: `let x = 1` / `x = 5` / `let y = x` / `print y` printed `1`,
+must print `5`. Root cause: `_emit_general_file`
+(`compiler/emitter.py`) split top-level statements into `lets` and
+`others` and emitted all lets first (D11's two-phase layout), so a
+`let` RHS saw a `let`'s initial value, not a value a preceding
+assignment wrote. Fix: emit structs/enums/functions first
+(definitions are hoisted — a fn body reads module globals at call
+time), then ALL top-level statements in file order. The bot emitter
+(`_emit_bot_file`) emits no top-level statements, so item 1 does
+not apply to bots. D11 is corrected in place above (the two-phase
+layout is gone); the D11 rationale (fn bodies reading later lets)
+is preserved by the defs-first order, not by hoisting lets.
+Tests: `tests/test_emitter.py::TestTopLevelOrder` (5 tests:
+assignment between lets, let RHS reading an earlier assignment's
+value, fn call after an assignment seeing the new value, print
+before a fn declaration still works, struct declared after the
+let using it) + conformance `ok/toplevel_order.newr`. Red-check:
+revert to the two-phase layout → exactly the 2 order-sensitive
+tests fail; restore byte-identical (sha256 `dab0d15c…`).
+
+### 15.2 Item 2 — `economy.transfer` is NOT atomic (SPEC §14)
+
+Repro (live, venv python): seed alice 100; simulate a crash
+between the two legs (out-leg committed: alice 50 + `"K:out"` in
+the ledger; in-leg never ran); retry `transfer(alice→bob, 50,
+key="K")` returned `True` with alice 50, bob 0 — 50 gold destroyed,
+success reported. A second poisoning (a synthetic `K:in` row with
+amount 0, no money moved) made the old code return `True` without
+moving any money. Root causes: the two legs were two separate
+`_economy_apply` calls, each with its own commit; the replay guard
+(`key:out OR key:in` present → return True) conflated "out-leg
+seen" with "transfer done". Related holes in `_economy_apply`:
+the balance check sat outside the transaction (concurrent debits
+could overdraw — TOCTOU), and no rollback if the ledger INSERT
+failed (a later call's `commit()` could commit the partial
+transaction). Fix (`compiler/emitter.py`, store template only —
+no language change): one `asyncio.Lock` per store (created in
+`_{name}_connect`, `None` in `__init__`), held across every store
+method — the lock is required because aiosqlite runs all ops in
+one thread, so a second coroutine's `BEGIN IMMEDIATE` would block
+that thread until the busy timeout, and a concurrent read would
+see uncommitted partial state. The lock is not reentrant: no
+economy method calls another while holding it (`credit` delegates
+to `_apply` without taking it). Each op is one explicit
+`BEGIN IMMEDIATE` … `COMMIT` with `ROLLBACK` on any exception.
+`debit` inlines its single leg (it does not call `_apply`, which
+would nest a transaction) and checks the balance inside the
+transaction. `transfer` inlines both legs and heals on retry:
+each leg is topped up to its intended total from the amounts
+actually in the ledger (not just presence — a row that merely
+exists with amount 0 heals the full leg), clamped to
+`[0, amount]`; the leg INSERTs upsert on the key (`ON
+CONFLICT(key) DO UPDATE SET amount = ledger.amount +
+excluded.amount`) so a poison row is topped up instead of
+colliding with the UNIQUE constraint; a fully-applied transfer is
+a no-op returning `True`. The debit side was already authorised
+at the original attempt, so the remaining debit is applied
+unconditionally — refusing would leave money destroyed.
+`get`/`set`/`delete` take the same lock, so a concurrent `set`'s
+`commit()` cannot commit a partial economy transaction.
+Tests: `tests/test_emitter_bot.py::TestBotStore.
+test_economy_uses_lock_and_explicit_transactions` (structure:
+`import asyncio`, lock creation, `BEGIN IMMEDIATE`, `ROLLBACK`,
+no two-`_apply` transfer) + `TestBotMockRoundTrip` (7 live
+scenarios under the venv python, via a new `_run_shop_bot`
+helper that emits SHOP into a temp dir and imports it there):
+fresh transfer + replay + insufficient funds, transfer without
+a key, crash-between-legs then retry heals (50/50, total 100,
+second retry a no-op), in-leg-poisoned then retry heals (50/50),
+concurrent debits cannot overdraw (two `debit(60)` against 100 →
+exactly one `True`, balance 40), credit idempotent on a key,
+debit replay returns `True` without a double debit. The golden
+`goldens/py/shop.py` changed and was regenerated with `--bless`
+after a line-by-line diff review (one defect caught in review: a
+comment edit left a dangling sentence fragment in the transfer
+method — fixed in the template before blessing). Red-check:
+revert the emitter template → the structure test + the 3
+behavioural tests (crash×2, concurrent debits) fail; restore
+byte-identical (sha256 `e33da68a…`).
+
+### 15.3 Item 3 — Top-level `let` RHS transitively reading a LATER `let` (G-M2-3)
+
+Repro: `fn getx() -> int: return x` / `let a = getx()` / `let x
+= 42` / `print a` — check ok, build ok, run died exit 1 with a
+raw `NameError: name 'x' is not defined`. Correction to the
+brief's file pointer: E2005 lives in `compiler/resolver.py`, not
+the checker (the resolver's docstring says so: name resolution is
+where scope order is known). Mechanism: `_resolve_fn` runs for all
+fns BEFORE the top-level walk; `_top_level_pending` is set only
+around the top-level walk; fn/lambda/handler bodies are exempt
+(deferred execution). Fix: while resolving a module fn, record
+which module-scope lets it reads / writes directly and which
+module fns it calls (reads via `_resolve_name`, writes via
+`_resolve_assign_target`, calls via the `Call` branch); reads and
+writes inside a nested lambda are NOT recorded (a lambda body may
+escape and run later — `_lambda_depth` tracks nesting); after all
+fns resolve, compute the transitive closure over the call graph
+(fixpoint, handles mutual recursion); during the top-level walk,
+a `Call` whose callee is a module fn whose transitive read/write
+set intersects the still-pending lets is E2005 at the call name
+("function `getx` reads `x` before its definition", help: move
+the `let` above the call, or the call after the `let`). The check
+is skipped in deferred scopes and when no walk is running, so
+handlers (which run after module initialisation) and fn bodies
+are unaffected. A write is treated as a use: calling a fn that
+assigns to a later let early would silently lose the assignment
+(the later `let` re-initialises the name). Tests:
+`tests/test_stress_fixes.py::TestTopLevelUseBeforeDef` (9 new:
+direct/indirect/mutual-recursion reads, print and `if` call
+sites, write-only fn, call-after-let ok, never-called ok,
+handler calling the fn ok) + conformance
+`err/fn_reads_later_let.newr`. Known limitations (recorded, not
+fixed — alias analysis is out of scope): a call through a local
+holding a fn (`let h = getx; h()`) is not tracked; a lambda
+defined-and-called at top level reading a later let is not
+tracked (IIFE does not parse as a call, so the common shape does
+not exist). Red-check: revert the resolver change → exactly the
+6 E2005-expecting tests fail; restore byte-identical (sha256
+`c9bc3443…`).
+
+### 15.4 Item 4 — `?` kind mismatch must be E2001 at check time, not E4001 at build (G-M2-1 / D30)
+
+Repro: `fn f() -> Result[int, error]` containing `let w = v?`
+where `v: int?` — check ok, build exit 4 E4001 ("the checker
+should have rejected this"). Fix (`compiler/checker.py`,
+`_synth_Propagate`): mirror the emitter's `_propagate_unwrapped`
+kind rule exactly. A `Result` operand (non-nullable) needs a
+`Result`-returning function; a nullable operand (non-`Result`)
+needs a nullable-returning function; a nullable `Result` operand
+fails both rules (G-M2-6, also E2001 now — the disagreement is
+closed from both ends, the emitter's refusal stays as
+defense-in-depth); a handler returns nothing, so `?` there just
+exits the handler (a bare `return`) and either kind is allowed.
+`_synth_Lambda` now saves/restores `_in_handler = False` — a
+lambda is a function boundary (the emitter's lambda `_fn_ctx`
+entry has `in_handler: False`), so `?` inside a lambda in a
+handler is judged against the lambda's own return type, never
+the enclosing handler; without this the handler branch would
+have created a NEW check/build disagreement. Tests:
+`tests/test_checker.py::TestResultAndPropagate` (8 new: the two
+mismatch directions, nullable-`Result` into both return kinds,
+nullable-into-nullable ok, `?` in a handler with both operand
+kinds ok, `?` in a lambda in a handler is E2001) + conformance
+`err/propagate_kind_mismatch.newr` and
+`err/propagate_kind_mismatch_rev.newr`. The old
+`tests/test_emitter.py::test_propagate_mismatched_kind_is_emitter_error`
+pinned the E4001 behaviour; it is now a defense-in-depth test
+(resolve WITHOUT the checker, emit, assert `EmitterError` — both
+mismatch directions). Red-check: revert the checker change →
+6 failures in `TestResultAndPropagate` (4 kind mismatches + 2
+handler-ok tests); restore byte-identical (sha256 `0aa1bfaa…`).
+
+### 15.5 Item 5 — `?.` on nullable methods must type as nullable (G-M2-2 / D31)
+
+Repro: `let v: int? = none` then `v?.unwrap()`, `v?.is_some()`,
+`v?.is_none()` — all three check ok, build exit 4 E4001.
+(`?.` on ordinary methods was already correct: `xs?.len()` on
+`list[int]?` yields `int?`.) Fix, checker
+(`compiler/checker.py`, `_call_member`): the nullable-methods
+branch now wraps the result in `nullable_of` when the call is
+optional (`?.`); non-optional `.unwrap()`/`.is_some()`/`.is_none()`
+keep their plain types. `?.unwrap()` on a nullable `Result`
+resolves `.unwrap()` against the INNER type (the receiver mapping
+maps `T` to the whole stripped type, so a naive wrap would give
+`Result[int, error]?`): result is `nullable_of` the Result's
+value type (`int?`). Fix, emitter (`compiler/emitter.py`):
+inside an `opt_chain` lambda the receiver is the STRIPPED inner
+type (D38), so `_v.is_some()` on `_v: int` hit "int has no method
+is_some" (E4001). `_emit_method_call` now has a fallback AFTER
+the `Result` branch (Result unwrap inside the lambda is correct
+and takes precedence): a call to `is_some`/`is_none`/`unwrap` on
+a non-nullable, non-`Result` receiver can only come from a
+rebased `?.` chain (the checker rejects it otherwise), so it
+emits `True` / `False` / the receiver text. The same round
+exposed a second emitter gap, fixed here: `_rebase` copied the
+original `expr_type` onto rebased Call links, so
+`s?.unwrap().upper()` dispatched `.upper()` against `str?` and
+failed E4001 — an OPTIONAL Call link's rebased `expr_type` is now
+the stripped type (the `?.` is the ONLY reason it is nullable;
+a Member link is NOT stripped — a field may itself be nullable,
+which survives inside the lambda). And the checker
+(`_is_optional_chain`) now walks through `Call` nodes too, so
+`s?.unwrap().upper()` is recognised as an optional chain (the
+emitter's `_chain_has_optional` already did). Tests:
+`tests/test_checker.py::TestNullability` (3 new: `?.` forms are
+nullable, assigning them to non-nullable is E2001, `?.unwrap()`
+on a nullable Result is `int?`) + `tests/test_emitter.py::
+TestNullable` (3 new runtime tests: the three `?.` forms on
+`5`/`none`, the segment tail `s?.unwrap().upper()`, `?.unwrap()`
+on a nullable Result) + `conformance/ok/opt_methods.newr`
+extended with the `?.` cases. Red-check: revert the checker +
+emitter changes → 4 discriminating failures (2 checker E2001
+tests, 2 emitter E4001 tests); restore byte-identical (emitter
+sha256 `2a94b6c6…`). Note: two of the six new tests pass on both
+sides (the "are nullable" checker test — `T` widens to `T?`, so
+the mistyping was masked — and the nullable-Result runtime test
+— the emitter's `Result` branch already handled it); they pin
+the correct behaviour but are not red-check discriminators.
+
+### 15.6 Item 6 — B6b 1.89× is a benchmark-methodology artifact (corrected to 1.23)
+
+Evidence: the generated B6b driver imports the whole shop golden
+→ `import discord` costs ~300-700 ms in the venv (measured 681.3
+ms this round, 313.5 ms at evaluation time — import cost varies
+with cache warmth) vs 77-78 ms for the hand-written driver's
+aiosqlite-only import; cProfile of the credit loop alone was
+1.07× parity. Fix: `benchmarks/handwritten/shop_economy.py` now
+imports discord too (with a comment explaining why), so hyperfine
+measures the economy loop, not interpreter startup. B6b only was
+re-measured (hyperfine, 10 runs, warmup 1 — the same invocation
+`benchmarks/run.py` uses): generated 718.6 ms ± 79.8 ms (range
+657.6–897.5 ms, N=10), hand-written 583.5 ms ± 30.5 ms (range
+531.6–616.5 ms, N=10), **ratio 1.23** (was 1.89). Both print the
+checksum 1000. Raw JSON overwritten in
+`benchmarks/raw/b6b_shop_gen.json` + `b6b_shop_hw.json`
+(verified to match `BENCHMARKS.md` exactly); `BENCHMARKS.md`
+B6b + B8 lines and §14.8 corrected (the remaining 1.23 is just
+over the 1.20 threshold — the honest price of the atomicity
+template from item 2: a lock acquire + explicit BEGIN IMMEDIATE /
+COMMIT per credit, ~0.14 ms extra per credit vs the hand-written
+plain `commit()`). The correction note was also added to
+`benchmarks/run.py`'s B6b text so a future full benchmark run
+does not silently drop the explanation. No other benchmark was
+re-run.
+
+### 15.7 Nice-to-haves done in this round
+
+- CI shop bot runs to the `DISCORD_TOKEN` guard
+  (`.github/workflows/ci.yml`): the `python-emitter` job's
+  build+run step now runs the emitted `shop_out.py` and greps for
+  `DISCORD_TOKEN`, like `hello_bot`/`showcase` already did (the
+  step previously only `py_compile`d it, while its own comment
+  already claimed it reached the guard). Verified locally first:
+  the emitted shop prints "set the DISCORD_TOKEN environment
+  variable", exit 1.
+- User variables named `_newr_*` are forbidden (G-M2-4):
+  `compiler/resolver.py::_declare` rejects any declaration whose
+  name starts with `_newr_` with E3001 (the emitter's temporaries
+  are `_newr_t*`/`_newr_h*`/`_newr_fn_*`/`_newr_m*`/
+  `_newr_result`). Placed in the resolver, not the checker — the
+  resolver owns declarations (same correction as item 3's file
+  pointer). Tests: `tests/test_resolver.py::
+  TestDuplicatesAndReserved` (2 new: the prefix is E3001 for
+  lets and fns, plain `_x` is fine).
+- The language has no doc-comment syntax: `SPEC.md` §6 (Comments)
+  now says so explicitly — no `///`, no `DocComment` token; a `#`
+  comment above a declaration is an ordinary comment, never
+  carried into emitted code as a docstring. The emitter's "doc
+  comments → docstrings" mapping is vacuous until the syntax is
+  frozen (M6, §24 idea 14).
+- `import types` sort order in the shop golden: the emitter's
+  `_render_imports` stdlib set lacked `asyncio` and `types`, so
+  both fell into the first-party group and sorted after
+  `import shop_items`. Both are now in the stdlib set; the
+  blessed shop golden shows the clean grouping (stdlib:
+  asyncio/logging/os/time/types; third-party: aiosqlite/discord;
+  first-party: newr_rt/shop_items).
+
+### 15.8 Found during this round — OPEN, not in the 6 items
+
+Two adjacent holes of the same class the evaluator flagged in
+item 3 (a program passing the full front end must never die with
+a raw Python traceback). Both are in FIELD access paths, not the
+method-call paths item 5 fixed, and both need a design decision,
+so they are recorded here for the re-evaluation / M3 rather than
+fixed mid-round.
+
+- **`o?.inner.name` with a nullable field crashes at runtime.**
+  Repro: `struct Inner: name: str` / `struct Outer: inner: Inner?`
+  / `let o: Outer? = Outer(inner: none)` / `print o?.inner.name`
+  — check ok, build ok, run dies `AttributeError: 'NoneType'
+  object has no attribute 'name'`. The checker accepts it as
+  `str?` (via `_is_optional_chain`), but `_emit_chain` folds the
+  non-optional `.name` link into the same `opt_chain` lambda, so
+  the `.name` access is unguarded when `inner` is `none`. Fix
+  direction: split a chain segment when the intermediate value
+  can be `none` inside the lambda (the in-lambda type, not the
+  checker's chain type — a field may itself be nullable), or
+  reject the shape in the checker. The same reasoning applies to
+  `a?.b.c()` (method after a nullable field).
+- **A nullable method name used as a bare value crashes at
+  runtime.** Repro: `let v: int? = 5` / `print v?.is_some` (no
+  parens) — check ok, build ok, run dies `AttributeError: 'int'
+  object has no attribute 'is_some'` (and `print v.is_some`,
+  non-optional, has the same hole). `_member_field_type` returns
+  the method's RETURN type (`bool`) for a bare nullable-method
+  access, while the emitter emits a field access that does not
+  exist. Fix direction: type bare nullable-method accesses as fn
+  values (like ordinary methods-as-values) and emit a lambda for
+  them, or reject them in the checker.
+
+### 15.9 Live verification (end of round)
+
+`./newr build` + run on all four examples, fresh temp dir:
+`hello.newr` → "Hello, world!", exit 0; `shop.newr` → builds
+(3 warnings, as before), reaches the `DISCORD_TOKEN` guard,
+exit 1; `hello_bot.newr` → guard, exit 1; `showcase.newr` →
+guard, exit 1. Full suite: 675 tests green on system Python
+(12 skipped: the venv-only mock round-trips) and on the
+newr-verify venv (1 skipped). Conformance: 69 ok + 25 err,
+harness exit 0. NOT re-verified here (unchanged since M2):
+CI has still never run — Windows/macOS execution stays
+UNVERIFIED until green on all three OSes; no live Discord bot
+has connected yet (P-42).

@@ -432,7 +432,7 @@ class _Emitter:
         for the bare helper calls."""
         stdlib = {"sys", "os", "math", "random", "time", "logging",
                   "datetime", "pathlib", "typing", "dataclasses",
-                  "decimal"}
+                  "decimal", "asyncio", "types"}
         third_party = {"discord", "discord.ext", "aiosqlite"}
         groups: list[list[str]] = [[], [], []]
         # (group, module, kind, text): kind 0 = plain import, 1 = from.
@@ -1097,6 +1097,20 @@ class _Emitter:
                 return f"{obj_text}.{name}()"
             if name == "unwrap_or":
                 return f"{obj_text}.unwrap_or({args[0]})"
+        # Rebased `?.` chains (D38): inside an `opt_chain` lambda the
+        # receiver is the STRIPPED inner type, so a nullable method
+        # (`is_some` / `is_none` / `unwrap`) reaches here on a
+        # non-nullable, non-Result receiver. The value is proven
+        # non-none inside the lambda, so the answer is constant
+        # (True / False / the value itself). The checker rejects
+        # these calls on a plain value, so they can only come from
+        # a rebased chain.
+        if name == "is_some":
+            return "True"
+        if name == "is_none":
+            return "False"
+        if name == "unwrap":
+            return obj_text
         self._fail(f"`{obj_type}` has no method `{name}`")
 
     # ------------------------------------------------------------ optional chains
@@ -1149,8 +1163,22 @@ class _Emitter:
                 obj=self._rebase(node.func.obj, old_base, new_base),
                 name=node.func.name, optional=False,
                 expr_type=node.func.expr_type)
+            # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
+            # is nullable only because the `?.` short-circuits — inside
+            # the lambda the receiver is proven non-none, so the
+            # result is the plain (stripped) type. Without this, a
+            # later link (`.upper()` in `s?.unwrap().upper()`)
+            # dispatches against the nullable type and fails with
+            # E4001. Only Call links are stripped: a Member link
+            # (`a?.b`) may be nullable because the FIELD itself is
+            # nullable, which survives inside the lambda.
+            expr_type = node.expr_type
+            if node.func.optional and expr_type is not None \
+                    and expr_type.nullable:
+                expr_type = Type(expr_type.name,
+                                 params=expr_type.params, nullable=False)
             return A.Call(span=node.span, func=func, args=node.args,
-                          kwargs=node.kwargs, expr_type=node.expr_type)
+                          kwargs=node.kwargs, expr_type=expr_type)
         return node
 
     def _emit_chain(self, node) -> str:
@@ -2409,6 +2437,7 @@ class _Emitter:
                      "intents=intents)")
         for store in program.stores:
             lines.append(f"        self.{store.name}_db = None")
+            lines.append(f"        self.{store.name}_lock = None")
         lines.append("")
         lines.append("    async def setup_hook(self) -> None:")
         for store in program.stores:
@@ -3098,6 +3127,12 @@ class _Emitter:
         lines.append("")
         lines.append(f"    async def _{name}_connect(self) -> None:")
         lines.append(f'        self.{name}_db = await aiosqlite.connect("{name}.db")')
+        # The economy ops serialise on this lock (see
+        # _emit_economy_methods): aiosqlite runs all ops in one
+        # thread, so a second coroutine's BEGIN IMMEDIATE would
+        # block that thread until the busy timeout.
+        self._need_import("asyncio")
+        lines.append(f"        self.{name}_lock = asyncio.Lock()")
         for table in store.tables:
             cols = []
             for i, col in enumerate(table.columns):
@@ -3123,72 +3158,150 @@ class _Emitter:
         return [
             "",
             f"    async def {n}_balance(self, user_id: str) -> int:",
-            f"        async with self.{n}_db.execute(\"SELECT balance FROM balances WHERE user = ?\", (user_id,)) as cursor:",
-            "            row = await cursor.fetchone()",
-            "        return row[0] if row is not None else 0",
+            f"        async with self.{n}_lock:",
+            f"            async with self.{n}_db.execute(\"SELECT balance FROM balances WHERE user = ?\", (user_id,)) as cursor:",
+            "                row = await cursor.fetchone()",
+            "            return row[0] if row is not None else 0",
             "",
             f"    async def _{n}_apply(self, user_id: str, amount: int, key: str | None) -> None:",
             "        # Idempotent on key: a duplicate key is a replay,",
-            "        # not an error (P11) — the balance + ledger land",
-            "        # in one transaction.",
-            "        if key is not None:",
-            f"            async with self.{n}_db.execute(\"SELECT 1 FROM ledger WHERE key = ?\", (key,)) as cursor:",
-            "                if await cursor.fetchone() is not None:",
-            "                    return",
-            f"        await self.{n}_db.execute(\"INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance\", (user_id, amount))",
-            f"        await self.{n}_db.execute(\"INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?)\", (user_id, amount, key, int(time.time())))",
-            f"        await self.{n}_db.commit()",
+            "        # not an error (P11). One explicit transaction:",
+            "        # the balance + ledger land together or not at all,",
+            "        # and a failed ledger INSERT rolls the balance",
+            "        # change back instead of leaving it for a later",
+            "        # commit() to commit. The lock serialises the ops",
+            "        # (and the reads): aiosqlite runs all ops in one",
+            "        # thread, so a second coroutine's BEGIN IMMEDIATE",
+            "        # would block that thread until the busy timeout,",
+            "        # and a concurrent read would see uncommitted",
+            "        # partial state. The lock is not reentrant: no",
+            "        # economy method may call another while holding it",
+            "        # (credit delegates to _apply without taking it).",
+            f"        async with self.{n}_lock:",
+            "            if key is not None:",
+            f"                async with self.{n}_db.execute(\"SELECT 1 FROM ledger WHERE key = ?\", (key,)) as cursor:",
+            "                    if await cursor.fetchone() is not None:",
+            "                        return",
+            f"            await self.{n}_db.execute(\"BEGIN IMMEDIATE\")",
+            "            try:",
+            f"                await self.{n}_db.execute(\"INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance\", (user_id, amount))",
+            f"                await self.{n}_db.execute(\"INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?)\", (user_id, amount, key, int(time.time())))",
+            f"                await self.{n}_db.execute(\"COMMIT\")",
+            "            except Exception:",
+            f"                await self.{n}_db.execute(\"ROLLBACK\")",
+            "                raise",
             "",
             f"    async def {n}_credit(self, user_id: str, amount: int, key: str | None = None) -> None:",
             f"        await self._{n}_apply(user_id, amount, key)",
             "",
             f"    async def {n}_debit(self, user_id: str, amount: int, key: str | None = None) -> bool:",
-            f"        if await self.{n}_balance(user_id) < amount:",
-            "            return False",
-            f"        await self._{n}_apply(user_id, -amount, key)",
-            "        return True",
+            "        # The balance check is inside the transaction (no",
+            "        # TOCTOU): a concurrent debit cannot slip between",
+            "        # the check and the write. A replayed key returns",
+            "        # True — the debit already happened.",
+            f"        async with self.{n}_lock:",
+            "            if key is not None:",
+            f"                async with self.{n}_db.execute(\"SELECT 1 FROM ledger WHERE key = ?\", (key,)) as cursor:",
+            "                    if await cursor.fetchone() is not None:",
+            "                        return True",
+            f"            await self.{n}_db.execute(\"BEGIN IMMEDIATE\")",
+            "            try:",
+            f"                async with self.{n}_db.execute(\"SELECT balance FROM balances WHERE user = ?\", (user_id,)) as cursor:",
+            "                    row = await cursor.fetchone()",
+            "                if (row[0] if row is not None else 0) < amount:",
+            f"                    await self.{n}_db.execute(\"ROLLBACK\")",
+            "                    return False",
+            f"                await self.{n}_db.execute(\"INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance\", (user_id, -amount))",
+            f"                await self.{n}_db.execute(\"INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?)\", (user_id, -amount, key, int(time.time())))",
+            f"                await self.{n}_db.execute(\"COMMIT\")",
+            "            except Exception:",
+            f"                await self.{n}_db.execute(\"ROLLBACK\")",
+            "                raise",
+            "            return True",
             "",
             f"    async def {n}_transfer(self, from_id: str, to_id: str, amount: int, key: str | None = None) -> bool:",
-            f"        if await self.{n}_balance(from_id) < amount:",
-            "            return False",
-            "        # The two legs get derived keys (the ledger's key",
-            "        # is UNIQUE, so one key cannot cover both legs).",
-            "        if key is not None:",
-            f"            async with self.{n}_db.execute(\"SELECT 1 FROM ledger WHERE key = ? OR key = ?\", (f\"{{key}}:out\", f\"{{key}}:in\")) as cursor:",
-            "                if await cursor.fetchone() is not None:",
+            "        # Both legs + the ledger in ONE transaction. A retry",
+            "        # heals a partial transfer: each leg is topped up",
+            "        # to its intended total (the out-leg debits `amount`,",
+            "        # the in-leg credits `amount`), so no money is",
+            "        # created or destroyed however the first attempt",
+            "        # died — a crash between the legs, or a poisoned",
+            "        # ledger row. The leg INSERTs upsert on the key:",
+            "        # a row that merely exists (amount 0) is topped up",
+            "        # instead of colliding with the UNIQUE constraint.",
+            "        # The debit side was already authorised at the",
+            "        # original attempt, so the remaining debit is",
+            "        # applied unconditionally; refusing would leave",
+            "        # money destroyed. The per-leg amounts are read from",
+            "        # the ledger (not just presence): a row that merely",
+            "        # exists with amount 0 heals the full leg.",
+            f"        async with self.{n}_lock:",
+            "            out_done = 0",
+            "            in_done = 0",
+            "            if key is not None:",
+            f"                async with self.{n}_db.execute(\"SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE key = ?\", (f\"{{key}}:out\",)) as cursor:",
+            "                    out_done = -(await cursor.fetchone())[0]",
+            f"                async with self.{n}_db.execute(\"SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE key = ?\", (f\"{{key}}:in\",)) as cursor:",
+            "                    in_done = (await cursor.fetchone())[0]",
+            "                out_done = max(0, min(amount, out_done))",
+            "                in_done = max(0, min(amount, in_done))",
+            "                if out_done >= amount and in_done >= amount:",
             "                    return True",
-            f"        await self._{n}_apply(from_id, -amount, f\"{{key}}:out\" if key is not None else None)",
-            f"        await self._{n}_apply(to_id, amount, f\"{{key}}:in\" if key is not None else None)",
-            "        return True",
+            "            out_left = amount - out_done",
+            "            in_left = amount - in_done",
+            f"            await self.{n}_db.execute(\"BEGIN IMMEDIATE\")",
+            "            try:",
+            "                if out_left > 0:",
+            f"                    async with self.{n}_db.execute(\"SELECT balance FROM balances WHERE user = ?\", (from_id,)) as cursor:",
+            "                        row = await cursor.fetchone()",
+            "                    if (row[0] if row is not None else 0) < out_left:",
+            f"                        await self.{n}_db.execute(\"ROLLBACK\")",
+            "                        return False",
+            f"                    await self.{n}_db.execute(\"INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance\", (from_id, -out_left))",
+            f"                    await self.{n}_db.execute(\"INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET amount = ledger.amount + excluded.amount\", (from_id, -out_left, f\"{{key}}:out\" if key is not None else None, int(time.time())))",
+            "                if in_left > 0:",
+            f"                    await self.{n}_db.execute(\"INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance\", (to_id, in_left))",
+            f"                    await self.{n}_db.execute(\"INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET amount = ledger.amount + excluded.amount\", (to_id, in_left, f\"{{key}}:in\" if key is not None else None, int(time.time())))",
+            f"                await self.{n}_db.execute(\"COMMIT\")",
+            "            except Exception:",
+            f"                await self.{n}_db.execute(\"ROLLBACK\")",
+            "                raise",
+            "            return True",
         ]
 
     def _emit_table_methods(self, name: str, table: A.TableDecl) -> list[str]:
         """`get` / `set` / `delete` for one declared table. A row is
         a SimpleNamespace (attribute access works for its fields);
-        `set` takes such a row (or a struct) via vars()."""
+        `set` takes such a row (or a struct) via vars(). All three
+        take the store lock: a `set` / `delete` commit() running
+        concurrently with an economy transaction would commit that
+        transaction part-way through."""
         n = name
         key_col = table.columns[0].name if table.columns else "id"
         return [
             "",
             f"    async def {n}_get(self, table: str, key) -> types.SimpleNamespace | None:",
-            f"        async with self.{n}_db.execute(f\"SELECT * FROM {{table}} WHERE {key_col} = ?\", (key,)) as cursor:",
-            "            row = await cursor.fetchone()",
-            "            if row is None:",
-            "                return None",
-            "            cols = [d[0] for d in cursor.description]",
-            "            return types.SimpleNamespace(**dict(zip(cols, row)))",
+            f"        async with self.{n}_lock:",
+            f"            async with self.{n}_db.execute(f\"SELECT * FROM {{table}} WHERE {key_col} = ?\", (key,)) as cursor:",
+            "                row = await cursor.fetchone()",
+            "                if row is None:",
+            "                    return None",
+            "                cols = [d[0] for d in cursor.description]",
+            "                return types.SimpleNamespace(**dict(zip(cols, row)))",
             "",
             f"    async def {n}_set(self, table: str, row) -> None:",
-            "        data = vars(row)",
-            "        cols = \", \".join(data)",
-            "        placeholders = \", \".join(\"?\" * len(data))",
-            f"        updates = \", \".join(f\"{{c}} = excluded.{{c}}\" for c in data)",
-            f"        await self.{n}_db.execute(f\"INSERT INTO {{table}} ({{cols}}) VALUES ({{placeholders}}) ON CONFLICT({key_col}) DO UPDATE SET {{updates}}\", tuple(data.values()))",
-            f"        await self.{n}_db.commit()",
+            f"        async with self.{n}_lock:",
+            "            data = vars(row)",
+            "            cols = \", \".join(data)",
+            "            placeholders = \", \".join(\"?\" * len(data))",
+            f"            updates = \", \".join(f\"{{c}} = excluded.{{c}}\" for c in data)",
+            f"            await self.{n}_db.execute(f\"INSERT INTO {{table}} ({{cols}}) VALUES ({{placeholders}}) ON CONFLICT({key_col}) DO UPDATE SET {{updates}}\", tuple(data.values()))",
+            f"            await self.{n}_db.commit()",
             "",
             f"    async def {n}_delete(self, table: str, key) -> None:",
-            f"        await self.{n}_db.execute(f\"DELETE FROM {{table}} WHERE {key_col} = ?\", (key,))",
-            f"        await self.{n}_db.commit()",
+            f"        async with self.{n}_lock:",
+            f"            await self.{n}_db.execute(f\"DELETE FROM {{table}} WHERE {key_col} = ?\", (key,))",
+            f"            await self.{n}_db.commit()",
         ]
 
     # -- strings / _t (D16) ---------------------------------------------
@@ -3308,8 +3421,14 @@ class _Emitter:
 
     def _emit_general_file(self, program: A.Program, main_path: str):
         """A general (non-bot) program: header, imports, structs/enums,
-        functions, top-level lets/consts in file order, then the
-        remaining top-level statements in file order (D11)."""
+        functions, then the top-level STATEMENTS in file order (SPEC
+        §8). Definitions (structs/enums/functions) are hoisted — a
+        function body reads module globals at call time, so emitting
+        the `def` before the statements is safe — but the statements
+        themselves (lets, assignments, prints, ...) must run in the
+        order written. The old two-phase layout (all lets, then the
+        other statements) silently computed the wrong value whenever
+        an assignment sat between two lets (M2 evaluation #1)."""
         self.program = program
         self.fns = {f.name: f for f in program.functions}
         self.structs = {s.name: s for s in program.structs}
@@ -3319,10 +3438,6 @@ class _Emitter:
         self._fn_ctx = []
         self._fn_globals = set()
         self._hoists = []
-        lets = [st for st in program.stmts
-                if isinstance(st, (A.Let, A.Const))]
-        others = [st for st in program.stmts
-                  if not isinstance(st, (A.Let, A.Const))]
         body: list[str] = []
         for decl in program.structs:
             body.extend(self._emit_struct(decl))
@@ -3333,9 +3448,7 @@ class _Emitter:
         for decl in program.functions:
             body.extend(self._emit_fn(decl))
             body.append("")
-        for st in lets:
-            body.extend(self._emit_stmt_with_hoists(st, 0))
-        for st in others:
+        for st in program.stmts:
             body.extend(self._emit_stmt_with_hoists(st, 0))
         # Drop the trailing blank line the decl loop leaves behind.
         while body and body[-1] == "":

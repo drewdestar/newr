@@ -349,6 +349,50 @@ class TestFunctionsAndRecursion(unittest.TestCase):
         self.assertEqual(run_ok(src), "15\n")
 
 
+class TestTopLevelOrder(unittest.TestCase):
+    def test_assignment_between_lets_runs_in_order(self):
+        # M2 evaluation must-fix #1 (SPEC §8: top-level statements
+        # execute in file order). The two-phase emitter used to hoist
+        # every `let` before the other statements, so `y` saw the
+        # initial value of `x`, not the assigned one.
+        src = ("let x = 1\n"
+               "x = 5\n"
+               "let y = x\n"
+               "print y\n")
+        self.assertEqual(run_ok(src), "5\n")
+
+    def test_let_rhs_reads_value_written_by_earlier_assignment(self):
+        src = ("let x = 1\n"
+               "x = x + 1\n"
+               "let y = x * 2\n"
+               "print y\n")
+        self.assertEqual(run_ok(src), "4\n")
+
+    def test_fn_call_after_assignment_sees_new_value(self):
+        src = ("let x = 1\n"
+               "fn getx() -> int:\n"
+               "  return x\n"
+               "x = 9\n"
+               "print getx()\n")
+        self.assertEqual(run_ok(src), "9\n")
+
+    def test_print_before_fn_declaration_still_works(self):
+        # Definitions are hoisted (emitted before the statements);
+        # only the STATEMENTS run in file order.
+        src = ("print double(21)\n"
+               "fn double(n: int) -> int:\n"
+               "  return n * 2\n")
+        self.assertEqual(run_ok(src), "42\n")
+
+    def test_struct_declared_after_let_using_it(self):
+        src = ("let p = Point(x: 1, y: 2)\n"
+               "struct Point:\n"
+               "  x: int\n"
+               "  y: int\n"
+               "print p.x\n")
+        self.assertEqual(run_ok(src), "1\n")
+
+
 class TestContracts(unittest.TestCase):
     def test_requires_and_ensures_pass(self):
         src = ("fn absolute(n: int) -> int:\n"
@@ -456,18 +500,32 @@ class TestErrorsAndResult(unittest.TestCase):
         self.assertEqual(run_ok(src), "5\nnone\n")
 
     def test_propagate_mismatched_kind_is_emitter_error(self):
-        # Checker gap (recorded in BUILD_REPORT §14.3): `?` on a
-        # nullable inside a Result-returning function has no defined
-        # early-return value (there is no Err to return, and the
-        # function does not return a nullable). The checker accepts
-        # it; the emitter refuses cleanly rather than inventing
-        # semantics. The same holds for the reverse mismatch.
-        src = ("fn get(n: int) -> Result[int, error]:\n"
-               "  let v: int? = none\n"
-               "  let w = v?\n"
-               "  return ok(w)\n")
-        with self.assertRaises(EmitterError):
-            emit_src(src)
+        # The checker rejects both mismatches now (test_checker:
+        # test_propagate_nullable_into_result_fn_is_E2001 and
+        # test_propagate_result_into_nullable_fn_is_E2001). The
+        # emitter's D30 refusal stays as defense-in-depth: resolve
+        # WITHOUT the checker and emit — the emitter must still
+        # refuse rather than invent semantics.
+        cases = [
+            ("fn get(n: int) -> Result[int, error]:\n"
+             "  let v: int? = none\n"
+             "  let w = v?\n"
+             "  return ok(w)\n"),
+            ("fn get(n: int) -> int?:\n"
+             "  let v: Result[int, error] = ok(1)\n"
+             "  let w = v?\n"
+             "  return w\n"),
+        ]
+        for src in cases:
+            with self.subTest(src=src):
+                resolved = resolve_source(src, "<test>.newr")
+                self.assertEqual(
+                    [d for d in resolved.diagnostics if d.is_error()],
+                    [])
+                with self.assertRaises(EmitterError):
+                    emit_program(resolved.program,
+                                 main_path="<test>.newr",
+                                 sources={"<test>.newr": src})
 
 
 class TestNullable(unittest.TestCase):
@@ -496,6 +554,35 @@ class TestNullable(unittest.TestCase):
                "let y: int? = none\n"
                "print y.is_none()\n")
         self.assertEqual(run_ok(src), "true\n3\ntrue\n")
+
+    def test_optional_nullable_methods_run(self):
+        # M2 evaluation must-fix #5 (G-M2-2 / D31): `?.is_some()` /
+        # `?.is_none()` / `?.unwrap()` short-circuit on `none`.
+        src = ("let a: int? = 5\n"
+               "let b: int? = none\n"
+               "print a?.is_some()\n"
+               "print b?.is_some()\n"
+               "print a?.is_none()\n"
+               "print b?.is_none()\n"
+               "print a?.unwrap()\n"
+               "print b?.unwrap()\n")
+        self.assertEqual(run_ok(src), "true\nnone\nfalse\nnone\n5\nnone\n")
+
+    def test_optional_unwrap_then_method_runs(self):
+        # Segment tail: the method after `?.unwrap()` runs inside
+        # the same `opt_chain` lambda.
+        src = ("let s: str? = \"hi\"\n"
+               "print s?.unwrap().upper()\n"
+               "let u: str? = none\n"
+               "print u?.unwrap().upper()\n")
+        self.assertEqual(run_ok(src), "HI\nnone\n")
+
+    def test_optional_unwrap_on_nullable_result_runs(self):
+        src = ("let r: Result[int, error]? = ok(5)\n"
+               "print r?.unwrap()\n"
+               "let q: Result[int, error]? = none\n"
+               "print q?.unwrap()\n")
+        self.assertEqual(run_ok(src), "5\nnone\n")
 
 
 class TestMatch(unittest.TestCase):

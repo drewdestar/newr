@@ -157,6 +157,20 @@ class Resolver:
         # walk in _resolve_module, None everywhere else — fn/lambda/
         # handler bodies are deferred execution and never see it.
         self._top_level_pending: dict[str, A.Stmt] | None = None
+        # Transitive top-level-let effect analysis (M2 fix #3): while
+        # a module fn is being resolved, record which module-scope
+        # lets it reads / writes directly and which module fns it
+        # calls. After all fns are resolved the transitive closure
+        # over the call graph is computed into _fn_top_reads /
+        # _fn_top_writes; a top-level statement that calls such a
+        # fn while one of those lets is still pending is E2005.
+        self._collecting_fn: str | None = None
+        self._lambda_depth: int = 0
+        self._fn_direct_reads: dict[str, set[str]] = {}
+        self._fn_direct_writes: dict[str, set[str]] = {}
+        self._fn_direct_calls: dict[str, set[str]] = {}
+        self._fn_top_reads: dict[str, set[str]] = {}
+        self._fn_top_writes: dict[str, set[str]] = {}
         # (id(scope), name) pairs already reported for E3007, so a
         # top-level let pre-declared by _collect_top_level and re-seen
         # by the statement walk is not reported twice.
@@ -280,8 +294,12 @@ class Resolver:
                 if not cycle:
                     self._check_imported_file_restrictions(program)
             self._collect_top_level(info, program)
+            self._fn_direct_reads = {}
+            self._fn_direct_writes = {}
+            self._fn_direct_calls = {}
             for fn in program.functions:
                 self._resolve_fn(info, fn)
+            self._compute_fn_top_level_effects()
             # Round-2 BUG-2: top-level lets/consts are "pending" until
             # their declaration statement has been walked. A top-level
             # statement that uses one before that point is E2005
@@ -510,6 +528,18 @@ class Resolver:
                             "redefined",
                             help="rename the declaration")
             return None
+        # The emitter's temporaries live in the `_newr_` namespace
+        # (_newr_t0, _newr_result, ...): a user name with that prefix
+        # would collide with them (M2 evaluation nice-to-have G-M2-4).
+        if name.startswith("_newr_"):
+            key = (id(scope), name)
+            if key not in self._reserved_reported:
+                self._reserved_reported.add(key)
+                self._error(span, "E3001",
+                            f"`{name}` uses the reserved `_newr_` prefix",
+                            help="rename it — `_newr_*` is the emitter's "
+                                 "temporary namespace")
+            return None
         if (kind in ("var", "param", "const", "option")
                 and name in RESERVED_HANDLER_BINDINGS
                 and (kind == "param" or self._in_handler(scope))):
@@ -564,7 +594,105 @@ class Resolver:
             # not earn W1001 (SPEC.md §5.3).
             if fn.pub and binding is not None:
                 binding.used = True
-        self._walk_stmts(fn.body, scope)
+        # M2 fix #3: record the top-level lets this fn reads/writes
+        # and the module fns it calls (for the transitive E2005
+        # analysis). Reads/writes inside a nested lambda are NOT
+        # recorded: a lambda body may escape and run later.
+        prev_fn = self._collecting_fn
+        prev_depth = self._lambda_depth
+        self._collecting_fn = fn.name
+        self._lambda_depth = 0
+        self._fn_direct_reads[fn.name] = set()
+        self._fn_direct_writes[fn.name] = set()
+        self._fn_direct_calls[fn.name] = set()
+        try:
+            self._walk_stmts(fn.body, scope)
+        finally:
+            self._collecting_fn = prev_fn
+            self._lambda_depth = prev_depth
+
+    def _is_module_let(self, name: str, binding: _Binding) -> bool:
+        """True if ``binding`` is a top-level let/const of the module
+        currently being resolved. The ``lookup_local`` identity
+        check excludes a local that shadows the top-level name."""
+        info = self._current_info
+        if info is None or binding.kind not in ("var", "const"):
+            return False
+        return info.scope.lookup_local(name) is binding
+
+    def _record_fn_read(self, name: str, binding: _Binding) -> None:
+        if (self._collecting_fn is None or self._lambda_depth > 0
+                or not self._is_module_let(name, binding)):
+            return
+        self._fn_direct_reads[self._collecting_fn].add(name)
+
+    def _record_fn_call(self, name: str) -> None:
+        if self._collecting_fn is None or self._lambda_depth > 0:
+            return
+        info = self._current_info
+        if info is None:
+            return
+        binding = info.scope.lookup_local(name)
+        if binding is None or binding.kind != "fn":
+            return
+        self._fn_direct_calls[self._collecting_fn].add(name)
+
+    def _compute_fn_top_level_effects(self) -> None:
+        """Transitive closure over the call graph: for each module
+        fn, the top-level lets it reads / writes (directly, or via
+        another module fn it calls). Fixpoint iteration handles
+        mutual recursion."""
+        reads = {name: set(s)
+                 for name, s in self._fn_direct_reads.items()}
+        writes = {name: set(s)
+                  for name, s in self._fn_direct_writes.items()}
+        changed = True
+        while changed:
+            changed = False
+            for fn, callees in self._fn_direct_calls.items():
+                for callee in callees:
+                    for target in (reads, writes):
+                        before = len(target[fn])
+                        target[fn] |= target.get(callee, set())
+                        if len(target[fn]) != before:
+                            changed = True
+        self._fn_top_reads = reads
+        self._fn_top_writes = writes
+
+    def _check_fn_call_before_let(self, expr: A.Call,
+                                  scope: _Scope) -> None:
+        """A top-level statement that calls a module fn which
+        (transitively) reads or writes a still-pending top-level
+        let is E2005: the call executes in file order, before the
+        let exists, and would die at runtime with a raw NameError
+        (M2 evaluation #3, G-M2-3)."""
+        if self._top_level_pending is None:
+            return
+        if self._in_deferred_scope(scope):
+            return
+        if not isinstance(expr.func, A.Name):
+            return
+        name = expr.func.name
+        info = self._current_info
+        if info is None:
+            return
+        binding = info.scope.lookup_local(name)
+        if binding is None or binding.kind != "fn":
+            return
+        pending = set(self._top_level_pending)
+        bad_reads = sorted(self._fn_top_reads.get(name, set()) & pending)
+        bad_writes = sorted(self._fn_top_writes.get(name, set()) & pending)
+        if not bad_reads and not bad_writes:
+            return
+        if bad_reads:
+            target, verb = bad_reads[0], "reads"
+        else:
+            target, verb = bad_writes[0], "assigns to"
+        self._error(expr.func.span, "E2005",
+                    f"function `{name}` {verb} `{target}` before its "
+                    "definition",
+                    help="move the `let` above the call, or move the "
+                         "call after the `let`")
 
     def _handler_scope(self, info: _ModuleInfo, names: set[str],
                        extra: dict[str, Span] | None = None) -> _Scope:
@@ -818,6 +946,11 @@ class Resolver:
                              "not a variable")
             return
         binding.used = True
+        # M2 fix #3: a write to a top-level let is a use of it —
+        # record it for the transitive E2005 analysis.
+        if (self._collecting_fn is not None and self._lambda_depth == 0
+                and self._is_module_let(st.name, binding)):
+            self._fn_direct_writes[self._collecting_fn].add(st.name)
 
     def _declare_pattern(self, pat: A.Pattern, scope: _Scope) -> None:
         if isinstance(pat, A.NamePattern):
@@ -877,10 +1010,16 @@ class Resolver:
             fn_scope = _Scope("function", parent=scope)
             for p in expr.params:
                 self._declare(fn_scope, "param", p.name, p.span, p)
-            if expr.body is not None:
-                self._walk_stmts(expr.body, fn_scope)
-            elif expr.expr_body is not None:
-                self._walk_expr(expr.expr_body, fn_scope)
+            # M2 fix #3: a lambda body may escape and run later, so
+            # its reads/writes are not the enclosing fn's.
+            self._lambda_depth += 1
+            try:
+                if expr.body is not None:
+                    self._walk_stmts(expr.body, fn_scope)
+                elif expr.expr_body is not None:
+                    self._walk_expr(expr.expr_body, fn_scope)
+            finally:
+                self._lambda_depth -= 1
         elif isinstance(expr, A.TryExpr):
             self._walk_expr(expr.expr, scope)
         elif isinstance(expr, A.Propagate):
@@ -891,6 +1030,12 @@ class Resolver:
                 self._walk_expr(arg, scope)
             for _name, value, _span in expr.kwargs:
                 self._walk_expr(value, scope)
+            # M2 fix #3: record the call for the transitive E2005
+            # analysis, and reject a top-level call that would read
+            # or write a still-pending let.
+            if isinstance(expr.func, A.Name):
+                self._record_fn_call(expr.func.name)
+            self._check_fn_call_before_let(expr, scope)
         elif isinstance(expr, A.TCall):
             for _name, value, _span in expr.args:
                 self._walk_expr(value, scope)
@@ -978,6 +1123,9 @@ class Resolver:
                              f"`{node.name}.<name>`")
             return
         binding.used = True
+        # M2 fix #3: record a read of a top-level let for the
+        # transitive E2005 analysis.
+        self._record_fn_read(node.name, binding)
 
     def _walk_member(self, node: A.Member, scope: _Scope) -> None:
         obj = node.obj

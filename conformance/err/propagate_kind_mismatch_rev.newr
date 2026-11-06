@@ -1,0 +1,7 @@
+# expect: E2001
+# `?` on a Result inside a nullable-returning function (M2
+# evaluation #4, G-M2-1): the kinds must match.
+fn f() -> int?:
+  let v: Result[int, error] = ok(1)
+  let w = v?
+  return w

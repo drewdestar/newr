@@ -238,6 +238,94 @@ class TestTopLevelUseBeforeDef(unittest.TestCase):
                "  return 1\n")
         self.assertEqual(codes(full(src)), [])
 
+    def test_let_rhs_calling_fn_reading_later_let_is_E2005(self):
+        # M2 evaluation must-fix #3 (G-M2-3): a top-level `let` whose
+        # RHS calls a function reading a LATER `let` was accepted by
+        # the checker but died at runtime with a raw `NameError`.
+        # The call happens in file order, before the `let` exists.
+        src = ("fn getx() -> int:\n"
+               "  return x\n"
+               "let a = getx()\n"
+               "let x = 42\n"
+               "print a\n")
+        self.assertIn("E2005", codes(full(src)))
+
+    def test_print_calling_fn_reading_later_let_is_E2005(self):
+        # Same hole through any top-level statement, not just a let RHS.
+        src = ("fn getx() -> int:\n"
+               "  return x\n"
+               "print getx()\n"
+               "let x = 42\n")
+        self.assertIn("E2005", codes(full(src)))
+
+    def test_call_inside_top_level_if_reading_later_let_is_E2005(self):
+        src = ("fn getx() -> int:\n"
+               "  return x\n"
+               "if true:\n"
+               "  print getx()\n"
+               "let x = 42\n")
+        self.assertIn("E2005", codes(full(src)))
+
+    def test_indirect_call_chain_reading_later_let_is_E2005(self):
+        # The read is transitive: wrap() calls getx(), which reads x.
+        src = ("fn getx() -> int:\n"
+               "  return x\n"
+               "fn wrap() -> int:\n"
+               "  return getx()\n"
+               "let a = wrap()\n"
+               "let x = 42\n"
+               "print a\n")
+        self.assertIn("E2005", codes(full(src)))
+
+    def test_mutual_recursion_reading_later_let_is_E2005(self):
+        src = ("fn a() -> int:\n"
+               "  return b()\n"
+               "fn b() -> int:\n"
+               "  return x\n"
+               "let v = a()\n"
+               "let x = 42\n"
+               "print v\n")
+        self.assertIn("E2005", codes(full(src)))
+
+    def test_fn_assigning_to_later_let_called_early_is_E2005(self):
+        # A write is a use too: the assignment would be lost (the
+        # later `let` re-initialises the name), so the call is
+        # rejected just like a read.
+        src = ("fn setx() -> int:\n"
+               "  x = 5\n"
+               "  return 0\n"
+               "let a = setx()\n"
+               "let x = 42\n"
+               "print a\n")
+        self.assertIn("E2005", codes(full(src)))
+
+    def test_fn_reading_later_let_called_after_let_is_ok(self):
+        src = ("fn getx() -> int:\n"
+               "  return x\n"
+               "let x = 42\n"
+               "print getx()\n")
+        self.assertEqual(codes(full(src)), [])
+
+    def test_fn_reading_later_let_never_called_from_top_level_is_ok(self):
+        src = ("fn getx() -> int:\n"
+               "  return x\n"
+               "let x = 42\n"
+               "print x\n")
+        self.assertEqual(codes(full(src)), [])
+
+    def test_handler_calling_fn_reading_later_let_is_ok(self):
+        # Handlers run after module initialisation, so a handler may
+        # call a function reading any top-level `let` — even one
+        # declared after the handler block.
+        src = ("fn getx() -> int:\n"
+               "  return x\n"
+               "command ping:\n"
+               "  description: \"x\"\n"
+               "  do:\n"
+               "    print getx()\n"
+               "let x = 42\n")
+        self.assertEqual(codes(full(src)), [])
+
     def test_stress_corpus_use_before_def_exits_4(self):
         r = run_cli("check", str(CORPUS / "i_use_before_def.newr"))
         self.assertEqual(r.returncode, 4, r.stdout + r.stderr)

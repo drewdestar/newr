@@ -513,7 +513,12 @@ information-theoretically ambiguous; the honest response is a precise
   (full list in §6.1). An identifier that starts with a digit is an error.
 - **Comments:** `#` to end of line. There is no block comment in v1
   (documented; add one only if demanded — a block comment is a lexer
-  feature, not a language feature).
+  feature, not a language feature). There is also **no doc-comment
+  syntax in v1** (no `///`, no `DocComment` token): a `#` comment
+  above a declaration is an ordinary comment, never carried into
+  emitted code as a docstring — the emitter's "doc comments →
+  docstrings" mapping is vacuous until the doc-comment syntax is
+  frozen (M6, §24 idea 14).
 
 ### 6.1 Keywords (reserved)
 

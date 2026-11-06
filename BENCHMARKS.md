@@ -45,10 +45,11 @@ All figures are measured, not promised. Raw hyperfine JSON is in `benchmarks/raw
 
 ## B6b — Shop economy, 1,000 credits (aiosqlite, commit per call)
 
-- generated (emitted shop Bot): 676.2 ms ± 85.4 ms (range 585.4–893.2 ms, N=10)
-- hand-written (aiosqlite directly): 358.3 ms ± 39.2 ms (range 315.0–433.7 ms, N=10)
-- ratio (generated/hand-written): 1.89
+- generated (emitted shop Bot): 718.6 ms ± 79.8 ms (range 657.6–897.5 ms, N=10)
+- hand-written (aiosqlite directly): 583.5 ms ± 30.5 ms (range 531.6–616.5 ms, N=10)
+- ratio (generated/hand-written): 1.23
   (10,000 was reduced to 1,000: per-call commit fsync dominates and 10k took >4 min; 1k still measures the code path. Both print the final balance 1000.)
+  (Corrected 7 Nov 2026, M2 fix #6: the published 1.89 was a benchmark-methodology artifact — the generated driver imports the whole shop bot (`import discord`, ~300-700 ms one-time) while the hand-written driver imported only aiosqlite (~78 ms). The hand-written driver now imports discord too, so the comparison measures the economy loop, not interpreter startup. The remaining 1.23 is just over the 1.20 threshold: the price is the atomicity template — a lock acquire + explicit BEGIN IMMEDIATE / COMMIT per credit, vs the hand-written plain commit().)
 
 ## B7 — Peak RSS
 
@@ -59,6 +60,6 @@ All figures are measured, not promised. Raw hyperfine JSON is in `benchmarks/raw
 
 - startup ratio: 1.13 (>1.20 would be a bug report)
 - loop ratio (generated/plain): 2.54 (>1.20 would be a bug report)
-- shop economy ratio: 1.89 (>1.20 would be a bug report)
+- shop economy ratio: 1.23 (>1.20 would be a bug report)
 - hello size ratio: 0.64 (>1.50 would be a bug report)
 - loop size ratio: 0.83 (>1.50 would be a bug report)

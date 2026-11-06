@@ -705,7 +705,13 @@ class Checker:
         if expr.return_type is not None:
             self._validate_type(expr.return_type, expr.span)
         saved_return, saved_fn = self._return_type, self._fn_name
+        saved_handler = self._in_handler
         self._return_type, self._fn_name = ret, None
+        # A lambda is a function boundary (like the emitter's
+        # `_fn_ctx` entry with `in_handler: False`): `?` inside it
+        # is judged against the lambda's own return type, never
+        # against the enclosing handler.
+        self._in_handler = False
         self._push_body()
         self._scopes.append({})
         for p in expr.params:
@@ -722,6 +728,7 @@ class Checker:
         self._scopes.pop()
         self._pop_body()
         self._return_type, self._fn_name = saved_return, saved_fn
+        self._in_handler = saved_handler
         return fn_of([p.type for p in expr.params], ret)
 
     def _synth_TryExpr(self, expr: A.TryExpr, expected) -> Type:
@@ -737,9 +744,21 @@ class Checker:
         # N-05: diagnose the OPERAND first. A `?` after a plain value
         # (`let x = 1 ?`) is an operand problem, not a return-type
         # problem — reporting the return type first misleads.
-        if t.name == "Result" and t.params:
+        is_result = t.name == "Result" and bool(t.params) and not t.nullable
+        is_nullable = t.nullable and t.name != "Result"
+        if t.name == "Result" and t.nullable:
+            # A nullable Result fails BOTH kind rules (G-M2-6): it is
+            # neither a plain Result nor a plain nullable.
+            self._error(expr.span, "E2001",
+                        "`?` on a nullable `Result` has no defined "
+                        "meaning",
+                        expected="Result[T, E] or T?", found=str(t),
+                        help="unwrap it first, then propagate the "
+                             "`Result`")
+            return UNKNOWN
+        if is_result:
             ok = t.params[0]
-        elif t.nullable:
+        elif is_nullable:
             ok = _strip_nullable(t)
         else:
             self._error(expr.span, "E2001",
@@ -749,6 +768,14 @@ class Checker:
                              "with `?` — a plain value has nothing to "
                              "propagate")
             return UNKNOWN
+        # The kind rule (D30, mirrored exactly from the emitter's
+        # `_propagate_unwrapped`): a Result operand needs a
+        # Result-returning function; a nullable operand needs a
+        # nullable-returning function. A handler returns nothing, so
+        # `?` there just exits the handler (a bare `return`) — either
+        # kind is allowed.
+        if self._in_handler:
+            return ok
         if self._return_type is None:
             self._error(expr.span, "E2001",
                         "`?` may only be used inside a function that "
@@ -756,16 +783,25 @@ class Checker:
                         help="move this into a function returning "
                              "`Result[T, error]`, or handle the error here")
             return UNKNOWN
-        if self._return_type.name == "Result" or self._return_type.nullable:
-            pass
-        else:
+        if is_result and self._return_type.name != "Result":
             self._error(expr.span, "E2001",
-                        "`?` requires the enclosing function to return "
-                        "`Result[?, E]` or a `?` type",
-                        expected="Result[?, error] or T?",
+                        "`?` on a `Result` value inside a function "
+                        "that does not return a `Result`",
+                        expected="Result[?, error]",
                         found=str(self._return_type),
-                        help="change the function's return type, or "
-                             "handle the error here instead of using `?`")
+                        help="change the function's return type to "
+                             "`Result[?, error]`, or handle the error "
+                             "here instead of using `?`")
+            return UNKNOWN
+        if is_nullable and not self._return_type.nullable:
+            self._error(expr.span, "E2001",
+                        "`?` on a nullable value inside a function "
+                        "that does not return a nullable",
+                        expected="T?",
+                        found=str(self._return_type),
+                        help="change the function's return type to a "
+                             "`?` type, or handle the `none` case here "
+                             "instead of using `?`")
             return UNKNOWN
         return ok
 
@@ -973,6 +1009,11 @@ class Checker:
     def _is_optional_chain(self, expr: A.Expr) -> bool:
         if isinstance(expr, A.Member):
             return expr.optional or self._is_optional_chain(expr.obj)
+        if isinstance(expr, A.Call) and isinstance(expr.func, A.Member):
+            # A method call in the chain: `s?.unwrap().upper()` —
+            # the receiver of `.upper()` is the `?.unwrap()` call.
+            return expr.func.optional or self._is_optional_chain(
+                expr.func.obj)
         return False
 
     def _methods_for(self, obj_type: Type) -> dict:
@@ -1355,7 +1396,24 @@ class Checker:
         # Methods defined on T? itself (is_some / is_none / unwrap).
         if obj_type.nullable and func.name in METHODS.get("nullable", {}):
             sig = METHODS["nullable"][func.name]
-            return self._call_method_sig(obj_type, func.name, sig, expr)
+            ret = self._call_method_sig(obj_type, func.name, sig, expr)
+            if _is_unknown(ret):
+                return ret
+            if not func.optional:
+                # `.unwrap()` / `.is_some()` / `.is_none()` on a
+                # nullable: the plain (non-optional) form.
+                return ret
+            # `?.is_some()` / `?.is_none()` / `?.unwrap()`: the chain
+            # short-circuits on `none`, so the result is nullable —
+            # EXCEPT `?.unwrap()` on a nullable Result, where the
+            # `?` unwraps the outer nullable and `.unwrap()` unwraps
+            # the Result inside, so the result is the Result's value
+            # type, still nullable.
+            if func.name == "unwrap":
+                inner = _strip_nullable(obj_type)
+                if inner.name == "Result" and inner.params:
+                    return nullable_of(inner.params[0])
+            return nullable_of(ret)
         if obj_type.nullable:
             # `?.method()` (or a chain after `?.`) unwraps the result.
             inner = _strip_nullable(obj_type)

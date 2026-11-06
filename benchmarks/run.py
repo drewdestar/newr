@@ -236,7 +236,11 @@ def main() -> int:
               f"{ratio(results['b6b_shop_gen'], results['b6b_shop_hw']):.2f}")
     md.append("  (10,000 was reduced to 1,000: per-call commit fsync "
               "dominates and 10k took >4 min; 1k still measures the code path. "
-              "Both print the final balance 1000.)\n")
+              "Both print the final balance 1000.)")
+    md.append("  (Methodology, M2 fix #6: the hand-written driver imports "
+              "discord too — the generated driver imports the whole shop "
+              "bot, so without the same import the comparison would measure "
+              "interpreter startup, not the economy loop.)\n")
     md.append("## B7 — Peak RSS\n")
     md.append(f"- compile (shop): {results['b7_compile']['rss_mb']:.1f} MB")
     md.append(f"- run (hello): {results['b7_run']['rss_mb']:.1f} MB\n")

@@ -255,6 +255,12 @@ jobs:
           python hello_out.py
           python newr build examples/shop.newr -o shop_out.py
           python -m py_compile shop_out.py shop_items.py
+          if python shop_out.py 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
           python newr build examples/hello_bot.newr -o hello_bot_out.py
           if python hello_bot_out.py 2>&1 | grep -q DISCORD_TOKEN; then
             echo "hello_bot: token guard reached (expected, no token set)"

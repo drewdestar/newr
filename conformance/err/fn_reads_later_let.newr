@@ -1,0 +1,9 @@
+# expect: E2005
+# A top-level let whose RHS calls a function that (transitively)
+# reads a LATER let must be rejected: the call executes in file
+# order, before the let exists (M2 evaluation #3, G-M2-3).
+fn getx() -> int:
+  return x
+let a = getx()
+let x = 42
+print a

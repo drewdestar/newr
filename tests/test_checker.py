@@ -326,6 +326,35 @@ class TestNullability(unittest.TestCase):
                   'let b: bool = s.is_some()\nprint b\n')
         self.assertEqual(errs(r), [])
 
+    def test_optional_nullable_methods_are_nullable(self):
+        # M2 evaluation must-fix #5 (G-M2-2 / D31): `?.is_some()` /
+        # `?.is_none()` / `?.unwrap()` must type as nullable — the
+        # chain short-circuits on `none`.
+        r = check('let v: int? = none\n'
+                  'let b: bool? = v?.is_some()\n'
+                  'let c: bool? = v?.is_none()\n'
+                  'let n: int? = v?.unwrap()\n'
+                  'print b\nprint c\nprint n\n')
+        self.assertEqual(errs(r), [])
+
+    def test_optional_nullable_methods_assigned_to_non_nullable_is_E2001(self):
+        r = check('let v: int? = none\n'
+                  'let b: bool = v?.is_some()\n'
+                  'print b\n')
+        self.assertIn("E2001", codes(r))
+        r2 = check('let v: int? = none\n'
+                   'let n: int = v?.unwrap()\n'
+                   'print n\n')
+        self.assertIn("E2001", codes(r2))
+
+    def test_optional_unwrap_on_nullable_result_is_nullable_value(self):
+        # `?.unwrap()` on a nullable Result: the `?` unwraps the
+        # outer nullable, `.unwrap()` unwraps the Result inside.
+        r = check('let r: Result[int, error]? = ok(5)\n'
+                  'let n: int? = r?.unwrap()\n'
+                  'print n\n')
+        self.assertEqual(errs(r), [])
+
     def test_member_flag_qdot_vs_dot(self):
         # AST amendment: Member carries optional=True exactly for `?.`.
         from compiler.ast_nodes import Member
@@ -372,6 +401,81 @@ class TestResultAndPropagate(unittest.TestCase):
         r = check('fn g() -> Result[int, error]:\n  return ok(1)\n'
                   'fn f() -> Result[int, error]:\n  let v = g()?\n  return ok(v)\n')
         self.assertEqual(errs(r), [])
+
+    def test_propagate_nullable_into_result_fn_is_E2001(self):
+        # M2 evaluation must-fix #4 (G-M2-1 / D30): `?` on a nullable
+        # operand inside a Result fn was accepted by the checker but
+        # failed at build with E4001. The checker must E2001 it.
+        r = check('fn f() -> Result[int, error]:\n'
+                  '  let v: int? = none\n'
+                  '  let w = v?\n'
+                  '  return ok(w)\n')
+        self.assertIn("E2001", codes(r))
+
+    def test_propagate_result_into_nullable_fn_is_E2001(self):
+        # The mirror image: a Result operand inside a nullable fn.
+        r = check('fn f() -> int?:\n'
+                  '  let v: Result[int, error] = ok(1)\n'
+                  '  let w = v?\n'
+                  '  return w\n')
+        self.assertIn("E2001", codes(r))
+
+    def test_propagate_nullable_result_into_result_fn_is_E2001(self):
+        # A nullable Result operand fails BOTH kind rules: it is
+        # nullable AND a Result.
+        r = check('fn f() -> Result[int, error]:\n'
+                  '  let v: Result[int, error]? = none\n'
+                  '  let w = v?\n'
+                  '  return ok(w)\n')
+        self.assertIn("E2001", codes(r))
+
+    def test_propagate_nullable_result_into_nullable_fn_is_E2001(self):
+        r = check('fn f() -> int?:\n'
+                  '  let v: Result[int, error]? = none\n'
+                  '  let w = v?\n'
+                  '  return w\n')
+        self.assertIn("E2001", codes(r))
+
+    def test_propagate_nullable_into_nullable_fn_is_ok(self):
+        r = check('fn f() -> int?:\n'
+                  '  let v: int? = none\n'
+                  '  let w = v?\n'
+                  '  return w\n')
+        self.assertEqual(errs(r), [])
+
+    def test_propagate_result_in_handler_is_ok(self):
+        # A handler returns nothing, so `?` there just exits the
+        # handler — either operand kind is allowed (matches the
+        # emitter's handler branch).
+        r = check('fn g() -> Result[int, error]:\n  return ok(1)\n'
+                  'command ping:\n'
+                  '  description: "x"\n'
+                  '  do:\n'
+                  '    let v = g()?\n'
+                  '    print v\n')
+        self.assertEqual(errs(r), [])
+
+    def test_propagate_nullable_in_handler_is_ok(self):
+        r = check('command ping:\n'
+                  '  description: "x"\n'
+                  '  do:\n'
+                  '    let v: int? = none\n'
+                  '    let w = v?\n'
+                  '    print w\n')
+        self.assertEqual(errs(r), [])
+
+    def test_propagate_in_lambda_in_handler_is_E2001(self):
+        # A lambda is a function boundary: `?` inside it is judged
+        # against the lambda's own return type (`int`, not a
+        # Result), not the enclosing handler.
+        r = check('fn g() -> Result[int, error]:\n  return ok(1)\n'
+                  'command ping:\n'
+                  '  description: "x"\n'
+                  '  do:\n'
+                  '    let f = fn() -> int:\n'
+                  '      return g()?\n'
+                  '    print f()\n')
+        self.assertIn("E2001", codes(r))
 
 
 class TestMatch(unittest.TestCase):

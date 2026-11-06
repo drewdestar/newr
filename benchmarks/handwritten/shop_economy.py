@@ -5,6 +5,11 @@ written by a human with aiosqlite directly — the same SQL shape
 the emitted bot uses (INSERT ... ON CONFLICT for the balance,
 ledger insert, commit per call), so the comparison is fair.
 Prints the final balance as a checksum.
+
+The `import discord` below is deliberate (M2 fix #6): the
+generated driver imports the whole emitted shop bot, which imports
+discord (~300-700 ms one-time cost); without the same import here,
+hyperfine would measure interpreter startup, not the economy loop.
 """
 
 import asyncio
@@ -13,6 +18,7 @@ import tempfile
 from pathlib import Path
 
 import aiosqlite
+import discord  # noqa: F401  (equalises the generated driver's import)
 
 
 async def main():

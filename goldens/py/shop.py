@@ -2,9 +2,11 @@
 # Edit the .newr file and rebuild with: newr build examples/shop.newr
 # A tiny shop
 
+import asyncio
 import logging
 import os
 import time
+import types
 
 import aiosqlite
 import discord
@@ -13,7 +15,6 @@ from discord.ext import commands, tasks
 
 from newr_rt import mul, neg, sub, to_str
 import shop_items
-import types
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +72,7 @@ class Bot(commands.Bot):
         intents.members = True
         super().__init__(command_prefix="!", intents=intents)
         self.economy_db = None
+        self.economy_lock = None
 
     async def setup_hook(self) -> None:
         await self._economy_connect()
@@ -88,68 +90,144 @@ class Bot(commands.Bot):
 
     async def _economy_connect(self) -> None:
         self.economy_db = await aiosqlite.connect("economy.db")
+        self.economy_lock = asyncio.Lock()
         await self.economy_db.execute("CREATE TABLE IF NOT EXISTS balances (user TEXT PRIMARY KEY, balance INTEGER)")
         await self.economy_db.execute("CREATE TABLE IF NOT EXISTS ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, amount INTEGER NOT NULL, key TEXT UNIQUE, created_at INTEGER NOT NULL)")
         await self.economy_db.commit()
 
     async def economy_balance(self, user_id: str) -> int:
-        async with self.economy_db.execute("SELECT balance FROM balances WHERE user = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-        return row[0] if row is not None else 0
+        async with self.economy_lock:
+            async with self.economy_db.execute("SELECT balance FROM balances WHERE user = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+            return row[0] if row is not None else 0
 
     async def _economy_apply(self, user_id: str, amount: int, key: str | None) -> None:
         # Idempotent on key: a duplicate key is a replay,
-        # not an error (P11) — the balance + ledger land
-        # in one transaction.
-        if key is not None:
-            async with self.economy_db.execute("SELECT 1 FROM ledger WHERE key = ?", (key,)) as cursor:
-                if await cursor.fetchone() is not None:
-                    return
-        await self.economy_db.execute("INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance", (user_id, amount))
-        await self.economy_db.execute("INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?)", (user_id, amount, key, int(time.time())))
-        await self.economy_db.commit()
+        # not an error (P11). One explicit transaction:
+        # the balance + ledger land together or not at all,
+        # and a failed ledger INSERT rolls the balance
+        # change back instead of leaving it for a later
+        # commit() to commit. The lock serialises the ops
+        # (and the reads): aiosqlite runs all ops in one
+        # thread, so a second coroutine's BEGIN IMMEDIATE
+        # would block that thread until the busy timeout,
+        # and a concurrent read would see uncommitted
+        # partial state. The lock is not reentrant: no
+        # economy method may call another while holding it
+        # (credit delegates to _apply without taking it).
+        async with self.economy_lock:
+            if key is not None:
+                async with self.economy_db.execute("SELECT 1 FROM ledger WHERE key = ?", (key,)) as cursor:
+                    if await cursor.fetchone() is not None:
+                        return
+            await self.economy_db.execute("BEGIN IMMEDIATE")
+            try:
+                await self.economy_db.execute("INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance", (user_id, amount))
+                await self.economy_db.execute("INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?)", (user_id, amount, key, int(time.time())))
+                await self.economy_db.execute("COMMIT")
+            except Exception:
+                await self.economy_db.execute("ROLLBACK")
+                raise
 
     async def economy_credit(self, user_id: str, amount: int, key: str | None = None) -> None:
         await self._economy_apply(user_id, amount, key)
 
     async def economy_debit(self, user_id: str, amount: int, key: str | None = None) -> bool:
-        if await self.economy_balance(user_id) < amount:
-            return False
-        await self._economy_apply(user_id, -amount, key)
-        return True
+        # The balance check is inside the transaction (no
+        # TOCTOU): a concurrent debit cannot slip between
+        # the check and the write. A replayed key returns
+        # True — the debit already happened.
+        async with self.economy_lock:
+            if key is not None:
+                async with self.economy_db.execute("SELECT 1 FROM ledger WHERE key = ?", (key,)) as cursor:
+                    if await cursor.fetchone() is not None:
+                        return True
+            await self.economy_db.execute("BEGIN IMMEDIATE")
+            try:
+                async with self.economy_db.execute("SELECT balance FROM balances WHERE user = ?", (user_id,)) as cursor:
+                    row = await cursor.fetchone()
+                if (row[0] if row is not None else 0) < amount:
+                    await self.economy_db.execute("ROLLBACK")
+                    return False
+                await self.economy_db.execute("INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance", (user_id, -amount))
+                await self.economy_db.execute("INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?)", (user_id, -amount, key, int(time.time())))
+                await self.economy_db.execute("COMMIT")
+            except Exception:
+                await self.economy_db.execute("ROLLBACK")
+                raise
+            return True
 
     async def economy_transfer(self, from_id: str, to_id: str, amount: int, key: str | None = None) -> bool:
-        if await self.economy_balance(from_id) < amount:
-            return False
-        # The two legs get derived keys (the ledger's key
-        # is UNIQUE, so one key cannot cover both legs).
-        if key is not None:
-            async with self.economy_db.execute("SELECT 1 FROM ledger WHERE key = ? OR key = ?", (f"{key}:out", f"{key}:in")) as cursor:
-                if await cursor.fetchone() is not None:
+        # Both legs + the ledger in ONE transaction. A retry
+        # heals a partial transfer: each leg is topped up
+        # to its intended total (the out-leg debits `amount`,
+        # the in-leg credits `amount`), so no money is
+        # created or destroyed however the first attempt
+        # died — a crash between the legs, or a poisoned
+        # ledger row. The leg INSERTs upsert on the key:
+        # a row that merely exists (amount 0) is topped up
+        # instead of colliding with the UNIQUE constraint.
+        # The debit side was already authorised at the
+        # original attempt, so the remaining debit is
+        # applied unconditionally; refusing would leave
+        # money destroyed. The per-leg amounts are read from
+        # the ledger (not just presence): a row that merely
+        # exists with amount 0 heals the full leg.
+        async with self.economy_lock:
+            out_done = 0
+            in_done = 0
+            if key is not None:
+                async with self.economy_db.execute("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE key = ?", (f"{key}:out",)) as cursor:
+                    out_done = -(await cursor.fetchone())[0]
+                async with self.economy_db.execute("SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE key = ?", (f"{key}:in",)) as cursor:
+                    in_done = (await cursor.fetchone())[0]
+                out_done = max(0, min(amount, out_done))
+                in_done = max(0, min(amount, in_done))
+                if out_done >= amount and in_done >= amount:
                     return True
-        await self._economy_apply(from_id, -amount, f"{key}:out" if key is not None else None)
-        await self._economy_apply(to_id, amount, f"{key}:in" if key is not None else None)
-        return True
+            out_left = amount - out_done
+            in_left = amount - in_done
+            await self.economy_db.execute("BEGIN IMMEDIATE")
+            try:
+                if out_left > 0:
+                    async with self.economy_db.execute("SELECT balance FROM balances WHERE user = ?", (from_id,)) as cursor:
+                        row = await cursor.fetchone()
+                    if (row[0] if row is not None else 0) < out_left:
+                        await self.economy_db.execute("ROLLBACK")
+                        return False
+                    await self.economy_db.execute("INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance", (from_id, -out_left))
+                    await self.economy_db.execute("INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET amount = ledger.amount + excluded.amount", (from_id, -out_left, f"{key}:out" if key is not None else None, int(time.time())))
+                if in_left > 0:
+                    await self.economy_db.execute("INSERT INTO balances (user, balance) VALUES (?, ?) ON CONFLICT(user) DO UPDATE SET balance = balance + excluded.balance", (to_id, in_left))
+                    await self.economy_db.execute("INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET amount = ledger.amount + excluded.amount", (to_id, in_left, f"{key}:in" if key is not None else None, int(time.time())))
+                await self.economy_db.execute("COMMIT")
+            except Exception:
+                await self.economy_db.execute("ROLLBACK")
+                raise
+            return True
 
     async def economy_get(self, table: str, key) -> types.SimpleNamespace | None:
-        async with self.economy_db.execute(f"SELECT * FROM {table} WHERE user = ?", (key,)) as cursor:
-            row = await cursor.fetchone()
-            if row is None:
-                return None
-            cols = [d[0] for d in cursor.description]
-            return types.SimpleNamespace(**dict(zip(cols, row)))
+        async with self.economy_lock:
+            async with self.economy_db.execute(f"SELECT * FROM {table} WHERE user = ?", (key,)) as cursor:
+                row = await cursor.fetchone()
+                if row is None:
+                    return None
+                cols = [d[0] for d in cursor.description]
+                return types.SimpleNamespace(**dict(zip(cols, row)))
 
     async def economy_set(self, table: str, row) -> None:
-        data = vars(row)
-        cols = ", ".join(data)
-        placeholders = ", ".join("?" * len(data))
-        updates = ", ".join(f"{c} = excluded.{c}" for c in data)
-        await self.economy_db.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders}) ON CONFLICT(user) DO UPDATE SET {updates}", tuple(data.values()))
-        await self.economy_db.commit()
+        async with self.economy_lock:
+            data = vars(row)
+            cols = ", ".join(data)
+            placeholders = ", ".join("?" * len(data))
+            updates = ", ".join(f"{c} = excluded.{c}" for c in data)
+            await self.economy_db.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders}) ON CONFLICT(user) DO UPDATE SET {updates}", tuple(data.values()))
+            await self.economy_db.commit()
 
     async def economy_delete(self, table: str, key) -> None:
-        await self.economy_db.execute(f"DELETE FROM {table} WHERE user = ?", (key,))
-        await self.economy_db.commit()
+        async with self.economy_lock:
+            await self.economy_db.execute(f"DELETE FROM {table} WHERE user = ?", (key,))
+            await self.economy_db.commit()
 
 
 bot = Bot()

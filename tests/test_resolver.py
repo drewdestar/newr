@@ -194,6 +194,20 @@ class TestDuplicatesAndReserved(unittest.TestCase):
         p = prog(functions=[fn("len")])
         self.assertEqual(codes(resolve(p)), ["E3007"])
 
+    def test_newr_prefix_names_are_E3001(self):
+        # The emitter's temporaries live in the `_newr_` namespace
+        # (_newr_t0, _newr_result, ...): a user name with that prefix
+        # would collide with them (M2 evaluation nice-to-have).
+        for src in ("let _newr_t0 = 1\n",
+                    "fn _newr_result() -> int:\n  return 1\n",
+                    "let _newr_x = 1\nprint _newr_x\n"):
+            r = resolve_source(src, "<string>")
+            self.assertIn("E3001", codes(r), src)
+
+    def test_underscore_names_without_newr_prefix_are_ok(self):
+        r = resolve_source("let _x = 1\nprint _x\n", "<string>")
+        self.assertEqual(r.diagnostics, [])
+
     def test_param_named_user_is_E3007_everywhere(self):
         p = prog(functions=[fn("f", [param("user")])])
         self.assertEqual(codes(resolve(p)), ["E3007"])
