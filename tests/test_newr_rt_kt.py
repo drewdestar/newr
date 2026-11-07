@@ -3,7 +3,7 @@
 Mirrors tests/test_newr_rt_java.py: compile the runtime together
 with the driver in tests/kt/RtChecks.kt and run it. Skips when no
 kotlinc/java is available (KOTLIN_HOME, ~/kotlin, or PATH, plus
-JAVA_HOME, ~/jdk-21/bin, or PATH — kotlinc's script needs `java`
+JAVA_HOME, ~/jdk-21/bin, or PATH - kotlinc's script needs `java`
 on PATH).
 """
 

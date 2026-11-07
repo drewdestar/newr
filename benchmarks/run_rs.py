@@ -23,7 +23,7 @@ Differences from run_java.py (all deliberate, all documented):
   benchmarks/generated/loop.newr on every run (there is no
   blessed loop.rs to compare against, unlike the Java twin).
 - Rust programs are compiled once by the runner (cargo build
-  --offline, debug profile — the honest default, like javac
+  --offline, debug profile - the honest default, like javac
   with no optimisation flags); hyperfine times only the built
   binary, never the build. Every cargo build uses
   CARGO_TARGET_DIR=$HOME/.cargo-target (a persistent path:
@@ -34,14 +34,14 @@ Differences from run_java.py (all deliberate, all documented):
   overwrite each other's binary in the shared debug/ dir.
 - The generated shop Bot is a plain `pub struct Bot` (not a
   nested class), so the B6b generated driver uses it directly
-  (`#[path = "shop.rs"] mod shop;`) — no reflection. The
+  (`#[path = "shop.rs"] mod shop;`) - no reflection. The
   driver does NOT start the tokio runtime and makes no Discord
   connection; it only calls Bot::connect + economy_credit.
 - Both B6b drivers open their DB in the CWD; the timed command
   itself starts in a fresh /tmp dir (tmpfs), so both pay the
   same fsync cost on the same filesystem (a `cd` in hyperfine
   --prepare does NOT carry into the benchmark, so the fresh dir
-  is made inside the timed command — the same lesson as Java).
+  is made inside the timed command - the same lesson as Java).
 - Rust links statically, so there is no JVM-style class load to
   equalise (M2 fix #6 does not apply): the hand-written shop
   driver still links serenity + tokio (a trivial reference
@@ -101,7 +101,7 @@ HELLO_RS = """\
 //
 // Written by a human (not generated-then-edited) for the M5
 // benchmarks (B4/B5/B8): the same observable behavior as
-// `newr build --target rs examples/hello.newr` — print
+// `newr build --target rs examples/hello.newr` - print
 // "Hello, world!".
 fn main() {
   println!("Hello, world!");
@@ -115,7 +115,7 @@ LOOP_PLAIN_RS = """\
 // a human in plain Rust (no checked helpers): 100,000 iterations
 // of integer arithmetic, printing a checksum so the loop cannot be
 // optimized away. Rust `%` already takes the dividend's sign, like
-// newr's `%` (tmod) — and the values stay far below 2**63, so plain
+// newr's `%` (tmod) - and the values stay far below 2**63, so plain
 // i64s are exact here.
 fn main() {
   let mut total: i64 = 0;
@@ -132,7 +132,7 @@ LOOP_CHECKED_RS = """\
 // Hand-written checked-int tight loop with the newr runtime (B6).
 //
 // The same loop as benchmarks/generated/loop.newr emits, written by
-// a human using the newr_rt checked helpers directly — the honest
+// a human using the newr_rt checked helpers directly - the honest
 // comparison for "what does the checked-int runtime cost": the
 // emitted program should be within noise of this one, and both are
 // slower than the plain-int loop (loop_plain.rs).
@@ -161,7 +161,7 @@ SHOP_ECONOMY_GEN_RS = """\
 // to one user; the final balance is printed as a checksum.
 //
 // The emitted Bot is a plain `pub struct Bot`, so the driver uses
-// it directly (`#[path = "shop.rs"] mod shop;`) — no reflection.
+// it directly (`#[path = "shop.rs"] mod shop;`) - no reflection.
 // Each credit gets its own idempotency key (`bench-{n}`), like a
 // real call site; the driver never starts the tokio runtime.
 //
@@ -187,7 +187,7 @@ SHOP_ECONOMY_HW_RS = """\
 // Hand-written shop economy benchmark (B6b comparison).
 //
 // The same 1,000 credits as the generated driver, written by a
-// human with plain rusqlite directly — the same SQL shape the
+// human with plain rusqlite directly - the same SQL shape the
 // emitted Rust bot uses (balances stored as TEXT, one IMMEDIATE
 // transaction per credit, a ledger row per credit with a unique
 // key, INSERT ... ON CONFLICT for the balance). Prints the final
@@ -201,7 +201,7 @@ SHOP_ECONOMY_HW_RS = """\
 // The `let _ = serenity::...` line below is deliberate: the
 // generated driver links the whole emitted shop bot (serenity +
 // poise + tokio), so this driver links serenity + tokio too, so
-// both sides pay the same dependency weight. It is a load only —
+// both sides pay the same dependency weight. It is a load only -
 // no Discord connection is made.
 fn main() {
   let _ = serenity::model::gateway::GatewayIntents::GUILDS;
@@ -280,7 +280,7 @@ def _hyperfine(name: str, cmd: list[str], runs: int, warmup: int = 0,
     if shell_none:
         # No shell at all: hyperfine execs the binary directly.
         # The Rust binaries run in ~1-5 ms, so a shell spawn
-        # (~1-2 ms on this VM) would dominate the measurement —
+        # (~1-2 ms on this VM) would dominate the measurement -
         # and under load hyperfine has recorded literal 0.0 s wall
         # times through the shell for such fast commands (seen in
         # the first --quick run: b6_loop_checked_rs mean 0.0).
@@ -481,7 +481,7 @@ def main() -> int:
         def bin_cmd(name: str) -> list[str]:
             return [str(bin_dir / name)]
 
-        # B1: compile cold (no warmup) — the Rust target.
+        # B1: compile cold (no warmup) - the Rust target.
         results["b1_hello_rs"] = _hyperfine(
             "b1_hello_rs", [PY, str(LAUNCHER), "build", "--target", "rs",
                             "examples/hello.newr", "-o",
@@ -570,7 +570,7 @@ def main() -> int:
     finally:
         shutil.rmtree(build_root, ignore_errors=True)
 
-    # The M5 (Rust) section for BENCHMARKS.md — printed, NOT
+    # The M5 (Rust) section for BENCHMARKS.md - printed, NOT
     # written (BENCHMARKS.md is a shared file outside this
     # runner's file list).
     def fmt(r: dict) -> str:
@@ -596,7 +596,7 @@ def main() -> int:
     loop_size_ratio = (sizes["loop_gen"]["bytes"]
                        / sizes["loop_hw"]["bytes"])
     md = []
-    md.append("# Benchmarks — M5 (Rust emitter)\n")
+    md.append("# Benchmarks - M5 (Rust emitter)\n")
     md.append(f"Machine: {platform.system()} {platform.machine()}, "
               f"Python {platform.python_version()}, {rustc_ver}, "
               f"serenity 0.12.5 + poise 0.7.1 + rusqlite 0.32.1, "
@@ -605,7 +605,7 @@ def main() -> int:
     md.append("All figures are measured, not promised. Raw hyperfine JSON "
               "is in `benchmarks/raw/` (`*_rs.json`). The compile "
               "benchmarks (B1/B2/B7-compile) measure the same Python "
-              "compiler as M2, emitting Rust instead of Python — the "
+              "compiler as M2, emitting Rust instead of Python - the "
               "difference is the emitter. Rust programs are compiled "
               "once by the runner (cargo build --offline, debug "
               "profile, CARGO_TARGET_DIR=$HOME/.cargo-target); the "
@@ -615,61 +615,61 @@ def main() -> int:
               "dominate the measurement); B1/B2/B6b use the shell "
               "as in the other targets. The B6b drivers open economy.db in the CWD and "
               "the timed command itself starts in a fresh /tmp dir "
-              "(tmpfs) — a `cd` in hyperfine --prepare does not carry "
+              "(tmpfs) - a `cd` in hyperfine --prepare does not carry "
               "into the benchmark, so the fresh dir is made inside "
-              "the command — so both pay the same fsync cost on the "
+              "the command - so both pay the same fsync cost on the "
               "same filesystem. The generated shop Bot is a plain "
               "`pub struct Bot`, so the generated B6b driver uses it "
               "directly (no reflection); neither driver makes a "
               "Discord connection.\n")
-    md.append("## B1 — Compile, cold (no warmup), `--target rs`\n")
+    md.append("## B1 - Compile, cold (no warmup), `--target rs`\n")
     md.append(f"- hello: {fmt(results['b1_hello_rs'])}")
     md.append(f"- shop: {fmt(results['b1_shop_rs'])}\n")
-    md.append("## B2 — Compile, warm, `--target rs`\n")
+    md.append("## B2 - Compile, warm, `--target rs`\n")
     md.append(f"- hello (no change): {fmt(results['b2_hello_rs'])}")
     md.append(f"- shop (one file changed): {fmt(results['b2_shop_change_rs'])}\n")
-    md.append("## B4 — Generated code size (Rust)\n")
+    md.append("## B4 - Generated code size (Rust)\n")
     for label, s in sizes.items():
         md.append(f"- {label}: {s['bytes']} bytes, {s['lines']} lines")
     md.append(f"- hello size ratio (generated/hand-written): "
               f"{hello_size_ratio:.2f}")
     md.append(f"- loop size ratio (generated/hand-written): "
               f"{loop_size_ratio:.2f}\n")
-    md.append("## B5 — Generated program startup (built binary)\n")
+    md.append("## B5 - Generated program startup (built binary)\n")
     md.append(f"- generated hello: {fmt(results['b5_hello_gen_rs'])}")
     md.append(f"- hand-written hello: {fmt(results['b5_hello_hw_rs'])}")
     md.append(f"- ratio (generated/hand-written): {startup_ratio:.2f}\n")
-    md.append("## B6 — Generated runtime (checked-int tight loop, 100k iterations)\n")
+    md.append("## B6 - Generated runtime (checked-int tight loop, 100k iterations)\n")
     md.append(f"- generated (checked helpers, newr_rt): {fmt(results['b6_loop_gen_rs'])}")
     md.append(f"- hand-written, plain i64: {fmt(results['b6_loop_plain_rs'])}")
     md.append(f"- hand-written, newr_rt helpers: {fmt(results['b6_loop_checked_rs'])}")
     md.append(f"- ratio generated/plain: {loop_ratio:.2f}")
     md.append(f"- ratio generated/checked-hand-written: {loop_checked_ratio:.2f}")
-    md.append("  (All three print the same checksum, 105003 — the loops agree.)")
+    md.append("  (All three print the same checksum, 105003 - the loops agree.)")
     if loop_ratio > 1.20:
         md.append(f"  (Note: the {loop_ratio:.2f} generated/plain ratio is "
-                  f"over the 1.20 proposal threshold — flagged honestly, "
+                  f"over the 1.20 proposal threshold - flagged honestly, "
                   f"not hidden. The generated loop pays the top-level-"
                   f"let design (R2): every `total`/`i` access is a "
                   f"`Mutex` lock/unlock through `gget`/`gset`, while "
                   f"the hand-written loops use plain locals. The "
                   f"checked helpers themselves are within noise of "
                   f"hand-written code using them "
-                  f"({loop_checked_ratio:.2f} generated/checked) — "
+                  f"({loop_checked_ratio:.2f} generated/checked) - "
                   f"the gap is the global-let access pattern, not the "
                   f"arithmetic. A `let` inside a fn would not pay "
                   f"it.)\n")
     else:
         md.append("")
-    md.append("## B6b — Shop economy, 1,000 credits (rusqlite, commit per call)\n")
+    md.append("## B6b - Shop economy, 1,000 credits (rusqlite, commit per call)\n")
     md.append(f"- generated (emitted shop Bot): {fmt(results['b6b_shop_gen_rs'])}")
     md.append(f"- hand-written (rusqlite directly): {fmt(results['b6b_shop_hw_rs'])}")
     md.append(f"- ratio (generated/hand-written): {shop_ratio:.2f}")
     md.append("  (Both print the final balance 1000.)\n")
-    md.append("## B7 — Peak RSS (Rust)\n")
+    md.append("## B7 - Peak RSS (Rust)\n")
     md.append(f"- compile (shop, --target rs): {results['b7_compile_rs']['rss_mb']:.1f} MB")
     md.append(f"- run (hello, built binary): {results['b7_run_rs']['rss_mb']:.1f} MB\n")
-    md.append("## B8 — Hand-written parity (Rust)\n")
+    md.append("## B8 - Hand-written parity (Rust)\n")
     md.append(f"- startup ratio: {startup_ratio:.2f} "
               f"(>1.20 would be a bug report)")
     md.append(f"- loop ratio (generated/plain): {loop_ratio:.2f} "
@@ -683,7 +683,7 @@ def main() -> int:
     section = "\n".join(md)
     print(section)
     print("M5 (Rust) section printed above (BENCHMARKS.md is NOT "
-          "written by this runner — add the section there by hand); "
+          "written by this runner - add the section there by hand); "
           "raw JSON in benchmarks/raw/*_rs.json")
     return 0
 

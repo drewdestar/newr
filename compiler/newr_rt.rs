@@ -8,7 +8,7 @@
 // compiles with plain `rustc <main>.rs` and no Cargo.toml.
 //
 // It lives in the compiler package as `compiler/newr_rt.rs` and
-// `newr build --target rs` copies it — byte-identical — next to
+// `newr build --target rs` copies it - byte-identical - next to
 // an emitted `.rs` file when (and only when) that program uses a
 // helper from it. Do not edit a copied file by hand: edit this file
 // in the newr repo and rebuild.
@@ -47,7 +47,7 @@ static NEXT_ERROR_ID: AtomicU64 = AtomicU64::new(1);
 /// Base of every newr `error` value. Carries the error payload.
 /// `code` is None unless set (a caught host error keeps its own
 /// code via as_error). Two errors are equal only when they are the
-/// same error (identity, by `id` — a clone keeps the id).
+/// same error (identity, by `id` - a clone keeps the id).
 #[derive(Clone, Debug)]
 pub struct NewrError {
     pub message: String,
@@ -164,7 +164,7 @@ pub fn gmut<T, F: FnOnce(&mut T)>(cell: &Mutex<Option<T>>, f: F) {
 // ---------------------------------------------------------------- int64
 
 /// Return `v` if it fits in signed 64-bit, else raise. (i64 is
-/// already the type, so this is the identity — kept for parity
+/// already the type, so this is the identity - kept for parity
 /// with the other runtimes' call sites.)
 pub fn check_int(v: i64) -> i64 {
     v
@@ -208,7 +208,7 @@ pub fn pow_int(a: i64, b: i64) -> i64 {
     // newr `**` on ints: checked, bounded before computing.
     // A negative exponent is an error (an int result cannot
     // represent it). Repeated squaring with a check at every
-    // multiply — `10 ** 10**9` raises instead of computing blindly.
+    // multiply - `10 ** 10**9` raises instead of computing blindly.
     if b < 0 {
         throw(NewrError::new("negative exponent for int pow"));
     }
@@ -238,7 +238,7 @@ pub fn pow_int(a: i64, b: i64) -> i64 {
 
 pub fn tdiv(a: i64, b: i64) -> i64 {
     // newr `/` on ints: truncating division (toward zero).
-    // Rust `/` already truncates — the check is the two error cases.
+    // Rust `/` already truncates - the check is the two error cases.
     if b == 0 {
         throw(NewrError::new("integer division by zero"));
     }
@@ -263,7 +263,7 @@ pub fn tmod(a: i64, b: i64) -> i64 {
 pub fn pow_float(a: f64, b: f64) -> f64 {
     // newr `**` on floats: IEEE semantics. Rust `powf` already
     // returns NaN for a negative base with a fractional exponent
-    // (Python returns a complex there — newr has no complex type,
+    // (Python returns a complex there - newr has no complex type,
     // so the answer is NaN) and Infinity on overflow. The one
     // case Rust gets wrong is a zero base with a negative
     // exponent: Rust gives Infinity, Python raises ZeroDivisionError.
@@ -292,7 +292,7 @@ pub fn fdiv(a: f64, b: f64) -> f64 {
     // raises like Python (Rust would give Infinity for a non-zero
     // dividend and NaN for 0/0). Python's native `/` raises the
     // BUILTIN ZeroDivisionError, so this throws the coded error,
-    // not the codeless class — a `catch e:` sees e.code ==
+    // not the codeless class - a `catch e:` sees e.code ==
     // "ZeroDivisionError" on every target.
     if b == 0.0 {
         throw(coded_error("ZeroDivisionError", "float division by zero"));
@@ -501,7 +501,7 @@ fn decimal_string(digits: &BigUint, places: i64) -> String {
 
 /// Round the exact decimal (digits / 10**scale) to `n` places,
 /// half away from zero, as a double. `n` below -308 rounds every
-/// finite double to (signed) zero — 10**309 already exceeds the
+/// finite double to (signed) zero - 10**309 already exceeds the
 /// largest finite double, so no huge power is ever built.
 fn round_exact_to_double(sign: i32, digits: BigUint, scale: u32, n: i64) -> f64 {
     if n < -308 {
@@ -518,7 +518,7 @@ fn round_exact_to_double(sign: i32, digits: BigUint, scale: u32, n: i64) -> f64 
 }
 
 /// newr `round()`: half-away-from-zero (schoolbook), on the
-/// EXACT value of the float — not its shortest repr.
+/// EXACT value of the float - not its shortest repr.
 /// `round(2.675, 2)` is 2.67, because the float 2.675 is stored
 /// slightly below 2.675. `round(x)` returns an `int` (int64
 /// range-checked); `round(x, n)` returns a `float`. Non-finite
@@ -742,7 +742,7 @@ pub fn to_bool_from_float(x: f64) -> bool {
 /// exponent is < -4 or >= 16, ".0" for integral floats. The
 /// digits are derived from the EXACT decimal expansion: the
 /// shortest prefix that parses back to the same double (round
-/// to nearest, ties to even — David Gay's dtoa mode 0, the rule
+/// to nearest, ties to even - David Gay's dtoa mode 0, the rule
 /// behind Python's repr).
 pub fn float_str(x: f64) -> String {
     if x.is_nan() {
@@ -763,7 +763,7 @@ pub fn float_str(x: f64) -> String {
     }
     let neg = x < 0.0;
     let ax = x.abs();
-    // Exact decimal digits of ax (finite expansion — every
+    // Exact decimal digits of ax (finite expansion - every
     // binary fraction has one) plus the decimal exponent of
     // the leading digit.
     let (_sign, digits_big, scale) = exact_decimal(ax);
@@ -1067,7 +1067,7 @@ pub fn struct_hash_u64(fields: &[u64]) -> u64 {
 // ---------------------------------------------------------------- dict / set
 
 /// A newr `dict[str, V]`: insertion-ordered like Python's dict
-/// (and Java's LinkedHashMap) — iteration and rendering follow
+/// (and Java's LinkedHashMap) - iteration and rendering follow
 /// insertion order; lookup is a hash map. Equality is
 /// order-insensitive (by key).
 #[derive(Clone, Debug)]
@@ -1123,7 +1123,7 @@ impl<V: Clone> Dict<V> {
 }
 
 impl<V: Clone> Dict<V> {
-    /// `d[k]`: a missing key is a KeyError (Python semantics —
+    /// `d[k]`: a missing key is a KeyError (Python semantics -
     /// the reference target raises; Java's `.get()` returning
     /// null is the divergence, not the rule).
     pub fn index(&self, key: &str) -> V {
@@ -1183,13 +1183,13 @@ impl<V> Default for Dict<V> {
     }
 }
 
-/// `{"k": v, ...}` — alternating key/value pairs into a Dict
+/// `{"k": v, ...}` - alternating key/value pairs into a Dict
 /// (insertion order). Null values are allowed.
 pub fn dict_of<V>(pairs: Vec<(String, V)>) -> Dict<V> {
     Dict::from_pairs(pairs)
 }
 
-/// A newr `set[T]`: insertion-ordered iteration (deterministic —
+/// A newr `set[T]`: insertion-ordered iteration (deterministic -
 /// Rust's default HashSet is randomly seeded, which would make
 /// `str(set)` flaky), membership by newr `==` (NaN is never a
 /// member of itself, -0.0 equals 0.0). Equality is
@@ -1393,7 +1393,7 @@ pub fn try_result<T, F: FnOnce() -> T>(f: F) -> Result<T, NewrError> {
 }
 
 /// newr `Result.unwrap()`: the Ok value, or the stored error
-/// re-thrown (the error itself, code and all — not a panic
+/// re-thrown (the error itself, code and all - not a panic
 /// message).
 pub fn result_unwrap<T>(r: Result<T, NewrError>) -> T {
     match r {
@@ -1590,7 +1590,7 @@ pub fn time_now() -> i64 {
         .unwrap_or(0)
 }
 
-/// newr `time.format(ts, fmt)`: UTC, never local time (P4) —
+/// newr `time.format(ts, fmt)`: UTC, never local time (P4) -
 /// the same program prints the same output on every machine.
 /// The format must be one of the spec's fixed set (§12.2).
 /// Civil-date conversion is Howard Hinnant's days-from-epoch
@@ -1705,7 +1705,7 @@ pub fn env_get_or(name: &str, dflt: &str) -> String {
 
 /// `env.args`: the command-line arguments, argv[0] included
 /// (Rust's `std::env::args` already carries argv[0], unlike
-/// Java's main-args — so no setMainArgs patch is needed).
+/// Java's main-args - so no setMainArgs patch is needed).
 pub fn env_args() -> Vec<String> {
     std::env::args().collect()
 }

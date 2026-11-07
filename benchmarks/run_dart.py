@@ -3,7 +3,7 @@
 
 Runs hyperfine for the timing benchmarks and the resource module
 for peak RSS, then PRINTS an M5 (Dart) section for BENCHMARKS.md
-(it does NOT edit BENCHMARKS.md — that file is owned by the parent
+(it does NOT edit BENCHMARKS.md - that file is owned by the parent
 orchestrator, which merges the section in) and writes
 benchmarks/raw/*_dart.json (raw hyperfine output).
 
@@ -19,7 +19,7 @@ Method notes (see BENCHMARKS.md for the full text):
   shop_economy) and the generated shop-economy driver live as
   string constants in this file and are written into the temp
   build dirs. The generated programs (hello, loop, shop) are
-  emitted fresh with `newr build --target dart` each run — a fresh
+  emitted fresh with `newr build --target dart` each run - a fresh
   emit is byte-identical to what `--bless` writes, so it is the
   blessed artifact.
 - Dart has no ahead-of-time compile step in this runner: `dart
@@ -28,7 +28,7 @@ Method notes (see BENCHMARKS.md for the full text):
   setup, never inside a timed command.
 - The sqlite3 package (3.9.0) loads its C library through a build
   hook: `dart pub get` does NOT run build hooks (verified live,
-  online and offline — no `.dart_tool/native_assets.yaml` after
+  online and offline - no `.dart_tool/native_assets.yaml` after
   pub get), and plain `dart <file>` does not run them either
   (it fails with "Couldn't resolve native function
   'sqlite3_initialize'"). The runner therefore runs each shop
@@ -36,20 +36,20 @@ Method notes (see BENCHMARKS.md for the full text):
   native asset; the timed runs then use plain `dart`.
   Loading the sqlite3 package costs several seconds of Dart
   startup on this VM (JIT kernel compile of the FFI bindings,
-  worse under load) — that fixed cost is paid equally by both
+  worse under load) - that fixed cost is paid equally by both
   B6b drivers, so the B6b ratio is compressed toward 1.0 and
   the means are startup-dominated; the loop work (1,000 commits)
   is the same 1,000 as the other targets.
 - Dart `%` is Euclidean, while newr `%` takes the dividend's sign
   (tmod), so the hand-written plain loop uses `.remainder(...)`
-  to print the same checksum (105003) as the generated loop — a
+  to print the same checksum (105003) as the generated loop - a
   Dart programmer writing truncating remainder writes exactly
   that, so it is the fair plain form.
 - Both B6b drivers open their DB in the CWD; the timed command
   itself starts in a fresh /tmp dir (tmpfs), so both pay the same
   fsync cost on the same filesystem (an earlier draft put one DB
   on the home disk and the other on tmpfs, and the disk one looked
-  ~100x slower — pure fsync latency, not the economy loop; and a
+  ~100x slower - pure fsync latency, not the economy loop; and a
   `cd` in hyperfine --prepare does NOT carry into the benchmark,
   so the fresh dir is made inside the timed command).
 - The generated shop Bot is a top-level class, so the B6b
@@ -91,7 +91,7 @@ HELLO_DART = """// Hand-written equivalent of the emitted hello program.
 //
 // Written by a human (not generated-then-edited) for the M5
 // benchmarks (B4/B5/B8): the same observable behavior as
-// `newr build --target dart examples/hello.newr` — print
+// `newr build --target dart examples/hello.newr` - print
 // "Hello, world!".
 
 void main() {
@@ -105,7 +105,7 @@ LOOP_PLAIN_DART = """// Hand-written checked-int tight loop (B6/B8 comparison).
 // a human in plain Dart (no checked helpers): 100,000 iterations
 // of integer arithmetic, printing a checksum so the loop cannot be
 // optimized away. Dart `%` is Euclidean, while newr `%` takes the
-// dividend's sign — so the plain form uses `.remainder(...)`,
+// dividend's sign - so the plain form uses `.remainder(...)`,
 // which is what a Dart programmer writes for truncating remainder.
 // The values stay far below 2**63, so plain ints are exact here.
 
@@ -123,7 +123,7 @@ void main() {
 LOOP_CHECKED_DART = """// Hand-written checked-int tight loop with the newr runtime (B6).
 //
 // The same loop as benchmarks/generated/loop.newr emits, written by
-// a human using the NewrRt checked helpers directly — the honest
+// a human using the NewrRt checked helpers directly - the honest
 // comparison for "what does the checked-int runtime cost": the
 // emitted program should be within noise of this one, and both are
 // slower than the plain-int loop (loop_plain.dart).
@@ -151,7 +151,7 @@ SHOP_ECONOMY_GEN_DART = """// Shop economy benchmark driver (B6b): 1,000 credits
 // to one user; the final balance is printed as a checksum.
 //
 // The emitted Bot is a top-level class (`class Bot` in shop.dart),
-// so the driver imports shop.dart and drives it directly — no
+// so the driver imports shop.dart and drives it directly - no
 // reflection (unlike Java). Importing shop.dart runs only its
 // top-level initializers (command builders); main() is not run,
 // so no gateway login and no timer ever start.
@@ -185,7 +185,7 @@ void main() {
 SHOP_ECONOMY_HW_DART = """// Hand-written shop economy benchmark (B6b comparison).
 //
 // The same 1,000 credits as the generated shop_economy driver,
-// written by a human with the sqlite3 package directly — the
+// written by a human with the sqlite3 package directly - the
 // same SQL shape the emitted Dart bot uses (balances stored as
 // TEXT, BEGIN IMMEDIATE / COMMIT per credit, INSERT ... ON
 // CONFLICT for the balance; no ledger row when the key is null,
@@ -196,14 +196,14 @@ SHOP_ECONOMY_HW_DART = """// Hand-written shop economy benchmark (B6b comparison
 // the runner starts every run in a fresh temp dir, so the balance
 // is fresh and both drivers pay the same fsync cost on the same
 // filesystem. (An earlier draft put the hand-written DB in /tmp
-// while the generated one sat on the home disk — the generated
+// while the generated one sat on the home disk - the generated
 // driver then looked ~100x slower, purely from fsync latency.)
 //
 // The `Nyxx.connectGateway;` below is deliberate (M2 fix #6): the
 // generated driver loads the whole emitted shop bot, which loads
 // nyxx; without the same package load here, hyperfine would
 // measure Dart + nyxx startup, not the economy loop. It is a load
-// only — no Discord connection is made.
+// only - no Discord connection is made.
 //
 // Run: dart shop_economy.dart (after `dart pub get` in this dir)
 
@@ -249,7 +249,7 @@ void main() {
 }
 """
 
-SHOP_ECONOMY_HW_PUBSPEC = f"""# Generated by newr benchmarks — do not edit by hand.
+SHOP_ECONOMY_HW_PUBSPEC = f"""# Generated by newr benchmarks - do not edit by hand.
 name: shop_economy_hw
 description: Hand-written shop economy benchmark driver.
 version: 1.0.0
@@ -325,7 +325,7 @@ def _build_hooks(d: Path, entry: str) -> None:
     """Run `dart run <entry>` once so the sqlite3 build hook writes
     .dart_tool/native_assets.yaml. `dart pub get` does NOT run build
     hooks (verified: no native_assets.yaml after pub get, online or
-    offline), and plain `dart <file>` does not run them either — it
+    offline), and plain `dart <file>` does not run them either - it
     fails with "Couldn't resolve native function 'sqlite3_initialize'"
     until a `dart run` has built the asset once. The run's output is
     discarded; the real checksum verification happens separately."""
@@ -383,7 +383,7 @@ def main() -> int:
         d.mkdir()
         (d / "hello.dart").write_text(HELLO_DART, encoding="utf-8")
         # loop (generated: fresh emit from loop.newr; the blessed
-        # benchmarks/generated/loop.dart does not exist yet — the
+        # benchmarks/generated/loop.dart does not exist yet - the
         # runner emits fresh, which is what --bless writes).
         d = build_root / "loop_gen"
         d.mkdir()
@@ -429,7 +429,7 @@ def main() -> int:
         def dart_cmd(sub: str, f: str) -> list[str]:
             return [DART, str(build_root / sub / f)]
 
-        # B1: compile cold (no warmup) — the Dart target.
+        # B1: compile cold (no warmup) - the Dart target.
         results["b1_hello_dart"] = _hyperfine(
             "b1_hello_dart", [PY, str(LAUNCHER), "build", "--target", "dart",
                               "examples/hello.newr", "-o",
@@ -482,7 +482,7 @@ def main() -> int:
         # --prepare in a separate shell, so a `cd` there does NOT
         # carry into the benchmark (verified: the prepare's cd is
         # ignored and the command would run in the repo dir, where
-        # each COMMIT fsyncs on the home disk at ~70 ms — the
+        # each COMMIT fsyncs on the home disk at ~70 ms - the
         # generated driver then looks ~100x slower, pure fsync
         # latency). The fresh tmpfs dir is therefore made IN the
         # timed command itself (mktemp costs ~ms, identical for
@@ -517,7 +517,7 @@ def main() -> int:
         shutil.rmtree(build_root, ignore_errors=True)
 
     # Build the M5 (Dart) section for BENCHMARKS.md (printed, NOT
-    # written — that file is owned by the parent orchestrator).
+    # written - that file is owned by the parent orchestrator).
     def fmt(r: dict) -> str:
         return (f"{r['mean']*1000:.1f} ms ± {r['stddev']*1000:.1f} ms "
                 f"(range {r['min']*1000:.1f}–{r['max']*1000:.1f} ms, "
@@ -531,7 +531,7 @@ def main() -> int:
     loop_checked_ratio = ratio(results["b6_loop_gen_dart"],
                                results["b6_loop_checked_dart"])
     md = []
-    md.append("# Benchmarks — M5 (Dart emitter)\n")
+    md.append("# Benchmarks - M5 (Dart emitter)\n")
     md.append(f"Machine: {platform.system()} {platform.machine()}, "
               f"Python {platform.python_version()}, {dart_ver}, "
               f"nyxx {NYXX_VERSION} + nyxx_commands "
@@ -540,72 +540,72 @@ def main() -> int:
     md.append("All figures are measured, not promised. Raw hyperfine JSON "
               "is in `benchmarks/raw/` (`*_dart.json`). The compile "
               "benchmarks (B1/B2/B7-compile) measure the same Python "
-              "compiler as M2, emitting Dart instead of Python — the "
+              "compiler as M2, emitting Dart instead of Python - the "
               "difference is the emitter. Dart programs run on the JIT "
               "directly (`dart <file>.dart`); there is no ahead-of-time "
               "compile step, and `dart pub get` runs once per shop dir "
               "in setup, never inside a timed command. The B6b drivers "
               "open economy.db in the CWD and the timed command itself "
-              "starts in a fresh /tmp dir (tmpfs) — a `cd` in hyperfine "
+              "starts in a fresh /tmp dir (tmpfs) - a `cd` in hyperfine "
               "--prepare does not carry into the benchmark, so the "
-              "fresh dir is made inside the command — so both pay the "
+              "fresh dir is made inside the command - so both pay the "
               "same fsync cost on the same filesystem. "
               "The generated shop Bot is a top-level class, so the "
               "generated B6b driver imports the emitted shop.dart and "
               "drives it directly (no reflection, unlike Java); the "
               "hand-written driver loads nyxx (a tear-off reference, "
               "no Discord connection) so both sides pay the same "
-              "package load (M2 fix #6) — neither makes a Discord "
+              "package load (M2 fix #6) - neither makes a Discord "
               "connection. Dart `%` is Euclidean, so the hand-written "
               "plain loop uses `.remainder(...)` to print the same "
               "checksum as the generated loop.\n")
-    md.append("## B1 — Compile, cold (no warmup), `--target dart`\n")
+    md.append("## B1 - Compile, cold (no warmup), `--target dart`\n")
     md.append(f"- hello: {fmt(results['b1_hello_dart'])}")
     md.append(f"- shop: {fmt(results['b1_shop_dart'])}\n")
-    md.append("## B2 — Compile, warm, `--target dart`\n")
+    md.append("## B2 - Compile, warm, `--target dart`\n")
     md.append(f"- hello (no change): {fmt(results['b2_hello_dart'])}")
     md.append(f"- shop (one file changed): {fmt(results['b2_shop_change_dart'])}\n")
-    md.append("## B4 — Generated code size (Dart)\n")
+    md.append("## B4 - Generated code size (Dart)\n")
     for label, s in sizes.items():
         md.append(f"- {label}: {s['bytes']} bytes, {s['lines']} lines")
     md.append(f"- hello size ratio (generated/hand-written): "
               f"{sizes['hello_gen']['bytes']/sizes['hello_hw']['bytes']:.2f}")
     md.append(f"- loop size ratio (generated/hand-written): "
               f"{sizes['loop_gen']['bytes']/sizes['loop_hw']['bytes']:.2f}\n")
-    md.append("## B5 — Generated program startup (`dart hello.dart`)\n")
+    md.append("## B5 - Generated program startup (`dart hello.dart`)\n")
     md.append(f"- generated hello: {fmt(results['b5_hello_gen_dart'])}")
     md.append(f"- hand-written hello: {fmt(results['b5_hello_hw_dart'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b5_hello_gen_dart'], results['b5_hello_hw_dart']):.2f}\n")
-    md.append("## B6 — Generated runtime (checked-int tight loop, 100k iterations)\n")
+    md.append("## B6 - Generated runtime (checked-int tight loop, 100k iterations)\n")
     md.append(f"- generated (checked helpers, NewrRt): {fmt(results['b6_loop_gen_dart'])}")
     md.append(f"- hand-written, plain ints: {fmt(results['b6_loop_plain_dart'])}")
     md.append(f"- hand-written, NewrRt helpers: {fmt(results['b6_loop_checked_dart'])}")
     md.append(f"- ratio generated/plain: {loop_ratio:.2f}")
     md.append(f"- ratio generated/checked-hand-written: {loop_checked_ratio:.2f}")
-    md.append("  (All three print the same checksum, 105003 — the loops agree.)")
+    md.append("  (All three print the same checksum, 105003 - the loops agree.)")
     if loop_ratio > 1.20:
         md.append(f"  (Note: the {loop_ratio:.2f} generated/plain ratio is "
-                  f"over the 1.20 proposal threshold — flagged honestly, "
+                  f"over the 1.20 proposal threshold - flagged honestly, "
                   f"not hidden. It is the checked-int price "
                   f"(BigInt range checks per operation plus a tmod call), "
                   f"the same shape as M2's 2.54: the generated code is within "
                   f"noise of hand-written code using the same checked "
                   f"helpers ({loop_checked_ratio:.2f}), and the "
-                  f"plain-int loop is not a fair target — it cannot "
+                  f"plain-int loop is not a fair target - it cannot "
                   f"overflow-check at all.)\n")
     else:
         md.append("")
-    md.append("## B6b — Shop economy, 1,000 credits (sqlite3, commit per call)\n")
+    md.append("## B6b - Shop economy, 1,000 credits (sqlite3, commit per call)\n")
     md.append(f"- generated (emitted shop Bot): {fmt(results['b6b_shop_gen_dart'])}")
     md.append(f"- hand-written (sqlite3 directly): {fmt(results['b6b_shop_hw_dart'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b6b_shop_gen_dart'], results['b6b_shop_hw_dart']):.2f}")
     md.append("  (Both print the final balance 1000.)\n")
-    md.append("## B7 — Peak RSS (Dart)\n")
+    md.append("## B7 - Peak RSS (Dart)\n")
     md.append(f"- compile (shop, --target dart): {results['b7_compile_dart']['rss_mb']:.1f} MB")
     md.append(f"- run (hello, dart): {results['b7_run_dart']['rss_mb']:.1f} MB\n")
-    md.append("## B8 — Hand-written parity (Dart)\n")
+    md.append("## B8 - Hand-written parity (Dart)\n")
     md.append(f"- startup ratio: "
               f"{ratio(results['b5_hello_gen_dart'], results['b5_hello_hw_dart']):.2f} "
               f"(>1.20 would be a bug report)")

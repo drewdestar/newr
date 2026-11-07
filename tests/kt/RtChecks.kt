@@ -1,7 +1,7 @@
 // Kotlin-side unit tests for compiler/newr_rt.kt (M5).
 //
 // Mirrors tests/java/RtChecks.java case for case (same rule, both
-// targets) — the same 61 checks, adapted to Kotlin types (Long
+// targets) - the same 61 checks, adapted to Kotlin types (Long
 // instead of BigInt, `==` on boxed values goes through
 // NewrRt.eq). Run with
 // `kotlinc newr_rt.kt RtChecks.kt -include-runtime -d rtchecks.jar

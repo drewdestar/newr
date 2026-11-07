@@ -1,7 +1,7 @@
 // Rust-side unit tests for compiler/newr_rt.rs (M5).
 //
 // Mirrors tests/java/RtChecks.java case for case (same rule, both
-// targets) — same checks, adapted to Rust types (i64 instead of
+// targets) - same checks, adapted to Rust types (i64 instead of
 // long, Option instead of null, Result instead of NewrRt.Result).
 // Run with `rustc newr_rt.rs RtChecks.rs -o RtChecks && ./RtChecks`
 // from a temp dir holding copies of both files, or via

@@ -1,19 +1,19 @@
 """The Kotlin emitter (M5, SPEC.md §18).
 
 ``newr build --target kt`` lowers a *checked* program (the front
-end has already run: parse -> resolve -> check) to readable Kotlin —
+end has already run: parse -> resolve -> check) to readable Kotlin -
 one `.newr` file -> one `.kt` file, structure preserved, user names
 verbatim, helpers only in `newr_rt.kt` (copied next to the output
 when used).
 
 Readability is a requirement, not a nicety: the output is code a
-human would write — the Kotlin goldens (`goldens/kt/`) are the style
+human would write - the Kotlin goldens (`goldens/kt/`) are the style
 oracle, and the emitter reproduces them byte-for-byte
 (BUILD_REPORT.md §22, N1–Nn).
 
 The emitter NEVER runs on an unchecked program: the CLI checks first
 and exits 4 on errors. If it meets a node without a type (which only
-happens on an unchecked program), it raises `EmitterError` — a clean
+happens on an unchecked program), it raises `EmitterError` - a clean
 refusal, never a TypeError traceback.
 
 Module system (N1, the Kotlin twin of Java's K1): one `object` per
@@ -46,7 +46,7 @@ _BUILTIN_NAMES = frozenset(BUILTINS)
 # colliding with one of these is mangled with a trailing underscore
 # (D20, mirrored from the Python/JS emitters). The `NewrRt` runtime
 # helpers are called qualified (`NewrRt.add`), so user names that
-# match a helper are harmless — but the class name `NewrRt` itself,
+# match a helper are harmless - but the class name `NewrRt` itself,
 # the `main` method, its `args` parameter, and the java.lang type
 # names the emitter writes (`String`, `Long`, ...) must not be
 # shadowed by a user struct/enum/fn name in the same file.
@@ -168,7 +168,7 @@ def _kt_float(value: float) -> str:
 # Java precedence (higher binds tighter), loosest -> tightest.
 # The emitter's precedence-climbing printer uses this table; newr's
 # own table (SPEC §9.2) maps onto it, with the traps documented
-# where they bite — notably unary `-`: `-x ** y` parses as
+# where they bite - notably unary `-`: `-x ** y` parses as
 # `-(x ** y)` in newr, and Java has no `**`, so the power helper
 # call binds as a primary; and `!a == b` is `(!a) == b` in Java,
 # not `!(a == b)` as newr's `not` reads it.
@@ -181,7 +181,7 @@ _PREC = {
     "add": 9,      # + -
     "mul": 10,     # * / %
     "unary": 11,   # -x !x
-    "pow": 12,     # ** (emitted as a helper call — primary)
+    "pow": 12,     # ** (emitted as a helper call - primary)
     "primary": 13,  # calls, indexing, member access, atoms
 }
 
@@ -251,7 +251,7 @@ def _is_struct_or_enum(t: Type | None) -> bool:
 def _needs_eq(t: Type | None) -> bool:
     """True when `==` on a value of this type needs structural
     equality (`NewrRt.eq`) instead of `==`: lists, dicts, sets,
-    Results, structs and enums (and nullable forms of them — `eq`
+    Results, structs and enums (and nullable forms of them - `eq`
     handles `null` on either side). Primitives, functions, errors
     and Discord entities compare by identity (`==`)."""
     if t is None:
@@ -309,7 +309,7 @@ class _KtEmitter:
         # name). The CLI passes the `-o` stem; the default is the
         # main source stem, falling back to "Main".
         self.output_stem = output_stem or "Main"
-        # Imports collected while emitting (per output file — reset
+        # Imports collected while emitting (per output file - reset
         # for each module file).
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
@@ -332,13 +332,13 @@ class _KtEmitter:
         # (for rename allocation in _bind_fresh). Reset per function.
         self._fn_used: set[str] = set()
         # Hoists for the statement being emitted: each is a list of
-        # lines (base indent 0) to emit before the statement —
+        # lines (base indent 0) to emit before the statement -
         # hoisted lambda consts and lambda snapshot locals.
         self._hoists: list[list[str]] | None = None
         # True while emitting the DIRECT top-level statement list of
         # a file (main() / the module static block). A `let` there
         # assigns the static field instead of declaring a local
-        # (K2) — a local would shadow the field and top-level
+        # (K2) - a local would shadow the field and top-level
         # functions would read the still-zero field (conformance
         # toplevel_order). Nested blocks reset it (their `let` is a
         # genuine local, even when it shadows a module name).
@@ -459,8 +459,8 @@ class _KtEmitter:
         """Bind `name` in the current scope.
 
         Java has real block scope (`long x` in an `if` block does
-        not clobber the outer name), so — unlike the Python emitter
-        — shadowing an enclosing name needs NO renaming: the inner
+        not clobber the outer name), so - unlike the Python emitter
+        - shadowing an enclosing name needs NO renaming: the inner
         binding is a different variable, exactly as newr reads it.
         Only keyword / emitter-reserved mangling applies (D20).
         """
@@ -472,7 +472,7 @@ class _KtEmitter:
     def _bind_fresh(self, name: str, type: Type | None = None,
                     kind: str = "local") -> _Binding:
         """Bind `name` in the current scope WITHOUT renaming against
-        enclosing scopes — for function/lambda parameters, where
+        enclosing scopes - for function/lambda parameters, where
         shadowing an enclosing name is the correct semantics. Only
         the current function's used-name set is consulted, so two
         parameters mangling to the same Java name still get distinct
@@ -522,9 +522,9 @@ class _KtEmitter:
 
     def _render_imports(self) -> list[str]:
         """The import block (N1's Kotlin twin of K12): Kotlin needs
-        almost no imports — the stdlib is auto-imported and the
+        almost no imports - the stdlib is auto-imported and the
         runtime lives in the same (default) package, so it needs no
-        import line at all. Only `java.sql.*` (a store — the bot's
+        import line at all. Only `java.sql.*` (a store - the bot's
         JDBC methods) and the Discord (Kord) classes plus any extra
         imports the bot emitter registered appear here."""
         lines: list[str] = []
@@ -690,10 +690,10 @@ class _KtEmitter:
         own file, `Module.Name` when imported (the binding records
         the module). An imported struct/enum reached only through
         its TYPE (a `let c = helper.Shade.Red` has type `Shade`
-        with no module on the Type — the Type class has no module
+        with no module on the Type - the Type class has no module
         field) is found by searching the imported file modules for
         the declaration and qualifying with the module's class
-        name — the file STEM, not the import alias (K1;
+        name - the file STEM, not the import alias (K1;
         conformance import_enum)."""
         binding = self._lookup(name)
         if binding is not None and binding.kind in ("struct", "enum"):
@@ -713,7 +713,7 @@ class _KtEmitter:
                   fn_target: Type | None = None) -> str:
         """Emit an expression, parenthesised when its precedence is
         below `min_prec`. `fn_target` is the expected fn type when
-        the expression is a lambda — the context's target type, so
+        the expression is a lambda - the context's target type, so
         the lambda needs no cast (Java lambdas are poly
         expressions)."""
         text, prec = self._emit_expr(node, fn_target)
@@ -739,7 +739,7 @@ class _KtEmitter:
                 self.emit_expr(i, 0,
                                fn_target=elem if _is_fn(elem) else None)
                 for i in node.elements)
-            # Arrays.asList (not List.of — List.of rejects null
+            # Arrays.asList (not List.of - List.of rejects null
             # elements, and a list[T?] may hold null) with an
             # explicit element-type witness, so a literal of only
             # nulls still has the right type.
@@ -758,7 +758,7 @@ class _KtEmitter:
                 parts.append(
                     f"{self.emit_expr(k, 0)}, "
                     f"{self.emit_expr(v, 0, fn_target=val if _is_fn(val) else None)}")
-            # NewrRt.dictOf (not Map.ofEntries — that rejects null
+            # NewrRt.dictOf (not Map.ofEntries - that rejects null
             # keys and values, and a dict[str, T?] may hold null),
             # with an explicit value-type witness.
             return (f"NewrRt.dictOf<{self._kt_boxed_type(val)}>"
@@ -797,7 +797,7 @@ class _KtEmitter:
             return self._emit_embed(node)
         if isinstance(node, (A.Member, A.Index, A.Call)):
             # Any optional link anywhere in the chain routes the
-            # WHOLE chain through _emit_chain (D9) — including
+            # WHOLE chain through _emit_chain (D9) - including
             # trailing non-optional links (`a?.b.c`), which must
             # short-circuit too.
             if self._chain_has_optional(node):
@@ -846,7 +846,7 @@ class _KtEmitter:
                     f"`{node.name}`", span=node.span)
             if binding.kind in ("struct", "enum"):
                 self._fail(
-                    f"`{node.name}` is not a value — use a variant "
+                    f"`{node.name}` is not a value - use a variant "
                     "or construct it", span=node.span)
             # A user fn as a value is the function itself (first-
             # class functions, SPEC §9.5); a local/param/handler
@@ -872,7 +872,7 @@ class _KtEmitter:
                             fn_target: Type | None = None) -> tuple[str, int]:
         # First-class builtin values: `len`/`min`/`max` as a value
         # are small lambdas. Kotlin has no cast-to-function-type
-        # like Java's `((Fn) (x) -> ...)` — instead the lambda
+        # like Java's `((Fn) (x) -> ...)` - instead the lambda
         # carries EXPLICIT parameter types (from fn_target when the
         # context provides one, else the generic fallback), so it
         # type-checks wherever it lands. Overloaded runtime
@@ -960,7 +960,7 @@ class _KtEmitter:
         if not parts:
             return '""', _PREC["primary"]
         # A `+` chain starting with a non-string operand would be
-        # ARITHMETIC (`{x}{y}` -> `x + y`), not concatenation — so
+        # ARITHMETIC (`{x}{y}` -> `x + y`), not concatenation - so
         # an interpolation whose first part is an expression starts
         # with `"" + `.
         if node.parts[0].text is None:
@@ -974,7 +974,7 @@ class _KtEmitter:
         handler bindings use their interp form (the mention / name
         form); everything else goes through `toStr` (P8). A bare
         non-string operand of `+` must be wrapped in `toStr` or the
-        `+` would be arithmetic — ints are the only exception
+        `+` would be arithmetic - ints are the only exception
         (they stringify in a `+` chain)."""
         if isinstance(expr, A.Name):
             binding = self._lookup(expr.name)
@@ -1018,7 +1018,7 @@ class _KtEmitter:
                 # `T? or T` (SPEC §7.2): the default when the value
                 # is absent. Java `||` would also take the default
                 # for a present-but-falsy value (0L, ""), so it is
-                # not the same — use coalesce.
+                # not the same - use coalesce.
                 self._need_rt("coalesce")
                 left = self.emit_expr(node.left, 0)
                 right = self.emit_expr(node.right, 0)
@@ -1061,7 +1061,7 @@ class _KtEmitter:
                         rt.name in self.structs or rt.name in self.enums:
                     # Structural equality (K6): `eq` is deep for
                     # lists/Maps/Sets/Results/structs, and treats
-                    # `null` as equal only to `null` — exactly
+                    # `null` as equal only to `null` - exactly
                     # newr's `==` for nullable collection values too.
                     self._need_rt("eq")
                     expr = f"NewrRt.eq({left}, {right})"
@@ -1070,7 +1070,7 @@ class _KtEmitter:
                     return expr, _PREC["primary"]
                 # `==` on a boxed value is IDENTITY in Java (a
                 # nullable long `1000L == 1000L` is false) and on a
-                # String it is identity too — use null-safe
+                # String it is identity too - use null-safe
                 # Objects.equals unless BOTH sides are non-nullable
                 # primitives, where bare `==` is correct.
                 if lt.nullable or rt.nullable or \
@@ -1137,7 +1137,7 @@ class _KtEmitter:
         # `-a + b` is `-(a + b)`).
         # D19: the int64 minimum is written `-9223372036854775808`
         # in newr. Its positive magnitude is out of int64 range, so
-        # the checker leaves the literal's own type unset — the
+        # the checker leaves the literal's own type unset - the
         # plain `neg(...)` form would also be wrong (it would check
         # the out-of-range literal first). Emit the minimum directly.
         if isinstance(node.operand, A.Lit) and \
@@ -1149,7 +1149,7 @@ class _KtEmitter:
             return f"NewrRt.neg({self.emit_expr(node.operand, 0)})", \
                 _PREC["primary"]
         operand = self.emit_expr(node.operand, _PREC["pow"])
-        # Java traps: `--x` is the decrement operator —
+        # Java traps: `--x` is the decrement operator -
         # parenthesise a `**` operand or a unary operand
         # (`-(powInt(a, 2))`, `-(-x)`).
         if (isinstance(node.operand, A.BinOp) and node.operand.op == "**") \
@@ -1185,7 +1185,7 @@ class _KtEmitter:
                 if binding is not None and binding.kind == "enum":
                     return self._emit_enum_call(obj.name, func.name, node)
             # §20: qualified imported fielded-variant construction,
-            # `m_helper.Shape.Circle(radius: 1.5)` — the declaration
+            # `m_helper.Shape.Circle(radius: 1.5)` - the declaration
             # comes from the imported module, for field reordering.
             imported = self._imported_enum(func)
             if imported is not None:
@@ -1212,7 +1212,7 @@ class _KtEmitter:
         if name == "input":
             if self._is_bot:
                 self.warnings.append(
-                    "input() in a bot program blocks on stdin — bots "
+                    "input() in a bot program blocks on stdin - bots "
                     "have no stdin (D21)")
             self._need_rt("input")
             args = [self.emit_expr(a, 0) for a in node.args]
@@ -1240,7 +1240,7 @@ class _KtEmitter:
         if name == "ok":
             self._need_rt("ok")
             t = self._type_of(node)
-            # The runtime's ok is `ok<T>(T value)` — ONE type
+            # The runtime's ok is `ok<T>(T value)` - ONE type
             # parameter (the error type is fixed to NewrError);
             # emitting two type arguments does not compile
             # (conformance opt_methods).
@@ -1315,7 +1315,7 @@ class _KtEmitter:
         return values
 
     def _emit_print(self, node: A.Call) -> tuple[str, int]:
-        """`print` renders every argument with `toStr` (P8) — the
+        """`print` renders every argument with `toStr` (P8) - the
         runtime `print` helper does that mapping internally, so the
         emitted call is bare. A `?` argument propagates first (the
         temp + early return are hoisted before the statement, D7).
@@ -1392,7 +1392,7 @@ class _KtEmitter:
         t = self._type_of(arg)
         text = self.emit_expr(arg, 0)
         if name == "str":
-            # A nullable str's runtime value is null when absent —
+            # A nullable str's runtime value is null when absent -
             # bare rendering would print "null", not newr's "none"
             # (P8), so nullable values go through toStr.
             if _is_str(t) and not t.nullable:
@@ -1402,7 +1402,7 @@ class _KtEmitter:
         if name == "int":
             if _is_int(t):
                 return text, _PREC["primary"]
-            # float (truncation), str (parsing), bool (0/1) — all
+            # float (truncation), str (parsing), bool (0/1) - all
             # through toInt, which returns a long in every case.
             self._need_rt("toInt")
             return f"NewrRt.toInt({text})", _PREC["primary"]
@@ -1471,7 +1471,7 @@ class _KtEmitter:
 
     def _file_module_class(self, binding: _Binding) -> str:
         """The Java class name for a file-module import: the file
-        STEM, not the import alias (K1 — one public class per file,
+        STEM, not the import alias (K1 - one public class per file,
         named after the stem). For `import "h_fn.newr" as h` the
         class is `h_fn`, so every reference to the module must use
         the stem; using the alias emits `h.…` against a class named
@@ -1539,7 +1539,7 @@ class _KtEmitter:
     # names verified live against the Kord 0.18.1 jars with javap
     # and a compiling probe. A newr `id` is an int, so it reads
     # the Snowflake's `.value` (a Long). A channel's `.name`
-    # needs the `_channelName` helper (a suspend call — a DM
+    # needs the `_channelName` helper (a suspend call - a DM
     # channel's name is its first recipient); an interaction's
     # `.guild` / `.channel` read the handler's prologue locals;
     # its `.locale` renders through `_newrLocale`. A message's
@@ -1594,15 +1594,15 @@ class _KtEmitter:
                     return self._emit_enum_variant(node, binding)
                 if binding.kind == "struct":
                     self._fail(
-                        f"struct `{obj.name}` is not a value — construct it",
+                        f"struct `{obj.name}` is not a value - construct it",
                         span=node.span)
                 if binding.kind == "store":
                     self._fail(
-                        f"store `{obj.name}` is not a value — use its "
+                        f"store `{obj.name}` is not a value - use its "
                         "economy functions", span=node.span)
                 if binding.kind == "fn":
                     self._fail(
-                        f"function `{obj.name}` is not a value — call it",
+                        f"function `{obj.name}` is not a value - call it",
                         span=node.span)
             if obj.name in MODULES:
                 # A named module used without an import: the name is
@@ -1624,7 +1624,7 @@ class _KtEmitter:
         # The newr `error` type has exactly two fields (checker
         # ERROR_FIELDS): message (str) and code (str?). Kotlin's
         # NewrError keeps `code` as a public property, but
-        # `message` lives in Throwable as a Kotlin property — the
+        # `message` lives in Throwable as a Kotlin property - the
         # Java getter spelling `getMessage()` is NOT callable from
         # Kotlin (unresolved reference); `.message` is the spelling
         # (conformance try_catch, arith_overflow_catch).
@@ -1637,7 +1637,7 @@ class _KtEmitter:
             return f"{obj_text}.{self._mangle(node.name)}", \
                 _PREC["primary"]
         # §16 (hole 2): a method used as a value is a lambda, not a
-        # Java attribute — a Long has no `is_some`, an ArrayList has
+        # Java attribute - a Long has no `is_some`, an ArrayList has
         # no `len`. A real struct field stays a plain attribute.
         if t.name == "fn" and not self._is_plain_field(obj_type,
                                                        node.name):
@@ -1648,14 +1648,14 @@ class _KtEmitter:
         obj_text = self.emit_expr(obj, _PREC["primary"])
         # Discord entity fields (SPEC §7.3) -> Kord properties. The
         # checker types these fields (ENTITY_FIELDS in
-        # discord_limits); Kotlin has no `.id` field on a User — the
+        # discord_limits); Kotlin has no `.id` field on a User - the
         # snowflake is `id.value` (newr `id` is int, so the String
         # getId() would be the wrong type).
         entity = self._entity_field_expr(obj_text, obj_type, node.name)
         if entity is not None:
             return entity, _PREC["primary"]
         # An enum field whose variants disagree on the type reads
-        # through the Object union field — cast to the declared type.
+        # through the Object union field - cast to the declared type.
         if self._find_enum_decl(obj_type.name) is not None:
             return (self._enum_field_access(obj_text, obj_type.name,
                                            node.name, t),
@@ -1712,7 +1712,7 @@ class _KtEmitter:
         type arguments substituted. A nullable method's "T" is the
         receiver's inner type; a method found only in the nullable
         table on a NON-nullable receiver is a rebased `?.` method
-        inside an `optChain` lambda (D38) — the receiver is proven
+        inside an `optChain` lambda (D38) - the receiver is proven
         non-none there, so "T" is the receiver itself."""
         table = None
         mapping: dict = {}
@@ -1738,7 +1738,7 @@ class _KtEmitter:
 
     def _is_plain_field(self, recv_type: Type, name: str) -> bool:
         """True when `name` is a real field of `recv_type` (a struct
-        field) — a plain attribute access, never a method value.
+        field) - a plain attribute access, never a method value.
         Provider/entity types have no tables here, so they report
         False and the method-signature lookup decides."""
         decl = self.structs.get(recv_type.name)
@@ -1858,7 +1858,7 @@ class _KtEmitter:
                 return f"NewrRt.splitStr({obj_text}, {args[0]})", \
                     _PREC["primary"]
             if name == "join":
-                # newr `"sep".join(parts)` — Java joins the LIST
+                # newr `"sep".join(parts)` - Java joins the LIST
                 # with the separator.
                 return f"{args[0]}.joinToString({obj_text})", \
                     _PREC["primary"]
@@ -1883,7 +1883,7 @@ class _KtEmitter:
             if name == "get":
                 self._need_rt("listGet")
                 # listGet returns Object (the runtime is untyped
-                # for lists) — cast to the element type, which is
+                # for lists) - cast to the element type, which is
                 # the call's own type (modules.py: list.get
                 # returns T). The checker guarantees two
                 # arguments (index, default); a one-argument
@@ -1919,7 +1919,7 @@ class _KtEmitter:
         elif tname == "Result":
             if name in ("is_ok", "is_err"):
                 # The Java Result exposes isOk/isErr as METHODS
-                # (newr_rt.java) — a bare access would be the
+                # (newr_rt.java) - a bare access would be the
                 # method itself, not the bool.
                 method = "isOk" if name == "is_ok" else "isErr"
                 return f"{obj_text}.{method}()", _PREC["primary"]
@@ -1960,8 +1960,8 @@ class _KtEmitter:
             # Indexing is the checked form: a negative or out-of
             # range index raises IndexError (rt listIndex), exactly
             # like newr's `xs[i]`. (`list.get` is the defaulting
-            # form — see _emit_method_call.) listIndex returns
-            # Object, so cast to the element's boxed type — a bare
+            # form - see _emit_method_call.) listIndex returns
+            # Object, so cast to the element's boxed type - a bare
             # result cannot be assigned to a `long` or compared
             # with `!=` (conformance list_index_error, list_ops,
             # nullable_propagate).
@@ -2000,7 +2000,7 @@ class _KtEmitter:
         return False
 
     def _emit_chain(self, node: A.Expr) -> tuple[str, int]:
-        """`?.` lowering (D9, corrected — the Java twin of the JS
+        """`?.` lowering (D9, corrected - the Java twin of the JS
         emitter's `_emit_chain`): one `optChain` call per optional
         link, nested; non-optional links after an optional one fold
         into the nearest lambda body. `a?.b.c` is one call;
@@ -2033,13 +2033,13 @@ class _KtEmitter:
             recv_type = self._type_of(inner_recv)
             # Inside the lambda the receiver is proven non-none
             # (optChain only calls it then), so the parameter and
-            # the rebased base carry the STRIPPED (inner) type —
+            # the rebased base carry the STRIPPED (inner) type -
             # otherwise a method call on it would dispatch as if the
             # value were still nullable.
             inner_type = Type(recv_type.name, params=recv_type.params,
                               nullable=False)
             # §16 (hole 1): a segment must also end before any link
-            # whose receiver can be `none` INSIDE the lambda — a
+            # whose receiver can be `none` INSIDE the lambda - a
             # nullable field (`o?.inner.name`) or a nullable method
             # result (`r?.unwrap().upper()` on `Result[str?, _]?`).
             # The checker's `expr_type` conflates the `?.`
@@ -2049,7 +2049,7 @@ class _KtEmitter:
             # in-lambda result type, so `_rebase` types the clones
             # exactly: a Member link's nullability inside the lambda
             # is its FIELD's nullability, not the checker's chain
-            # type — without this, a method after a nullable field
+            # type - without this, a method after a nullable field
             # dispatches against `T?` and fails with E4001.
             in_lambda: dict[int, Type | None] = {}
             cur_type = self._in_lambda_link_type(links[i], inner_type)
@@ -2067,7 +2067,7 @@ class _KtEmitter:
             self._push_scope()
             binding = self._bind_fresh("_v", type=inner_type,
                                        kind="param")
-            # The rebased base is a Name for the NEWR name `_v` —
+            # The rebased base is a Name for the NEWR name `_v` -
             # the lookup returns the binding's Java name (which may
             # be `_v_1` in a nested chain).
             new_base = A.Name(span=links[i].span, name="_v",
@@ -2115,8 +2115,8 @@ class _KtEmitter:
         `old_base` (by identity) with `new_base`, and clearing the
         `optional` flags (the optionality is handled by the
         `optChain` wrapper, not inside the lambda body). Types are
-        copied onto the clones — the checker already typed the
-        original nodes — except when `in_lambda_types` maps a link
+        copied onto the clones - the checker already typed the
+        original nodes - except when `in_lambda_types` maps a link
         to its in-lambda type (§16, hole 1): the checker's chain
         type conflates the `?.` short-circuit with a field's own
         nullability, and inside the lambda only the latter survives,
@@ -2152,7 +2152,7 @@ class _KtEmitter:
                 name=node.func.name, optional=False,
                 expr_type=node.func.expr_type)
             # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
-            # is nullable only because the `?.` short-circuits —
+            # is nullable only because the `?.` short-circuits -
             # inside the lambda the receiver is proven non-none, so
             # the result is the plain (stripped) type. Without this,
             # a later link (`.upper()` in `s?.unwrap().upper()`)
@@ -2161,7 +2161,7 @@ class _KtEmitter:
             # (`a?.b`) may be nullable because the FIELD itself is
             # nullable, which survives inside the lambda. When the
             # caller supplies the exact in-lambda type (§16), that
-            # wins over this heuristic — it is exact where D38
+            # wins over this heuristic - it is exact where D38
             # over-strips (a method whose own return type is
             # nullable, e.g. `unwrap()` on `Result[str?, _]`).
             expr_type = node.expr_type
@@ -2181,7 +2181,7 @@ class _KtEmitter:
 
         Inside an `optChain` lambda the receiver is proven
         non-none, so this is the link's result type with the `?.`
-        short-circuit removed — but a nullable FIELD type or a
+        short-circuit removed - but a nullable FIELD type or a
         nullable method return survives. Returns None when the type
         cannot be determined (provider/entity types); the caller
         treats None as nullable and splits the segment, which is
@@ -2198,7 +2198,7 @@ class _KtEmitter:
                 params, ret = sig
                 return fn_of(params, ret)
             # A field on a provider/entity type (e.g. a Discord
-            # member's `name`): the type is unknown — treat as
+            # member's `name`): the type is unknown - treat as
             # nullable (split the segment).
             return None
         if isinstance(link, A.Index):
@@ -2223,7 +2223,7 @@ class _KtEmitter:
                      fn_target: Type | None = None) -> tuple[str, int]:
         """Closures capture by value (D10, J8): free variables are
         snapshotted into hoisted `val` locals before the enclosing
-        statement — a Kotlin lambda may only capture `val`s (and
+        statement - a Kotlin lambda may only capture `val`s (and
         snapshot locals, never reassigned, are exactly the captured
         value). A block body cannot be an inline lambda body with
         statements, so it is hoisted to a `val` holding an
@@ -2315,7 +2315,7 @@ class _KtEmitter:
             b = self._lookup(name)
             # "global-let" is included: a top-level `let` is mutable,
             # so a lambda reading it at call time would see a LATER
-            # value — capture by value (D10) requires a snapshot.
+            # value - capture by value (D10) requires a snapshot.
             # (A top-level `const` is registered the same way; it
             # never changes, so snapshotting it is harmless.) Module
             # functions / structs / enums / modules / stores are
@@ -2508,7 +2508,7 @@ class _KtEmitter:
         that answer's line to carry the components.
 
         `top_level` marks the direct top-level statement list of a
-        file (main() / the module static block) — see
+        file (main() / the module static block) - see
         `_in_top_level`; nested blocks always pass False."""
         if new_scope:
             self._push_scope()
@@ -2528,7 +2528,7 @@ class _KtEmitter:
                     self._last_answer = (len(lines) - 1, kind)
                 elif isinstance(st, (A.ButtonDecl, A.SelectDecl)):
                     # The component's instantiation lines must come
-                    # BEFORE the answer they attach to — the answer
+                    # BEFORE the answer they attach to - the answer
                     # references the components variable, so defining
                     # it after the answer would be a compile error.
                     if self._last_answer is not None:
@@ -2575,7 +2575,7 @@ class _KtEmitter:
                 # A top-level `let`/`const` is a static field of the
                 # class (so top-level functions can read it), and
                 # its initializer runs here, in file order, inside
-                # main() (or the module's static block) — a field
+                # main() (or the module's static block) - a field
                 # initializer at declaration time would run before
                 # main() and break file order for side-effecting
                 # initializers (K2). Emitting a local declaration
@@ -2666,7 +2666,7 @@ class _KtEmitter:
                     f"{value});"]
         # float / str / %= : bare augmented assignment (no overflow
         # check applies; `+=` on a str is concatenation; `%` on an
-        # int cannot overflow — Long.MIN_VALUE % -1 is 0 in Java).
+        # int cannot overflow - Long.MIN_VALUE % -1 is 0 in Java).
         return [f"{p}{binding.java} {stmt.op} {value};"]
 
     def _emit_if(self, stmt: A.If, indent: int) -> list[str]:
@@ -2696,7 +2696,7 @@ class _KtEmitter:
         else:
             self._fail(f"cannot iterate over a `{it_type}` value")
         # The iterable is emitted BEFORE the loop variable is bound
-        # (it cannot see the loop variable — `for x in x` reads the
+        # (it cannot see the loop variable - `for x in x` reads the
         # enclosing `x`).
         iterable = self.emit_expr(stmt.iterable, 0)
         self._push_scope()
@@ -2768,7 +2768,7 @@ class _KtEmitter:
             if stmt.value is None:
                 return [f"{p}System.exit(0);"]
             self._fail("a top-level `return` with a value is not "
-                       "supported — a top-level `return` exits the "
+                       "supported - a top-level `return` exits the "
                        "program")
         ensures = ctx["ensures"]
         ret_type = ctx["return_type"]
@@ -2870,7 +2870,7 @@ class _KtEmitter:
                                                      scrut_type)
             if arm.guard is not None:
                 # The guard may reference the pattern's bindings
-                # (e.g. `x if x > 100:`) — bind each name to its
+                # (e.g. `x if x > 100:`) - bind each name to its
                 # pattern expression text while emitting it.
                 self._push_scope()
                 for name, expr_text, typ in bindings:
@@ -2881,7 +2881,7 @@ class _KtEmitter:
                 cond = f"{cond} && {guard}" if cond else guard
             arms.append((cond, bindings, arm))
         # The last unconditional arm becomes `else:`; otherwise the
-        # final `else` throws (defense — the checker proves
+        # final `else` throws (defense - the checker proves
         # exhaustiveness, so it is unreachable in a checked program).
         last_uncond = (arms and arms[-1][0] is None)
         for i, (cond, bindings, arm) in enumerate(arms):
@@ -2945,7 +2945,7 @@ class _KtEmitter:
             # variant singleton; a sealed-class variant matches by
             # `is` (which also smart-casts the scrutinee for the
             # bindings below). A null scrutinee matches no variant
-            # — the `none` pattern handles it.
+            # - the `none` pattern handles it.
             enum_kt = self._struct_kt_name(pattern.enum_name)
             variant_kt = f"{enum_kt}.{self._mangle(pattern.variant)}"
             enum_decl = self._find_enum_decl(pattern.enum_name)
@@ -3045,7 +3045,7 @@ class _KtEmitter:
         Result-returning function; a nullable operand returns `null`
         from a nullable-returning function. The mismatched kinds
         (D30) and a nullable `Result` (G-M2-6) are clean
-        `EmitterError`s — the checker should have rejected them, and
+        `EmitterError`s - the checker should have rejected them, and
         there is no defined early-return value to invent."""
         operand = prop.expr
         t = self._type_of(operand)
@@ -3059,7 +3059,7 @@ class _KtEmitter:
         temp_type = self._kt_type(t)
         if ctx.get("in_handler"):
             # A handler returns nothing, so `?` just exits the
-            # handler (a bare `return`) — there is no value to
+            # handler (a bare `return`) - there is no value to
             # propagate. (A handler that may exit early without
             # answering is the discord checker's E2010, not the
             # emitter's problem.)
@@ -3067,7 +3067,7 @@ class _KtEmitter:
                 self._hoists_add([
                     f"val {temp}: {temp_type} = {text};",
                     # §18 fix 1 (JS twin): isErr is a METHOD on the
-                    # Result — a bare access is the method itself
+                    # Result - a bare access is the method itself
                     # (always truthy), so `?` early-returned on
                     # every value. The unwrapped value lives in
                     # `._value` (there is no `.value` field).
@@ -3086,17 +3086,17 @@ class _KtEmitter:
                 return temp
             if t.name == "Result" and t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             self._fail("`?` needs a `Result[T, E]` or a `T?` value")
         if t.name == "Result" and t.params:
             if t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             if ret is None or ret.name != "Result":
                 self._fail("`?` on a `Result` value inside a function "
-                           "that does not return a `Result` (D30 — the "
+                           "that does not return a `Result` (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"val {temp}: {temp_type} = {text};",
@@ -3108,7 +3108,7 @@ class _KtEmitter:
         if t.nullable:
             if ret is None or not ret.nullable:
                 self._fail("`?` on a nullable value inside a function "
-                           "that does not return a nullable (D30 — the "
+                           "that does not return a nullable (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"val {temp}: {temp_type} = {text};",
@@ -3125,7 +3125,7 @@ class _KtEmitter:
                           binding: _Binding) -> tuple[str, int]:
         if binding.kind == "file-module":
             # A function in an imported .newr file: a plain call on
-            # the imported module — and the import itself (K1: one
+            # the imported module - and the import itself (K1: one
             # `.java` per imported `.newr`, named by its module
             # name). Struct construction through a file module needs
             # `new` (a Java class is not callable without it).
@@ -3239,7 +3239,7 @@ class _KtEmitter:
         """A named-module member used as a value: a constant, or a
         function (which becomes a lambda, D29). `binding.module` is
         the real module name (for dispatch); `binding.java` is the
-        Java reference (the alias, when the import is aliased) —
+        Java reference (the alias, when the import is aliased) -
         except for a file module, whose class name is the file stem
         (`_file_module_class`)."""
         real = binding.module or binding.java
@@ -3249,7 +3249,7 @@ class _KtEmitter:
             if binding.kind == "file-module":
                 # A function in an imported .newr file, used as a
                 # value: a callable reference to the module
-                # object's function (`ShopItems::priceOf` — a bound
+                # object's function (`ShopItems::priceOf` - a bound
                 # reference, verified against kotlinc 2.2.0). No
                 # cast: the expected fn type comes from the context.
                 return (f"{ref}::{self._mangle(node.name)}",
@@ -3257,7 +3257,7 @@ class _KtEmitter:
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
                 self._fail(f"`file.{node.name}` cannot be used as a "
-                           "value (it needs a statement — the `with` "
+                           "value (it needs a statement - the `with` "
                            "block cannot live inside a lambda)")
             params = t.params[:-1]  # the last param is the return type
             names = [f"_a{i}" for i in range(len(params))]
@@ -3297,16 +3297,16 @@ class _KtEmitter:
         """`economy.balance(user)` etc. -> `bot.<store>_<op>(...)`
         (D17/P11, J9's Java twin). Every mutation takes its
         idempotency `key:`; the checker enforces that it is present.
-        JDBC is synchronous, so there is no `await` — but the §19
+        JDBC is synchronous, so there is no `await` - but the §19
         guard still applies: the `bot` instance only exists inside
         a handler, so a store call at the top level, inside a
         (sync) top-level fn, or inside a lambda is a clean E4001
         instead of uncompilable code."""
         # The Bot method is `bot.<store>_<op>` with the RAW store
-        # name (the JS/Python spelling — and the name the Bot
+        # name (the JS/Python spelling - and the name the Bot
         # class's methods use). binding.java is the MANGLED name
         # ("economy" is emitter-reserved, so it would be
-        # "economy_") — using it here would call a method that
+        # "economy_") - using it here would call a method that
         # does not exist.
         store_name = (node.func.obj.name
                       if isinstance(node.func, A.Member)
@@ -3317,7 +3317,7 @@ class _KtEmitter:
         if ctx is None or not ctx.get("in_handler"):
             self._fail(
                 f"a store call (`{store_name}.{method}`) is only "
-                "possible inside a command, event, or task handler — "
+                "possible inside a command, event, or task handler - "
                 "top-level functions and statements run outside the "
                 "bot's handler context",
                 span=node.span)
@@ -3350,7 +3350,7 @@ class _KtEmitter:
                            "naming a declared table")
             # The Bot method returns Object (one method serves all
             # tables); the checker knows the row type, so cast to
-            # the row class — registered in the module scope by
+            # the row class - registered in the module scope by
             # _emit_bot_file (the row class IS the table name).
             binding = self._lookup(table.value)
             if binding is None or binding.kind != "struct":
@@ -3401,7 +3401,7 @@ class _KtEmitter:
         (D16, J10's Java twin). Template placeholders that are
         handler bindings (user, guild, ...) are auto-passed in their
         interpolation form; the rest must be explicit arguments (the
-        checker enforces it — E2009). The kwargs map is built with
+        checker enforces it - E2009). The kwargs map is built with
         `dictOf` (Map.of would reject null values)."""
         index, _default = self._strings_index()
         entry = None
@@ -3451,7 +3451,7 @@ class _KtEmitter:
         """Build an EmbedBuilder on the lines before the send call.
         Returns the lines and the embed variable's name (a fresh
         temp per embed). A field's assignments use an explicit
-        `this.` — a handler local named `name` would otherwise
+        `this.` - a handler local named `name` would otherwise
         shadow the builder's `name` property (Kotlin resolves a
         bare assignment to the local first). The color is a newr
         int (Long); Kord's Color takes an Int."""
@@ -3525,7 +3525,7 @@ class _KtEmitter:
         body_lines: list[str] = []
         if ensures:
             # `_newrResult` is declared ONCE, at the top of the
-            # function — every `return` assigns it (a `val` per
+            # function - every `return` assigns it (a `val` per
             # return would be a redeclaration). A void function
             # still gets one (of type Unit?) so its `ensures`
             # clauses can read `result`. Non-void results start at
@@ -3555,7 +3555,7 @@ class _KtEmitter:
                                            new_scope=False))
         if ensures and not (rest and isinstance(rest[-1], A.Return)):
             # The implicit return (falling off the end) is also a
-            # return — check the `ensures` against the default
+            # return - check the `ensures` against the default
             # result (Java's `null`; Kotlin's non-null result var
             # starts at its type default instead).
             if ret is None or _is_none(ret):
@@ -3586,7 +3586,7 @@ class _KtEmitter:
     def _kt_default(self, t: Type) -> str | None:
         """The default value for a value of type `t`, or None when
         the type has no literal default (a struct, enum, fn, error
-        or Result — only a reference default exists, which Kotlin
+        or Result - only a reference default exists, which Kotlin
         cannot spell for a non-nullable type). Callers that need a
         value for such a type fail cleanly instead."""
         if t is None or t.nullable or t.name in ("none", "object"):
@@ -3611,7 +3611,7 @@ class _KtEmitter:
     def _enum_union_fields(self, decl: A.EnumDecl) -> dict[str, Type]:
         """The union of all variants' fields: name -> type. When
         two variants share a field name with DIFFERENT types, the
-        union type is Object (name "object" — the emitter casts on
+        union type is Object (name "object" - the emitter casts on
         access; the field's declared type still wins in the
         variant's factory method and in match bindings)."""
         union: dict[str, Type | None] = {}
@@ -3632,7 +3632,7 @@ class _KtEmitter:
         (`Point(x: 1, y: 2)`, field values through `NewrRt.toStr`).
         An empty struct cannot be a data class (Kotlin requires at
         least one primary-constructor parameter), so it is a plain
-        class with the same equality. Fields are `val` — newr
+        class with the same equality. Fields are `val` - newr
         structs are immutable (the Java twin used final fields)."""
         p = "  " * indent
         binding = self._lookup(decl.name)
@@ -3674,7 +3674,7 @@ class _KtEmitter:
         nested `object`, and the union of all variant fields lives
         on the sealed base as nullable `open val`s (a variant that
         does not declare a field reads `null` there, and a field
-        access on the base falls back to its default — see
+        access on the base falls back to its default - see
         `_enum_field_access`). Each subclass overrides `toString`
         to the newr form (`Shape.Circle(radius: 1.5)` /
         `Color.Red` for a bare variant of a sealed enum); the
@@ -3693,7 +3693,7 @@ class _KtEmitter:
         lines = [f"{p}sealed class {kt_name} {{"]
         for fname, ftype in union.items():
             # The base property is the nullable form of the union
-            # type (a variant may narrow it — `Double` overrides
+            # type (a variant may narrow it - `Double` overrides
             # `Double?`); a conflicting union type is `Any?`, and
             # an already-nullable type needs no second `?`.
             bt = self._kt_type(ftype)
@@ -3729,7 +3729,7 @@ class _KtEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"// Generated by newr from {main_path} — do not edit by hand.",
+            f"// Generated by newr from {main_path} - do not edit by hand.",
             f"// Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:
@@ -3780,13 +3780,13 @@ class _KtEmitter:
                 self.fns_by_kt[b.java] = decl
         # The top level's used-name set starts with every module-level
         # Java name, so a `let` in a top-level block cannot reuse one
-        # (at module level Java has no block scope for the top level —
+        # (at module level Java has no block scope for the top level -
         # the name would clobber the module binding).
         self._fn_used = set(self._module_used)
 
     def _emit_general_file(self, program: A.Program, main_path: str):
         """A general (non-bot) program: header, imports, then the
-        `object` (N1) — properties for the top-level lets/consts
+        `object` (N1) - properties for the top-level lets/consts
         (N2: primitives get their default, every other type is
         `lateinit var`; main() / the `init` block assigns them in
         file order, so top-level functions can read them and
@@ -3797,9 +3797,9 @@ class _KtEmitter:
         statements run at object-initialisation time). The entry
         file also gets a top-level `fun main` delegating to
         `<Stem>.main` (kotlinc's jar entry point).
-        Definitions are hoisted — a function body reads module
+        Definitions are hoisted - a function body reads module
         globals at call time, so emitting the `function` before the
-        statements is safe — but the statements themselves (lets,
+        statements is safe - but the statements themselves (lets,
         assignments, prints, ...) must run in the order written.
         (M2 evaluation #1.)"""
         self.program = program
@@ -3813,7 +3813,7 @@ class _KtEmitter:
         is_main = self._is_main_file
         body: list[str] = []
         # Properties for the top-level lets/consts (no
-        # initializers — main() / the init block assigns them in
+        # initializers - main() / the init block assigns them in
         # file order). Kotlin has no uninitialised `var`: numeric
         # / bool properties start at their default, every other
         # non-nullable type is `lateinit var`, and nullable types
@@ -3847,7 +3847,7 @@ class _KtEmitter:
             body.extend(self._emit_fn(decl, 1))
         # Top-level statements: main() for the entry file, an init
         # block for a file module. The entry file's main() always
-        # exists (even with no statements — the top-level main
+        # exists (even with no statements - the top-level main
         # below delegates to it).
         if body:
             body.append("")
@@ -3881,7 +3881,7 @@ class _KtEmitter:
     def _emit_file_set(self, program: A.Program, main_path: str,
                        is_main: bool = True):
         """Emit one program and every file module it imports (recursively).
-        Returns (files, uses_rt). `is_main` marks the top file — the
+        Returns (files, uses_rt). `is_main` marks the top file - the
         only role difference left is that the top file is the entry
         point (a bot's `main()` guard, a general file's top-level
         statements); a file module gets a `static { }` block."""
@@ -3899,7 +3899,7 @@ class _KtEmitter:
             sub_path = imp.resolved_path or imp.path
             # The header names the file as the user would see it:
             # relative to the working directory when it is under it
-            # (D2 — so building `examples/shop.newr` and building
+            # (D2 - so building `examples/shop.newr` and building
             # `examples/shop_items.newr` directly give the same
             # shop_items.java header).
             import os
@@ -3926,17 +3926,17 @@ class _KtEmitter:
     # ------------------------------------------------------------ bot emitter
     # Kord 0.18.1 bot emission (M5 bot phase). The Kotlin twin of
     # the Java emitter's bot section: the same programs, the same
-    # semantics — slash commands registered through the REST
+    # semantics - slash commands registered through the REST
     # builders, a nested Bot class with JDBC store methods (P11),
     # component handlers routed by customId, a standalone deploy
     # program, and Gradle build files.
     #
     # Kord differences from JDA (verified live against the 0.18.1
-    # jars with javap and a compiling probe —
+    # jars with javap and a compiling probe -
     # ~/.m5-kt/probe/KordProbe.kt):
     # - Everything is suspending: handler methods are
     #   `private suspend fun`, registered with `kord.on<T> { }`
-    #   (a RECEIVER lambda — `this` is the event, there is no
+    #   (a RECEIVER lambda - `this` is the event, there is no
     #   `it`); replies/edits/followups are builder lambdas.
     # - There is no message-component collector in Kord core, so
     #   a button/select click routes through a handler map (keyed
@@ -3946,13 +3946,13 @@ class _KtEmitter:
     # - Timeouts are `kord.launch { delay(...); ... }` (the
     #   collector's `end` callback, Kord-shaped). Kord has no
     #   `asDisabled`, so a timeout edits the message with its
-    #   components removed (a documented divergence — the message
+    #   components removed (a documented divergence - the message
     #   is still un-clickable; the buttons just disappear).
     # - Modals use `label(...) { textInput(...) }` (Kord 0.18.1):
     #   `actionRow` in a modal is deprecated and becomes an error
     #   in 0.19.0.
     # - Modal timeouts have no Kord equivalent and are ignored
-    #   (a documented divergence — the modal still works; it
+    #   (a documented divergence - the modal still works; it
     #   just never times out).
     # - Intents are set at login (`kord.login { intents { ... } }`,
     #   `+Intent.X`); the privileged ones (members, message
@@ -3966,7 +3966,7 @@ class _KtEmitter:
     # newr type name). The Kord twin of the JS emitter's
     # _BOT_BINDINGS. Command/component handlers fetch the guild
     # and channel ONCE into prologue locals (`_newrGuild`,
-    # `_newrChannel` — see _emit_command/_emit_button and friends),
+    # `_newrChannel` - see _emit_command/_emit_button and friends),
     # so the bindings read through them; the `!!` on the guild
     # throws only when the binding is used in DMs (JDA's NPE-on-use).
     # The event parameter is always named `event` (member/message/
@@ -4059,7 +4059,7 @@ class _KtEmitter:
         """The Kord Intent constants to enable, sorted. The
         declared intents, plus the ones the events need (member
         events need members, message events need message_content)
-        — the JS emitter's _bot_intents, Kord spellings."""
+        - the JS emitter's _bot_intents, Kord spellings."""
         intents = set(program.bot.intents or [])
         kinds = {ev.kind for ev in program.events}
         if "member_join" in kinds or "member_remove" in kinds:
@@ -4246,7 +4246,7 @@ class _KtEmitter:
     def _emit_component_maps(self) -> list[str]:
         """The component handler maps and the author map, plus
         the `init` block that registers each handler by customId
-        (bound method references — the dispatch in main() looks
+        (bound method references - the dispatch in main() looks
         them up). Only the maps that are used."""
         if not self._bot_component_registrations:
             return []
@@ -4284,7 +4284,7 @@ class _KtEmitter:
     def _emit_commands_table(self) -> list[str]:
         """The command registration functions: one option-builder
         helper per command (`_newrCmd<Name>`, taking the shared
-        BaseInputChatBuilder — the option DSL extensions live on
+        BaseInputChatBuilder - the option DSL extensions live on
         it) and the two register functions the deploy program
         calls (`_newrRegisterGlobal` / `_newrRegisterGuild`).
         The deploy file calls the right one (guild when
@@ -4382,7 +4382,7 @@ class _KtEmitter:
     def _emit_bot_helpers(self) -> list[str]:
         """The small helpers the bot body uses, each only when
         something referenced it: `_channelText` (the `{channel}`
-        interpolation), `_channelName` (a channel's `.name` — a
+        interpolation), `_channelName` (a channel's `.name` - a
         suspend call, since a DM channel's name is its first
         recipient), `_newrLocale` (a Kord Locale as `en` or
         `en-US`), `_newrMessageChannel` (a Channel as the
@@ -4454,14 +4454,14 @@ class _KtEmitter:
     # One long-lived JDBC connection per store (created in
     # setup(), before login), a commit per mutation, the ledger
     # and the balance in one transaction, and a duplicate
-    # idempotency key replays instead of double-applying — the
+    # idempotency key replays instead of double-applying - the
     # Kotlin twin of the Java emitter's _emit_store_methods. All
     # store methods are @Synchronized: Kord calls listeners on
     # event threads, so a lock is what makes a read-modify-write
     # atomic (the Python emitter's threading.Lock, the JS
     # emitter's single thread). Balances are stored as TEXT and
     # parsed with toLong(); arithmetic goes through NewrRt.add/sub,
-    # never raw +/- on longs (checked — a silently wrapped balance
+    # never raw +/- on longs (checked - a silently wrapped balance
     # is a money bug). try-with-resources is `.use { }`.
 
     _SQL_TYPES = {"int": "TEXT", "str": "TEXT", "float": "REAL",
@@ -4582,7 +4582,7 @@ class _KtEmitter:
 
     def _jdbc_ledger_has_key(self, db: str, key_expr: str, p: str) \
             -> list[str]:
-        """Lines declaring `var dup` — whether the ledger
+        """Lines declaring `var dup` - whether the ledger
         already holds `key_expr`."""
         return [
             f"{p}var dup = false",
@@ -4909,7 +4909,7 @@ class _KtEmitter:
         DISCORD_CLIENT_ID is needed (unlike the JDA deploy)."""
         stem = Path(bot_filename).stem
         lines = self._header(self.main_path,
-                             "Command registration — run once, "
+                             "Command registration - run once, "
                              "then run the bot.")
         lines.append("")
         lines.append("import dev.kord.common.entity.Snowflake")
@@ -4949,7 +4949,7 @@ class _KtEmitter:
     # An option's values, read through the interaction's
     # `command` maps (InteractionCommand.strings / integers /
     # numbers / booleans / users / members / channels / roles).
-    # A channel option resolves to a ResolvedChannel — see
+    # A channel option resolves to a ResolvedChannel - see
     # _emit_option_bindings for why its declared type is Channel.
     _OPTION_GETTER = {"str": "strings", "int": "integers",
                       "num": "numbers", "float": "numbers",
@@ -4957,7 +4957,7 @@ class _KtEmitter:
                       "member": "members", "channel": "channels",
                       "role": "roles"}
     # The registration DSL function for an option type (an
-    # extension on BaseInputChatBuilder — imported by name from
+    # extension on BaseInputChatBuilder - imported by name from
     # dev.kord.rest.builder.interaction). A member option has no
     # Kord option type; it registers as a user option (JDA did
     # the same).
@@ -4968,7 +4968,7 @@ class _KtEmitter:
                          "role": "role"}
 
     def _command_method_name(self, name: str) -> str:
-        """`executePing` for `/ping` — unique per file."""
+        """`executePing` for `/ping` - unique per file."""
         words = "".join(ch if ch.isalnum() else " " for ch in name).split()
         base = "".join(w.capitalize() for w in words) or "Command"
         method = "execute" + base
@@ -4981,7 +4981,7 @@ class _KtEmitter:
         return method
 
     def _cmd_builder_name(self, name: str) -> str:
-        """`_newrCmdPing` for `/ping` — the option-builder helper,
+        """`_newrCmdPing` for `/ping` - the option-builder helper,
         unique per file."""
         words = "".join(ch if ch.isalnum() else " " for ch in name).split()
         base = "".join(w.capitalize() for w in words) or "Command"
@@ -5028,7 +5028,7 @@ class _KtEmitter:
         """An option's min/max bound. minValue/maxValue are
         overloaded (Long vs Double), so an int bound must be a
         long literal (`1L`) and a number bound a double literal
-        (`1.0`) — a bare `1` would be an ambiguous call."""
+        (`1.0`) - a bare `1` would be an ambiguous call."""
         if isinstance(expr, A.Lit):
             if tname == "int":
                 return f"{expr.value}L"
@@ -5064,11 +5064,11 @@ class _KtEmitter:
     def _emit_option_bindings(self, cmd: A.CommandDecl,
                               indent: int) -> list[str]:
         """The option locals at the top of an execute method:
-        required options read straight through (with `!!` — the
+        required options read straight through (with `!!` - the
         map lookup is nullable); optional ones read through
         `?:` so the default (or null) applies. A channel option
         is a ResolvedChannel, so its declared type is the Channel
-        interface — `MessageChannel` would not compile (a
+        interface - `MessageChannel` would not compile (a
         ResolvedChannel is never a MessageChannel; a `send` to it
         goes through _newrMessageChannel)."""
         p = "  " * indent
@@ -5157,7 +5157,7 @@ class _KtEmitter:
         """A suspend handler method for one event, plus its
         `kord.on<T> { }` registration (for main()). The system
         channel is a local named `_newrSystemChannel` (not
-        `channel` — a local with that name would shadow the
+        `channel` - a local with that name would shadow the
         binding in nested blocks); the message handler ignores
         the bot's own messages."""
         if ev.kind == "ready":
@@ -5234,9 +5234,9 @@ class _KtEmitter:
         self._fail(f"unknown event kind `{ev.kind}`")
 
     def _task_fn_name(self, task: A.TaskDecl) -> str:
-        """`_every_1h` for a 1h task — the JS emitter's naming
+        """`_every_1h` for a 1h task - the JS emitter's naming
         (a numeric suffix when the same period repeats). The
-        name is computed once per task and cached — main() and
+        name is computed once per task and cached - main() and
         the definition must agree."""
         key = id(task)
         if key in self._task_fn_names:
@@ -5271,7 +5271,7 @@ class _KtEmitter:
 
     def _emit_dispatch(self) -> list[str]:
         """The dispatch registrations (for main()): the slash
-        switch (with the JS dispatchCommand error reply — an
+        switch (with the JS dispatchCommand error reply - an
         ephemeral reply, falling back to a followup when the
         interaction was already answered) and the per-kind
         handler-map lookups for components. `kord.on<T> { }`
@@ -5349,7 +5349,7 @@ class _KtEmitter:
         """main(): the top-level statements first (they run before
         login, like the general emitter), then the token check,
         the store setup, the Kord login, and the task launches.
-        The locals are `_newrToken` — a top-level `let token`
+        The locals are `_newrToken` - a top-level `let token`
         is an object property, and a local named `token` would
         shadow it inside main(). Intents are set at login
         (`kord.login { intents { ... } }`); with no intents to
@@ -5424,7 +5424,7 @@ class _KtEmitter:
 
     def _answer_call(self, kind: str, arg: str, is_embed: bool,
                      ephemeral: bool = False) -> str:
-        """The Kord call that answers on `kind` — a builder
+        """The Kord call that answers on `kind` - a builder
         lambda, never a blocking `.complete()` (Kord calls are
         suspending, so the reply happens before the next
         statement, like the JS emitter's `await`). `reply` here
@@ -5546,7 +5546,7 @@ class _KtEmitter:
             # A channel value is a plain Channel (a ResolvedChannel
             # from an option, or a MessageChannel already): resolve
             # it to the MessageChannel a send needs. Only inside a
-            # handler — a send outside one has no channel to resolve
+            # handler - a send outside one has no channel to resolve
             # (and the checker keeps channels out of top-level fns).
             ctx = self._fn_ctx[-1] if self._fn_ctx else None
             if ctx is not None and ctx.get("in_handler"):
@@ -5565,7 +5565,7 @@ class _KtEmitter:
     # ------------------------------------------------------------ components
 
     def _component_method_name(self, label: str, suffix: str) -> str:
-        """`buyAgainHandler` for a \"Buy again\" component — unique
+        """`buyAgainHandler` for a \"Buy again\" component - unique
         per file (a numeric suffix when the same label repeats)."""
         words = "".join(ch if ch.isalnum() else " " for ch in label).split()
         base = "".join(w.capitalize() for w in words) or "Component"
@@ -5589,7 +5589,7 @@ class _KtEmitter:
 
     def _author_id_expr(self, ctx: dict) -> str | None:
         """The invoking user's id in this handler, for the
-        `only: author` gate — or None when the handler has no
+        `only: author` gate - or None when the handler has no
         user in scope (a ready/task handler)."""
         kind = ctx.get("kind")
         if kind in ("command", "component"):
@@ -5607,7 +5607,7 @@ class _KtEmitter:
         """The `only:` gate at the top of a component handler: the
         author gate reads the per-message map (filled in when the
         components are attached); the roles gate reads the
-        invoking member's roles (a Flow — `.any { }`). Both answer
+        invoking member's roles (a Flow - `.any { }`). Both answer
         ephemerally and return when the gate fails (the JS
         messages, verbatim)."""
         p = "  " * indent
@@ -5844,7 +5844,7 @@ class _KtEmitter:
         the answer's builder lambda (before its closing `}`),
         then capture the message (for the author gate and the
         timeout), record the author for `only: author`
-        components, and schedule the timeout — removing the rows
+        components, and schedule the timeout - removing the rows
         (Kord has no `asDisabled`) and running each on_timeout
         body."""
         if not self._pending_components:
@@ -5946,7 +5946,7 @@ class _KtEmitter:
     def _push_handler(self, kind: str, names: list[str],
                       reply: str | None, locale: str | None):
         """Push a handler context and bind its names into a fresh
-        scope. The Kord twin of the JS emitter's _BOT_BINDINGS —
+        scope. The Kord twin of the JS emitter's _BOT_BINDINGS -
         the same names, Kord spellings. The value form is what a
         bare name means; the interpolation form is what `{name}`
         renders as. The event parameter is always named `event`
@@ -6006,12 +6006,12 @@ def emit_program_kt(program: A.Program, *, main_path: str,
                       sources: dict[str, str],
                       line_comments: bool = False,
                       output_stem: str | None = None) -> EmitResult:
-    """Emit a CHECKED program to Kotlin — one `.kt` per `.newr` file.
+    """Emit a CHECKED program to Kotlin - one `.kt` per `.newr` file.
 
     `main_path` is the input file as passed (D2: the header names
     it); `sources` maps file paths to their text (for diagnostics
     and `--line-comments`). `output_stem` is the `-o` stem (the
-    object name — sanitized to a valid Kotlin identifier). The
+    object name - sanitized to a valid Kotlin identifier). The
     result's `files` maps an output basename (`hello.kt`) to its
     text; `main_file` is the main output's basename; `uses_rt` says
     whether any file needs `NewrRt` (the caller copies
@@ -6021,7 +6021,7 @@ def emit_program_kt(program: A.Program, *, main_path: str,
     em = _KtEmitter(program, main_path=main_path, sources=sources,
                       line_comments=line_comments, output_stem=stem)
     files, uses_rt = em._emit_file_set(program, main_path)
-    # `env.args` needs main()'s `args` in the runtime — but only
+    # `env.args` needs main()'s `args` in the runtime - but only
     # when some file actually uses it (D4: the runtime is copied
     # only when used, so hello stays runtime-free). A module file
     # may use env.args while the main file does not, and the main
@@ -6040,7 +6040,7 @@ def emit_program_kt(program: A.Program, *, main_path: str,
         # The standalone registration script (J10's Kotlin twin)
         # rides along as a second output file, and the Gradle
         # build file (Kord 0.18.1 always, sqlite-jdbc only when a
-        # store is used — the CLI writes every file in
+        # store is used - the CLI writes every file in
         # result.files, so the Gradle files land next to the
         # sources automatically).
         deploy = em._emit_deploy_file(program, stem + ".kt")
@@ -6065,7 +6065,7 @@ def _kt_bot_gradle(stem: str, *, uses_sqlite: bool) -> str:
     main_class = (stem[:1].upper() + stem[1:] + "Kt") if stem \
         else "MainKt"
     lines = [
-        "// Generated by newr — do not edit by hand.",
+        "// Generated by newr - do not edit by hand.",
         "plugins {",
         "    kotlin(\"jvm\") version \"2.2.0\"",
         "    application",

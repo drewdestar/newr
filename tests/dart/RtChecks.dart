@@ -1,7 +1,7 @@
 // Dart-side unit tests for compiler/newr_rt.dart (M5).
 //
 // Mirrors tests/java/RtChecks.java case for case (same rule, both
-// targets) — the same 71 checks, adapted to Dart types (int is
+// targets) - the same 71 checks, adapted to Dart types (int is
 // already 64-bit, no boxing at the helper boundaries). Run with
 // `dart RtChecks.dart` from a temp dir holding a copy of
 // newr_rt.dart, or via `python -m unittest
@@ -35,7 +35,7 @@ void check(String name, void Function() fn) {
 
 /// Deep equality via NewrRt.eq (Dart List/Map/Set `==` is
 /// identity, so a plain `==` would fail the collection cases).
-/// NaN is never eq'd through here — the checks use isNaN.
+/// NaN is never eq'd through here - the checks use isNaN.
 void eq(Object? got, Object? want, String what) {
   if (!NewrRt.eq(got, want)) {
     throw AssertionError(
@@ -394,7 +394,7 @@ void main() {
     });
     eq(r2.isErr(), true, 'try err');
     // Dart's StateError stringifies as "Bad state: x" (its
-    // toString, not a bare message — the Dart host form).
+    // toString, not a bare message - the Dart host form).
     eq(r2.error!.message, 'Bad state: x', 'try err message');
   });
 
@@ -485,7 +485,7 @@ void main() {
       NewrRt.fileRead('/definitely/not/here/xyz.txt');
       throw AssertionError('expected a throw');
     } on NewrError catch (e) {
-      // Host-specific code (Dart: PathNotFoundException — the
+      // Host-specific code (Dart: PathNotFoundException - the
       // concrete FileSystemException subclass for a missing path;
       // Java: NoSuchFileException; Python: FileNotFoundError).
       eq(e.code, 'PathNotFoundException', 'missing file code');

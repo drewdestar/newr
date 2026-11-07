@@ -1,20 +1,20 @@
 """The Rust emitter (M5, SPEC.md §18).
 
 ``newr build --target rs`` lowers a *checked* program (the front
-end has already run: parse -> resolve -> check) to readable Rust —
+end has already run: parse -> resolve -> check) to readable Rust -
 one `.newr` file -> one `.rs` file, structure preserved, user names
 verbatim, helpers only in `newr_rt.rs` (copied next to the output
-when used — the emitted code does `mod newr_rt;` and calls
+when used - the emitted code does `mod newr_rt;` and calls
 `newr_rt::add(...)`, R1).
 
 Readability is a requirement, not a nicety: the output is code a
-human would write — the Rust goldens (`goldens/rs/`) are the style
+human would write - the Rust goldens (`goldens/rs/`) are the style
 oracle, and the emitter reproduces them byte-for-byte
 (BUILD_REPORT.md §21, R1–Rn).
 
 The emitter NEVER runs on an unchecked program: the CLI checks first
 and exits 4 on errors. If it meets a node without a type (which only
-happens on an unchecked program), it raises `EmitterError` — a clean
+happens on an unchecked program), it raises `EmitterError` - a clean
 refusal, never a TypeError traceback.
 
 Module system (R2): one Rust module per file, named after the file
@@ -25,11 +25,11 @@ qualified `<stem>::name`. A program with no `main` file stem gets
 std-only); bot/store programs get a `Cargo.toml` (poise + serenity
 + rusqlite, pins in SPEC.md §14) and build with cargo.
 
-Ownership (R3): Rust has no GC — values are owned. The emitter
+Ownership (R3): Rust has no GC - values are owned. The emitter
 clones lvalue RHSs (`let`/`const` initializers, assignment RHS,
 call/struct/list/dict args, `??` defaults) only when the node is a
 `Name`/`Member`/`Index` (owned temporaries move fine). Lists/sets
-are NOT aliased through calls (a clone is made) — recorded as a
+are NOT aliased through calls (a clone is made) - recorded as a
 known divergence (no conformance coverage).
 
 Errors (R4): newr errors are panics carrying a `NewrError`
@@ -60,7 +60,7 @@ _BUILTIN_NAMES = frozenset(BUILTINS)
 # colliding with one of these is mangled with a trailing underscore
 # (D20, mirrored from the Python/JS/Java emitters). The `newr_rt`
 # runtime helpers are called qualified (`newr_rt::add`), so user
-# names that match a helper are harmless — but the module name
+# names that match a helper are harmless - but the module name
 # `newr_rt` itself, the `main` function, its `args` parameter, and
 # the std type names the emitter writes (`String`, `Vec`, ...)
 # must not be shadowed by a user struct/enum/fn name in the same
@@ -167,7 +167,7 @@ def _rs_float(value: float) -> str:
 # Rust precedence (higher binds tighter), loosest -> tightest.
 # The emitter's precedence-climbing printer uses this table; newr's
 # own table (SPEC §9.2) maps onto it, with the traps documented
-# where they bite — notably unary `-`: `-x ** y` parses as
+# where they bite - notably unary `-`: `-x ** y` parses as
 # `-(x ** y)` in newr, and Rust has no `**`, so the power helper
 # call binds as a primary; and `!a == b` is `(!a) == b` in Rust,
 # not `!(a == b)` as newr's `not` reads it.
@@ -180,7 +180,7 @@ _PREC = {
     "add": 9,      # + -
     "mul": 10,     # * / %
     "unary": 11,   # -x !x
-    "pow": 12,     # ** (emitted as a helper call — primary)
+    "pow": 12,     # ** (emitted as a helper call - primary)
     "primary": 13,  # calls, indexing, member access, atoms
 }
 
@@ -282,7 +282,7 @@ class _Binding:
     # channel id (`interaction.channel_id`). `_emit_member` uses
     # them for `member.guild`, `interaction.guild` /
     # `interaction.channel`, which have no serenity field to read
-    # directly — they are resolved through the cache.
+    # directly - they are resolved through the cache.
     guild_id_expr: str | None = None
     # True when `guild_id_expr` is an `Option<GuildId>` (an
     # interaction's / a message's guild id); a plain `GuildId`
@@ -312,7 +312,7 @@ class _RsEmitter:
         # `-o` stem; the default is the main source stem, falling
         # back to "Main".
         self.output_stem = output_stem or "Main"
-        # Runtime usage collected while emitting (per output file —
+        # Runtime usage collected while emitting (per output file -
         # reset for each module file).
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
@@ -336,12 +336,12 @@ class _RsEmitter:
         # (for rename allocation in _bind_fresh). Reset per function.
         self._fn_used: set[str] = set()
         # Hoists for the statement being emitted: each is a list of
-        # lines (base indent 0) to emit before the statement —
+        # lines (base indent 0) to emit before the statement -
         # hoisted lambda consts and lambda snapshot locals.
         self._hoists: list[list[str]] | None = None
         # True while emitting the DIRECT top-level statement list of
         # a file (main() / the module __newr_init()). A `let` there
-        # assigns the static instead of declaring a local (R2) — a
+        # assigns the static instead of declaring a local (R2) - a
         # local would shadow the static and top-level functions
         # would read the still-empty static (conformance
         # toplevel_order). Nested blocks reset it (their `let` is a
@@ -359,7 +359,7 @@ class _RsEmitter:
         # `{channel}` interpolation is emitted).
         self._used_channel_text = False
         # Whether a `.mention()` call was emitted (set when a
-        # user/member/channel mention form is used — the
+        # user/member/channel mention form is used - the
         # `Mentionable` trait import is only emitted then, so a
         # bot that never mentions anyone gets no unused-import
         # warning). `_channel_text` also mentions, so the import
@@ -464,11 +464,11 @@ class _RsEmitter:
         """Bind `name` in the current scope.
 
         Rust has real block scope (`let x` in an `if` block does
-        not clobber the outer name), so — unlike the Python emitter
-        — shadowing an enclosing LOCAL needs no renaming: the inner
+        not clobber the outer name), so - unlike the Python emitter
+        - shadowing an enclosing LOCAL needs no renaming: the inner
         binding is a different variable, exactly as newr reads it.
         But a module-level name is a `static`, and a `let` binding
-        may not shadow a static (E0530) — so a local whose mangled
+        may not shadow a static (E0530) - so a local whose mangled
         name collides with one gets a trailing underscore (the
         `fn_shadow` case). Only keyword / emitter-reserved mangling
         applies otherwise (D20).
@@ -484,7 +484,7 @@ class _RsEmitter:
     def _bind_fresh(self, name: str, type: Type | None = None,
                     kind: str = "local") -> _Binding:
         """Bind `name` in the current scope WITHOUT renaming against
-        enclosing scopes — for function/lambda parameters, where
+        enclosing scopes - for function/lambda parameters, where
         shadowing an enclosing name is the correct semantics. Only
         the current function's used-name set is consulted, so two
         parameters mangling to the same Rust name still get distinct
@@ -593,7 +593,7 @@ class _RsEmitter:
             return "()"
         if t.name == "object":
             # The union type of conflicting enum variant fields.
-            # Rust has no dynamic `Object` — a clean E4001 (R5).
+            # Rust has no dynamic `Object` - a clean E4001 (R5).
             self._fail(
                 "an enum variant field with conflicting types "
                 "across variants is not supported in the Rust "
@@ -660,7 +660,7 @@ class _RsEmitter:
         own file, `stem::Name` when imported (the binding records
         the module). An imported struct/enum reached only through
         its TYPE (a `let c = helper.Shade.Red` has type `Shade`
-        with no module on the Type — the Type class has no module
+        with no module on the Type - the Type class has no module
         field) is found by searching the imported file modules for
         the declaration and qualifying with the module's stem
         (conformance import_enum)."""
@@ -718,7 +718,7 @@ class _RsEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
             lines = [
-                f"// Generated by newr from {main_path} — do not edit by hand.",
+                f"// Generated by newr from {main_path} - do not edit by hand.",
                 f"// Edit the .newr file and rebuild with: newr build {main_path}",
             ]
             if description:
@@ -763,7 +763,7 @@ class _RsEmitter:
             type arguments substituted. A nullable method's "T" is the
             receiver's inner type; a method found only in the nullable
             table on a NON-nullable receiver is a rebased `?.` method
-            inside an `optChain` lambda (D38) — the receiver is proven
+            inside an `optChain` lambda (D38) - the receiver is proven
             non-none there, so "T" is the receiver itself."""
             table = None
             mapping: dict = {}
@@ -789,7 +789,7 @@ class _RsEmitter:
 
     def _is_plain_field(self, recv_type: Type, name: str) -> bool:
             """True when `name` is a real field of `recv_type` (a struct
-            field) — a plain attribute access, never a method value.
+            field) - a plain attribute access, never a method value.
             Provider/entity types have no tables here, so they report
             False and the method-signature lookup decides."""
             decl = self.structs.get(recv_type.name)
@@ -800,7 +800,7 @@ class _RsEmitter:
     def _enum_union_fields(self, decl: A.EnumDecl) -> dict[str, Type]:
             """The union of all variants' fields: name -> type. When
             two variants share a field name with DIFFERENT types, the
-            union type is Object (name "object" — the emitter casts on
+            union type is Object (name "object" - the emitter casts on
             access; the field's declared type still wins in the
             variant's factory method and in match bindings)."""
             union: dict[str, Type | None] = {}
@@ -851,9 +851,9 @@ class _RsEmitter:
             return index, (order[0] if order else "en")
 
     def _task_fn_name(self, task: A.TaskDecl) -> str:
-            """`_every_1h` for a 1h task — the JS emitter's naming
+            """`_every_1h` for a 1h task - the JS emitter's naming
             (a numeric suffix when the same period repeats). The
-            name is computed once per task and cached — main() and
+            name is computed once per task and cached - main() and
             the definition must agree."""
             key = id(task)
             if key in self._task_fn_names:
@@ -872,7 +872,7 @@ class _RsEmitter:
             return name
 
     def _command_method_name(self, name: str) -> str:
-            """`executePing` for `/ping` — unique per file."""
+            """`executePing` for `/ping` - unique per file."""
             words = "".join(ch if ch.isalnum() else " " for ch in name).split()
             base = "".join(w.capitalize() for w in words) or "Command"
             method = "execute" + base
@@ -885,7 +885,7 @@ class _RsEmitter:
             return method
 
     def _component_method_name(self, label: str, suffix: str) -> str:
-            """`buyAgainHandler` for a \"Buy again\" component — unique
+            """`buyAgainHandler` for a \"Buy again\" component - unique
             per file (a numeric suffix when the same label repeats)."""
             words = "".join(ch if ch.isalnum() else " " for ch in label).split()
             base = "".join(w.capitalize() for w in words) or "Component"
@@ -1076,8 +1076,8 @@ class _RsEmitter:
             `old_base` (by identity) with `new_base`, and clearing the
             `optional` flags (the optionality is handled by the
             `optChain` wrapper, not inside the lambda body). Types are
-            copied onto the clones — the checker already typed the
-            original nodes — except when `in_lambda_types` maps a link
+            copied onto the clones - the checker already typed the
+            original nodes - except when `in_lambda_types` maps a link
             to its in-lambda type (§16, hole 1): the checker's chain
             type conflates the `?.` short-circuit with a field's own
             nullability, and inside the lambda only the latter survives,
@@ -1113,7 +1113,7 @@ class _RsEmitter:
                     name=node.func.name, optional=False,
                     expr_type=node.func.expr_type)
                 # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
-                # is nullable only because the `?.` short-circuits —
+                # is nullable only because the `?.` short-circuits -
                 # inside the lambda the receiver is proven non-none, so
                 # the result is the plain (stripped) type. Without this,
                 # a later link (`.upper()` in `s?.unwrap().upper()`)
@@ -1122,7 +1122,7 @@ class _RsEmitter:
                 # (`a?.b`) may be nullable because the FIELD itself is
                 # nullable, which survives inside the lambda. When the
                 # caller supplies the exact in-lambda type (§16), that
-                # wins over this heuristic — it is exact where D38
+                # wins over this heuristic - it is exact where D38
                 # over-strips (a method whose own return type is
                 # nullable, e.g. `unwrap()` on `Result[str?, _]`).
                 expr_type = node.expr_type
@@ -1142,7 +1142,7 @@ class _RsEmitter:
 
             Inside an `optChain` lambda the receiver is proven
             non-none, so this is the link's result type with the `?.`
-            short-circuit removed — but a nullable FIELD type or a
+            short-circuit removed - but a nullable FIELD type or a
             nullable method return survives. Returns None when the type
             cannot be determined (provider/entity types); the caller
             treats None as nullable and splits the segment, which is
@@ -1159,7 +1159,7 @@ class _RsEmitter:
                     params, ret = sig
                     return fn_of(params, ret)
                 # A field on a provider/entity type (e.g. a Discord
-                # member's `name`): the type is unknown — treat as
+                # member's `name`): the type is unknown - treat as
                 # nullable (split the segment).
                 return None
             if isinstance(link, A.Index):
@@ -1197,7 +1197,7 @@ class _RsEmitter:
                 b = self._lookup(name)
                 # "global-let" is included: a top-level `let` is mutable,
                 # so a lambda reading it at call time would see a LATER
-                # value — capture by value (D10) requires a snapshot.
+                # value - capture by value (D10) requires a snapshot.
                 # (A top-level `const` is registered the same way; it
                 # never changes, so snapshotting it is harmless.) Module
                 # functions / structs / enums / modules / stores are
@@ -1220,7 +1220,7 @@ class _RsEmitter:
             that answer's line to carry the components.
 
             `top_level` marks the direct top-level statement list of a
-            file (main() / the module static block) — see
+            file (main() / the module static block) - see
             `_in_top_level`; nested blocks always pass False."""
             if new_scope:
                 self._push_scope()
@@ -1247,7 +1247,7 @@ class _RsEmitter:
                         self._last_answer = (len(lines) - 1, kind)
                     elif isinstance(st, (A.ButtonDecl, A.SelectDecl)):
                         # The component's instantiation lines must come
-                        # BEFORE the answer they attach to — the answer
+                        # BEFORE the answer they attach to - the answer
                         # references the components variable, so defining
                         # it after the answer would be a compile error.
                         # They go before the answer's BUILDER line
@@ -1380,14 +1380,14 @@ class _RsEmitter:
                     self.fns_by_rs[b.rs] = decl
             # The top level's used-name set starts with every module-level
             # Rust name, so a `let` in a top-level block cannot reuse one
-            # (at module level Rust has no block scope for the top level —
+            # (at module level Rust has no block scope for the top level -
             # the name would clobber the module binding).
             self._fn_used = set(self._module_used)
 
     def _emit_file_set(self, program: A.Program, main_path: str,
                            is_main: bool = True):
             """Emit one program and every file module it imports (recursively).
-            Returns (files, uses_rt). `is_main` marks the top file — the
+            Returns (files, uses_rt). `is_main` marks the top file - the
             only role difference left is that the top file is the entry
             point (a bot's `main()` guard, a general file's top-level
             statements); a file module gets a `static { }` block."""
@@ -1405,7 +1405,7 @@ class _RsEmitter:
                 sub_path = imp.resolved_path or imp.path
                 # The header names the file as the user would see it:
                 # relative to the working directory when it is under it
-                # (D2 — so building `examples/shop.newr` and building
+                # (D2 - so building `examples/shop.newr` and building
                 # `examples/shop_items.newr` directly give the same
                 # shop_items.rs header).
                 import os
@@ -1509,8 +1509,8 @@ class _RsEmitter:
                 and isinstance(expr, A.Call) \
                 and isinstance(expr.func, A.Name) \
                 and expr.func.name in ("ok", "err"):
-            # `ok`/`err` construct a bare `Ok`/`Err` — never an
-            # `Option` — but the checker unifies their type with
+            # `ok`/`err` construct a bare `Ok`/`Err` - never an
+            # `Option` - but the checker unifies their type with
             # the expected type, so `_wrap_nullable` below would
             # see a nullable actual type and skip the `Some` wrap.
             text = self._owned(expr, fn_target=fn_target)
@@ -1534,7 +1534,7 @@ class _RsEmitter:
                   fn_target: Type | None = None) -> str:
         """Emit an expression, parenthesised when its precedence is
         below `min_prec`. `fn_target` is the expected fn type when
-        the expression is a lambda — the context's target type, so
+        the expression is a lambda - the context's target type, so
         the lambda needs no cast (a Rust closure is not a
         `dyn Fn` until it is wrapped in an `Arc`)."""
         text, prec = self._emit_expr(node, fn_target)
@@ -1616,7 +1616,7 @@ class _RsEmitter:
             return self._emit_embed(node)
         if isinstance(node, (A.Member, A.Index, A.Call)):
             # Any optional link anywhere in the chain routes the
-            # WHOLE chain through _emit_chain (D9) — including
+            # WHOLE chain through _emit_chain (D9) - including
             # trailing non-optional links (`a?.b.c`), which must
             # short-circuit too.
             if self._chain_has_optional(node):
@@ -1665,7 +1665,7 @@ class _RsEmitter:
                     f"`{node.name}`", span=node.span)
             if binding.kind in ("struct", "enum"):
                 self._fail(
-                    f"`{node.name}` is not a value — use a variant "
+                    f"`{node.name}` is not a value - use a variant "
                     "or construct it", span=node.span)
             # A user fn as a value is the function itself (first-
             # class functions, SPEC §9.5): an `Arc` over the fn
@@ -1704,7 +1704,7 @@ class _RsEmitter:
         # types come from the context (fn_target) when known; the
         # checker types a bare builtin with `__unknown__` params,
         # so without a context there is nothing to build the
-        # closure from — a clean E4001 (no conformance coverage).
+        # closure from - a clean E4001 (no conformance coverage).
         if not _is_fn(fn_target) or fn_target is None:
             self._fail(
                 f"builtin `{name}` used as a value needs a known "
@@ -1889,7 +1889,7 @@ class _RsEmitter:
                 # `T? or T` (SPEC §7.2): the default when the value
                 # is absent. Rust `||` would also take the default
                 # for a present-but-falsy value (0, ""), so it is
-                # not the same — use the `??` form.
+                # not the same - use the `??` form.
                 result = self._type_of(node)
                 left = self._owned(node.left)
                 right = self._emit_value(node.right, result)
@@ -2015,7 +2015,7 @@ class _RsEmitter:
         # `-a + b` is `-(a + b)`).
         # D19: the int64 minimum is written `-9223372036854775808`
         # in newr. Its positive magnitude is out of int64 range, so
-        # the checker leaves the literal's own type unset — the
+        # the checker leaves the literal's own type unset - the
         # plain `neg(...)` form would also be wrong (it would check
         # the out-of-range literal first). Emit the minimum directly.
         if isinstance(node.operand, A.Lit) and \
@@ -2062,7 +2062,7 @@ class _RsEmitter:
                 if binding is not None and binding.kind == "enum":
                     return self._emit_enum_call(obj.name, func.name, node)
             # §20: qualified imported fielded-variant construction,
-            # `m_helper.Shape.Circle(radius: 1.5)` — the declaration
+            # `m_helper.Shape.Circle(radius: 1.5)` - the declaration
             # comes from the imported module, for field reordering.
             imported = self._imported_enum(func)
             if imported is not None:
@@ -2090,7 +2090,7 @@ class _RsEmitter:
         if name == "input":
             if self._is_bot:
                 self.warnings.append(
-                    "input() in a bot program blocks on stdin — bots "
+                    "input() in a bot program blocks on stdin - bots "
                     "have no stdin (D21)")
             self._need_rt("input")
             args = [self.emit_expr(a, 0) for a in node.args]
@@ -2194,7 +2194,7 @@ class _RsEmitter:
                          for a in node.args[len(params):]]
                 if binding.kind == "global-let":
                     # A fn value in a top-level let lives in a
-                    # static `Mutex<Option<Arc<dyn Fn>>>` — read
+                    # static `Mutex<Option<Arc<dyn Fn>>>` - read
                     # it through `gget` before calling it.
                     self._need_rt("gget")
                     return (f"newr_rt::gget(&{binding.rs})"
@@ -2220,7 +2220,7 @@ class _RsEmitter:
         self._fail(f"unknown function `{name}`")
 
     def _emit_print(self, node: A.Call) -> tuple[str, int]:
-        """`print` renders every argument with `to_str` (P8) — the
+        """`print` renders every argument with `to_str` (P8) - the
         runtime `print` helper does that mapping internally, so the
         emitted call is bare. A `?` argument propagates first (the
         temp + early return are hoisted before the statement, D7).
@@ -2303,7 +2303,7 @@ class _RsEmitter:
         t = self._type_of(arg)
         text = self.emit_expr(arg, 0)
         if name == "str":
-            # A nullable str's runtime value is `None` when absent —
+            # A nullable str's runtime value is `None` when absent -
             # bare rendering would print nothing useful, not newr's
             # "none" (P8), so nullable values go through to_str.
             if _is_str(t) and not t.nullable:
@@ -2313,7 +2313,7 @@ class _RsEmitter:
         if name == "int":
             if _is_int(t):
                 return text, _PREC["primary"]
-            # float (truncation), str (parsing), bool (0/1) — all
+            # float (truncation), str (parsing), bool (0/1) - all
             # through the runtime converters, which return an i64
             # in every case.
             if _is_float(t):
@@ -2396,7 +2396,7 @@ class _RsEmitter:
 
     def _file_module_mod(self, binding: _Binding) -> str:
         """The Rust module path for a file-module import: the file
-        STEM, not the import alias (R2 — one `.rs` per file,
+        STEM, not the import alias (R2 - one `.rs` per file,
         named after the stem). For `import "h_fn.newr" as h` the
         module is `h_fn`, so every reference to the module must use
         the stem; using the alias emits `h::…` against a module
@@ -2435,8 +2435,8 @@ class _RsEmitter:
     def _enum_field_access(self, expr_text: str, enum_name: str,
                            field_name: str, field_type: Type | None) -> str:
         """`expr.field` for an enum field. (Rust has no `object`
-        union type — conflicting field types are E4001 in
-        `_rs_type` — so no cast is ever needed here.)"""
+        union type - conflicting field types are E4001 in
+        `_rs_type` - so no cast is ever needed here.)"""
         return f"{expr_text}.{self._mangle(field_name)}"
 
     # Discord entity fields (SPEC §7.3, ENTITY_FIELDS in
@@ -2489,15 +2489,15 @@ class _RsEmitter:
                     return self._emit_enum_variant(node, binding)
                 if binding.kind == "struct":
                     self._fail(
-                        f"struct `{obj.name}` is not a value — construct it",
+                        f"struct `{obj.name}` is not a value - construct it",
                         span=node.span)
                 if binding.kind == "store":
                     self._fail(
-                        f"store `{obj.name}` is not a value — use its "
+                        f"store `{obj.name}` is not a value - use its "
                         "economy functions", span=node.span)
                 if binding.kind == "fn":
                     self._fail(
-                        f"function `{obj.name}` is not a value — call it",
+                        f"function `{obj.name}` is not a value - call it",
                         span=node.span)
             if obj.name in MODULES:
                 # A named module used without an import: the name is
@@ -2520,14 +2520,14 @@ class _RsEmitter:
         # ERROR_FIELDS): message (str) and code (str?). Both are
         # public fields on `NewrError` (conformance try_catch).
         if obj_type.name == "error":
-            # `message` / `code` are the runtime's pub fields —
+            # `message` / `code` are the runtime's pub fields -
             # they are NOT mangled (`message` is emitter-reserved
             # for the bot, but the field name on NewrError is
             # literally `message`).
             obj_text = self.emit_expr(obj, _PREC["primary"])
             return f"{obj_text}.{node.name}", _PREC["primary"]
         # §16 (hole 2): a method used as a value is a closure, not a
-        # Rust attribute — a Vec has no `len` field. A real struct
+        # Rust attribute - a Vec has no `len` field. A real struct
         # field stays a plain attribute.
         if t.name == "fn" and not self._is_plain_field(obj_type,
                                                        node.name):
@@ -2538,7 +2538,7 @@ class _RsEmitter:
         obj_text = self.emit_expr(obj, _PREC["primary"])
         # Discord entity fields (SPEC §7.3) -> serenity. The
         # checker types these fields (ENTITY_FIELDS in
-        # discord_limits); Rust has no `.id` field on a User — the
+        # discord_limits); Rust has no `.id` field on a User - the
         # snowflake is `id.get()` (newr `id` is int, so the String
         # `id.to_string()` would be the wrong type).
         entity = self._entity_field_expr(obj_text, obj_type, node.name)
@@ -2549,7 +2549,7 @@ class _RsEmitter:
             return entity, _PREC["primary"]
         # Bot handlers: `member.guild`, `interaction.guild` /
         # `interaction.channel`, and `channel.name` have no serenity
-        # field to read directly — they resolve through the cache
+        # field to read directly - they resolve through the cache
         # (M5). Anything else the table does not know is a clean
         # E4001, never a `.field` that does not exist.
         if isinstance(obj, A.Name):
@@ -2694,7 +2694,7 @@ class _RsEmitter:
                 return (f"newr_rt::split_str(&{obj_text}, &{args[0]})",
                         _PREC["primary"])
             if name == "join":
-                # newr `"sep".join(parts)` — Rust joins the LIST
+                # newr `"sep".join(parts)` - Rust joins the LIST
                 # with the separator.
                 return (f"{args[0]}.join({obj_text}.as_str())",
                         _PREC["primary"])
@@ -2764,7 +2764,7 @@ class _RsEmitter:
                             f"_v.add({arg}); }})", _PREC["primary"])
                 obj_text = self.emit_expr(obj, _PREC["primary"])
                 # `Set::add` returns bool; newr's `add` returns
-                # none — discard it in a block.
+                # none - discard it in a block.
                 return f"{{ {obj_text}.add({arg}); }}", _PREC["primary"]
             if name == "remove":
                 self._need_rt("set_remove")
@@ -2844,7 +2844,7 @@ class _RsEmitter:
             # Indexing is the checked form: a negative or out-of
             # range index raises IndexError (rt list_index), exactly
             # like newr's `xs[i]`. (`list.get` is the defaulting
-            # form — see _emit_method_call.)
+            # form - see _emit_method_call.)
             return (f"newr_rt::list_index(&{obj_text}, {idx})",
                     _PREC["primary"])
         if obj_type.name == "str":
@@ -2912,13 +2912,13 @@ class _RsEmitter:
             recv_type = self._type_of(inner_recv)
             # Inside the closure the receiver is proven non-none
             # (`.map` only calls it then), so the parameter and
-            # the rebased base carry the STRIPPED (inner) type —
+            # the rebased base carry the STRIPPED (inner) type -
             # otherwise a method call on it would dispatch as if the
             # value were still nullable.
             inner_type = Type(recv_type.name, params=recv_type.params,
                               nullable=False)
             # §16 (hole 1): a segment must also end before any link
-            # whose receiver can be `none` INSIDE the closure — a
+            # whose receiver can be `none` INSIDE the closure - a
             # nullable field (`o?.inner.name`) or a nullable method
             # result (`r?.unwrap().upper()` on `Result[str?, _]?`).
             # The checker's `expr_type` conflates the `?.`
@@ -2928,7 +2928,7 @@ class _RsEmitter:
             # in-closure result type, so `_rebase` types the clones
             # exactly: a Member link's nullability inside the closure
             # is its FIELD's nullability, not the checker's chain
-            # type — without this, a method after a nullable field
+            # type - without this, a method after a nullable field
             # dispatches against `T?` and fails with E4001.
             in_lambda: dict[int, Type | None] = {}
             cur_type = self._in_lambda_link_type(links[i], inner_type)
@@ -2973,7 +2973,7 @@ class _RsEmitter:
                     # `Option` result, not to the in-closure value
                     # (D38 would no-op it inside the closure and
                     # leave an `Option` where the checker's type
-                    # says a plain value) — end the segment
+                    # says a plain value) - end the segment
                     # before it.
                     break
                 cur_type = self._in_lambda_link_type(links[j], cur_type)
@@ -2983,7 +2983,7 @@ class _RsEmitter:
             self._push_scope()
             binding = self._bind_fresh("_v", type=inner_type,
                                        kind="param")
-            # The rebased base is a Name for the NEWR name `_v` —
+            # The rebased base is a Name for the NEWR name `_v` -
             # the lookup returns the binding's Rust name (which may
             # be `_v_1` in a nested chain).
             new_base = A.Name(span=links[i].span, name="_v",
@@ -2995,7 +2995,7 @@ class _RsEmitter:
                                        inner_type, body_type)
             self._pop_scope()
             if not body.startswith("|"):
-                # A hoisted body is an `Arc<dyn Fn>` NAME — `.map`
+                # A hoisted body is an `Arc<dyn Fn>` NAME - `.map`
                 # / `.and_then` take a closure, not an `Arc`, so
                 # wrap the call in one.
                 body = f"|{binding.rs}| {body}({binding.rs})"
@@ -3034,7 +3034,7 @@ class _RsEmitter:
                      fn_target: Type | None = None) -> tuple[str, int]:
         """Closures capture by value (D10, J8): free variables are
         snapshotted into hoisted `let` locals before the enclosing
-        statement — a Rust closure may only capture by move when it
+        statement - a Rust closure may only capture by move when it
         is a `move` closure, so a snapshot local (never reassigned
         after the snapshot) is exactly the captured value. A block
         body cannot be an inline closure body with statements, so it
@@ -3043,7 +3043,7 @@ class _RsEmitter:
         its fn type (fn_target when the context provides one)."""
         free = self._lambda_free_vars(node)
         # A lambda that ASSIGNS to a captured variable would need
-        # `FnMut`, which cannot coerce to `dyn Fn` — a clean E4001
+        # `FnMut`, which cannot coerce to `dyn Fn` - a clean E4001
         # (method-call mutation through a capture, e.g.
         # `xs.append(4)`, is undetectable here and is a known gap).
         free_names = {name for name, _b in free}
@@ -3134,7 +3134,7 @@ class _RsEmitter:
                 # A top-level `let`/`const` is a static of the
                 # module (so top-level functions can read it), and
                 # its initializer runs here, in file order, inside
-                # main() (or the module's __newr_init()) — a
+                # main() (or the module's __newr_init()) - a
                 # declaration-time initializer would run before
                 # main() and break file order for side-effecting
                 # initializers (R2). Emitting a local declaration
@@ -3285,7 +3285,7 @@ class _RsEmitter:
         else:
             self._fail(f"cannot iterate over a `{it_type}` value")
         # The iterable is emitted BEFORE the loop variable is bound
-        # (it cannot see the loop variable — `for x in x` reads the
+        # (it cannot see the loop variable - `for x in x` reads the
         # enclosing `x`).
         iterable = self.emit_expr(stmt.iterable, 0)
         self._push_scope()
@@ -3315,7 +3315,7 @@ class _RsEmitter:
     def _try_has_control_flow(self, stmts: list) -> bool:
         """True when a statement list contains a `return`/`break`/
         `continue` outside any nested lambda/fn (those would unwind
-        past a `catch_unwind` boundary — R4)."""
+        past a `catch_unwind` boundary - R4)."""
         for st in stmts:
             if isinstance(st, (A.Return, A.Break, A.Continue)):
                 return True
@@ -3413,7 +3413,7 @@ class _RsEmitter:
             if stmt.value is None:
                 return [f"{p}std::process::exit(0);"]
             self._fail("a top-level `return` with a value is not "
-                       "supported — a top-level `return` exits the "
+                       "supported - a top-level `return` exits the "
                        "program")
         ensures = ctx["ensures"]
         ret_type = ctx["return_type"]
@@ -3502,7 +3502,7 @@ class _RsEmitter:
                                                      scrut_type)
             if arm.guard is not None:
                 # The guard may reference the pattern's bindings
-                # (e.g. `x if x > 100:`) — bind each name to its
+                # (e.g. `x if x > 100:`) - bind each name to its
                 # pattern expression text while emitting it.
                 self._push_scope()
                 for name, expr_text, typ in bindings:
@@ -3513,7 +3513,7 @@ class _RsEmitter:
                 cond = f"{cond} && {guard}" if cond else guard
             arms.append((cond, bindings, arm))
         # The last unconditional arm becomes `else:`; otherwise the
-        # final `else` throws (defense — the checker proves
+        # final `else` throws (defense - the checker proves
         # exhaustiveness, so it is unreachable in a checked program).
         last_uncond = (arms and arms[-1][0] is None)
         for i, (cond, bindings, arm) in enumerate(arms):
@@ -3701,7 +3701,7 @@ class _RsEmitter:
         Result-returning function; a nullable operand returns `None`
         from a nullable-returning function. The mismatched kinds
         (D30) and a nullable `Result` (G-M2-6) are clean
-        `EmitterError`s — the checker should have rejected them, and
+        `EmitterError`s - the checker should have rejected them, and
         there is no defined early-return value to invent."""
         operand = prop.expr
         t = self._type_of(operand)
@@ -3715,7 +3715,7 @@ class _RsEmitter:
         temp_type = self._rs_type(t)
         if ctx.get("in_handler"):
             # A handler returns `Result<(), Error>`, so `?` exits
-            # the handler with `Ok(())` — there is no value to
+            # the handler with `Ok(())` - there is no value to
             # propagate. (A handler that may exit early without
             # answering is the discord checker's E2010, not the
             # emitter's problem.)
@@ -3737,17 +3737,17 @@ class _RsEmitter:
                 return f"{temp}.unwrap()"
             if t.name == "Result" and t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             self._fail("`?` needs a `Result[T, E]` or a `T?` value")
         if t.name == "Result" and t.params:
             if t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             if ret is None or ret.name != "Result":
                 self._fail("`?` on a `Result` value inside a function "
-                           "that does not return a `Result` (D30 — the "
+                           "that does not return a `Result` (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"let {temp}: {temp_type} = {text};",
@@ -3759,7 +3759,7 @@ class _RsEmitter:
         if t.nullable:
             if ret is None or not ret.nullable:
                 self._fail("`?` on a nullable value inside a function "
-                           "that does not return a nullable (D30 — the "
+                           "that does not return a nullable (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"let {temp}: {temp_type} = {text};",
@@ -3776,7 +3776,7 @@ class _RsEmitter:
                           binding: _Binding) -> tuple[str, int]:
         if binding.kind == "file-module":
             # A function in an imported .newr file: a plain call on
-            # the imported module — and the import itself (R2: one
+            # the imported module - and the import itself (R2: one
             # `.rs` per imported `.newr`, named by its module
             # name). Struct construction through a file module needs
             # the struct literal (a Rust struct is constructed
@@ -3901,7 +3901,7 @@ class _RsEmitter:
         """A named-module member used as a value: a constant, or a
         function (which becomes a closure, D29). `binding.module` is
         the real module name (for dispatch); `binding.rs` is the
-        Rust reference (the alias, when the import is aliased) —
+        Rust reference (the alias, when the import is aliased) -
         except for a file module, whose module path is the file stem
         (`_file_module_mod`)."""
         real = binding.module or binding.rs
@@ -3919,7 +3919,7 @@ class _RsEmitter:
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
                 self._fail(f"`file.{node.name}` cannot be used as a "
-                           "value (it needs a statement — the `with` "
+                           "value (it needs a statement - the `with` "
                            "block cannot live inside a closure)")
             params = t.params[:-1]  # the last param is the return type
             names = [f"_a{i}" for i in range(len(params))]
@@ -3966,7 +3966,7 @@ class _RsEmitter:
         # The Bot method is `bot.<store>_<op>` with the RAW store
         # name (the spelling the Bot struct's methods use).
         # binding.rs is the MANGLED name ("economy" is
-        # emitter-reserved, so it would be "economy_") — using it
+        # emitter-reserved, so it would be "economy_") - using it
         # here would call a method that does not exist.
         store_name = (node.func.obj.name
                       if isinstance(node.func, A.Member)
@@ -3977,7 +3977,7 @@ class _RsEmitter:
         if ctx is None or not ctx.get("in_handler"):
             self._fail(
                 f"a store call (`{store_name}.{method}`) is only "
-                "possible inside a command, event, or task handler — "
+                "possible inside a command, event, or task handler - "
                 "top-level functions and statements run outside the "
                 "bot's handler context",
                 span=node.span)
@@ -4077,7 +4077,7 @@ class _RsEmitter:
         (D16). Template placeholders that are handler bindings
         (user, guild, ...) are auto-passed in their interpolation
         form; the rest must be explicit arguments (the checker
-        enforces it — E2009). The kwargs map is built with
+        enforces it - E2009). The kwargs map is built with
         `dict_of`."""
         index, _default = self._strings_index()
         entry = None
@@ -4220,7 +4220,7 @@ class _RsEmitter:
                            optional: bool) -> str:
         """The owned `Guild` for a guild id: a cache lookup that
         panics with a clear message when the guild is absent (a DM,
-        or a cold cache) — the documented edge for a bare `guild`
+        or a cold cache) - the documented edge for a bare `guild`
         value and for `member.guild` / `interaction.guild`
         (R-guild)."""
         gid = guild_id_expr if optional else f"Some({guild_id_expr})"
@@ -4232,7 +4232,7 @@ class _RsEmitter:
     def _guild_name_expr(self, guild_id_expr: str, cache: str,
                          optional: bool, dm_fallback: str) -> str:
         """The guild's name through the cache, or `dm_fallback`
-        when there is no guild (a DM) or the cache is cold — the
+        when there is no guild (a DM) or the cache is cold - the
         interpolation form of `guild`."""
         gid = guild_id_expr if optional else f"Some({guild_id_expr})"
         return (f"{gid}.and_then(|id| {cache}.guild(id))"
@@ -4301,11 +4301,11 @@ class _RsEmitter:
         """The `GatewayIntents` expression for a bot: the declared
         intents plus the derived ones (member events -> members,
         a message event -> message_content; privileged intents are
-        only ever on when the program asks for them — never
+        only ever on when the program asks for them - never
         silently), plus the GUILDS base intent. The base is a
         deliberate deviation from the Java mirror (R-intents):
         serenity has no default intents (unlike JDA's
-        `createDefault`), and GUILDS is non-privileged — the
+        `createDefault`), and GUILDS is non-privileged - the
         `{guild}` fallback and the member-join system-channel
         lookup both depend on the guilds being cached."""
         bot = program.bot
@@ -4479,7 +4479,7 @@ class _RsEmitter:
             return lines
         if reply in ("system_channel", "message_channel", "timeout"):
             # Edit the message the last answer produced (channel
-            # kinds — the message variable was captured eagerly by
+            # kinds - the message variable was captured eagerly by
             # the send) or the enclosing answer's message
             # (timeout). An edit with no previous answer is a
             # clean E4001, not an undefined variable.
@@ -4579,7 +4579,7 @@ class _RsEmitter:
 
     def _component_names(self, custom_id: str) -> tuple[str, str]:
         """(variable, handler fn) for a component: `buy_again` /
-        `buy_again_handler` for custom id `buy-again` — unique per
+        `buy_again_handler` for custom id `buy-again` - unique per
         file (a numeric suffix on collision)."""
         var = self._component_var_name(custom_id)
         if var in self._bot_component_names:
@@ -4625,7 +4625,7 @@ class _RsEmitter:
         return menu
 
     def _disabled_row(self, spec: dict) -> str:
-        """The disabled `CreateActionRow` for a component spec —
+        """The disabled `CreateActionRow` for a component spec -
         rebuilt from the spec, not cloned (`CreateActionRow` has no
         `as_disabled`; the builders do)."""
         if spec["kind"] == "button":
@@ -4645,7 +4645,7 @@ class _RsEmitter:
         are captured by value AND by interpolation form (the
         interpolation mentions `interaction`, which does not exist
         in the spawn). `interaction` itself cannot be captured
-        (it is borrowed) — referencing it in a timeout body is a
+        (it is borrowed) - referencing it in a timeout body is a
         clean E4001."""
         refs: set[str] = set()
         bound: set[str] = set()
@@ -4675,7 +4675,7 @@ class _RsEmitter:
         """Walk AST nodes collecting referenced names (`refs`) and
         names bound inside the walked subtree (`bound`: `let` /
         `const` names, `for` variables, lambda params). A generic
-        dataclass walk — every node shape is covered the same way."""
+        dataclass walk - every node shape is covered the same way."""
         import dataclasses
         if isinstance(node, A.Name):
             refs.add(node.name)
@@ -4731,7 +4731,7 @@ class _RsEmitter:
         p = "  " * indent
         if node.style == "link":
             if node.body:
-                self._fail("a link button has no body (`do:`) — it "
+                self._fail("a link button has no body (`do:`) - it "
                            "opens the url instead", span=node.span)
             var, _fn = self._component_names(
                 node.custom_id or node.label)
@@ -4861,7 +4861,7 @@ class _RsEmitter:
         # The modal's handler: the fields are bound by name
         # (`_modal_value` walks the submitted rows). A modal has
         # no author/roles gate and its timeout has no serenity
-        # equivalent — it is ignored, as in the Java emitter
+        # equivalent - it is ignored, as in the Java emitter
         # (documented divergence, R-modal).
         body_ctx = self._modal_ctx()
         bindings = self._component_bindings("ctx.cache")
@@ -4935,7 +4935,7 @@ class _RsEmitter:
         clone is `{msgvar}_timeout`), and the handler bindings the
         body references are rebound to captures (evaluated in the
         handler, before the spawn). Returns (lines, value
-        captures, interp captures) — each capture is a (name,
+        captures, interp captures) - each capture is a (name,
         expression) pair for a `let <name> = <expr>.clone();`
         line."""
         if not body:
@@ -4957,7 +4957,7 @@ class _RsEmitter:
         # Rebind the captured names to their capture variables
         # (value + interpolation form) in the timeout scope. A
         # rebound member's guild id reads off the captured member
-        # itself — the enclosing `new_member.guild_id` expression
+        # itself - the enclosing `new_member.guild_id` expression
         # does not exist in the spawn.
         for name, cap, _expr, cap_i, _expr_i in caps:
             binding = self._lookup(name)
@@ -5054,7 +5054,7 @@ class _RsEmitter:
         # 4. Timeout spawns (one per attach, covering exactly the
         # newly pending components that have a timeout). The spawn
         # moves clones (the message, the data, the http, the
-        # captures) — the originals stay in the handler, so a
+        # captures) - the originals stay in the handler, so a
         # second component on the same answer still works.
         timed = [c for c in self._pending_components
                  if c.get("has_timeout")]
@@ -5145,7 +5145,7 @@ class _RsEmitter:
         """Rename unused fn params to `_name` in the signature
         line (a param whose name never appears as a word in the
         body would warn `unused_variables`). The rename only
-        touches `name:` in the signature — the body never uses
+        touches `name:` in the signature - the body never uses
         the name, so nothing else needs rewriting."""
         rest = "\n".join(rest_lines)
         for p in params:
@@ -5267,7 +5267,7 @@ class _RsEmitter:
         command name IS the fn name (mangled when it collides
         with a Rust keyword, with `#[rename]` keeping the slash
         name); the description is the doc comment (poise takes
-        the first paragraph — `CommandArgs` has no description
+        the first paragraph - `CommandArgs` has no description
         field)."""
         name = decl.name
         fn_name = self._mangle(name)
@@ -5354,7 +5354,7 @@ class _RsEmitter:
         lines.append("    _ => unreachable!(),")
         lines.append("  };")
         # The store clone only when the body actually touches the
-        # store — otherwise it is an unused-variable warning.
+        # store - otherwise it is an unused-variable warning.
         if self.stores and self._uses_store("\n".join(body_lines)):
             lines.append("  let bot = ctx.data().bot.clone();")
         lines.extend(prologue)
@@ -5388,7 +5388,7 @@ class _RsEmitter:
             if self._uses_store("\n".join(body_lines)):
                 # `bot` is the ready placeholder (the Discord bot
                 # user) here, so a store call would resolve to the
-                # user, not the store — fail cleanly instead of
+                # user, not the store - fail cleanly instead of
                 # emitting a type error.
                 self._fail("a store call in a `ready` handler "
                            "collides with the `bot` placeholder "
@@ -5582,7 +5582,7 @@ class _RsEmitter:
 
     def _emit_task(self, decl: A.TaskDecl) -> None:
         """One task fn: `async fn _every_1h(http: &Http, data:
-        &Data) -> Result<(), Error>` — spawned from poise's
+        &Data) -> Result<(), Error>` - spawned from poise's
         `setup` on a sleep-first loop (the initial delay is the
         period, as in Java's `scheduleAtFixedRate`)."""
         fn_name = self._task_fn_name(decl)
@@ -5675,7 +5675,7 @@ class _RsEmitter:
                 "}"]
 
     def _emit_has_any_role_lines(self) -> list[str]:
-        """`_has_any_role`: the `only: roles(...)` gate — true
+        """`_has_any_role`: the `only: roles(...)` gate - true
         when the member holds a role whose name is in `roles`
         (looked up through the cache; a DM, a missing member, or
         a cold cache all deny)."""
@@ -5696,7 +5696,7 @@ class _RsEmitter:
 
     def _emit_modal_value_lines(self) -> list[str]:
         """`_modal_value`: a modal field's submitted value by
-        name (the empty string when the field is absent — the
+        name (the empty string when the field is absent - the
         checker guarantees the declared fields)."""
         return [
             "fn _modal_value(interaction: "
@@ -5734,7 +5734,7 @@ class _RsEmitter:
         transaction with its ledger row, so a crash mid-op cannot
         leave a balance without its ledger entry; a duplicate key
         replays (returns `true` without applying twice). A
-        database error fails CLOSED (0 / false / None) — it never
+        database error fails CLOSED (0 / false / None) - it never
         grants money or hides a balance."""
         lines = ["pub struct Bot {"]
         for store in program.stores:
@@ -5743,7 +5743,7 @@ class _RsEmitter:
         lines.append("}")
         lines.append("")
         # The store API is emitted wholesale; a program that only
-        # credits never calls `debit` / `transfer` / `get` — those
+        # credits never calls `debit` / `transfer` / `get` - those
         # are not dead code, just unused by this program.
         lines.append("#[allow(dead_code)]")
         lines.append("impl Bot {")
@@ -5855,7 +5855,7 @@ class _RsEmitter:
         """balance / credit / debit / transfer for a store with a
         `balances` table. `credit` never refuses; `debit` and
         `transfer` refuse (`false`) on insufficient funds.
-        Transfer follows the JS emitter's semantics (NOT Java's —
+        Transfer follows the JS emitter's semantics (NOT Java's -
         Java's transfer healing is a dead branch: it logs the out
         leg under the plain key on the SENDER, then looks for
         `:out` keys on the RECEIVER, so it can never fire, and a
@@ -6092,7 +6092,7 @@ class _RsEmitter:
         return L
 
     def _emit_data_struct(self, program: A.Program) -> list[str]:
-        """`pub struct Data` — the shared state poise carries into
+        """`pub struct Data` - the shared state poise carries into
         every handler: the `Bot` (when a store exists) and the
         per-message author map (when an `only: author` component
         exists). `Clone` (an `Arc` per field), so tasks and
@@ -6117,7 +6117,7 @@ class _RsEmitter:
         task spawns in `setup`, then the serenity client."""
         # The deploy file includes the bot as a module
         # (`#[path] mod <stem>;`), so this `main` is dead code
-        # there — silence that warning at the source.
+        # there - silence that warning at the source.
         lines = ["#[allow(dead_code)]",
                  "#[tokio::main]", "async fn main() {"]
         lines.extend(self._emit_block(program.stmts, 1,
@@ -6274,7 +6274,7 @@ class _RsEmitter:
                 self._table_rows[table.name] = A.StructDecl(
                     name=table.name, fields=list(table.columns),
                     span=table.span)
-        # Commands, events, tasks (in that order — commands and
+        # Commands, events, tasks (in that order - commands and
         # events register components; the dispatch arm is built
         # after all of them).
         for decl in program.commands:
@@ -6306,7 +6306,7 @@ class _RsEmitter:
         for row in self._table_rows.values():
             if body:
                 body.append("")
-            # A table name is lowercase in newr (`balances`) — a
+            # A table name is lowercase in newr (`balances`) - a
             # Rust type name in that case warns
             # (`non_camel_case_types`); the row struct keeps the
             # table's name, with the warning silenced.
@@ -6402,7 +6402,7 @@ class _RsEmitter:
         stem = _rs_stem(file_stem)
         lines = self._header(
             self.main_path,
-            "Command registration — run once, then run the bot.")
+            "Command registration - run once, then run the bot.")
         lines.append(f"#[path = \"{file_stem}.rs\"]")
         lines.append(f"mod {stem};")
         lines.append("")
@@ -6428,7 +6428,7 @@ class _RsEmitter:
             self._bot_command_methods_by_name.values())
         lines.append(f"  let commands = vec![{cmds}];")
         # An empty `DISCORD_GUILD_ID` (e.g. `DISCORD_GUILD_ID=` in
-        # a .env file) counts as unset — it must fall back to
+        # a .env file) counts as unset - it must fall back to
         # global registration, not panic parsing "" as a number.
         lines.append("  match std::env::var(\"DISCORD_GUILD_ID\") {")
         lines.append("    Ok(guild_id) if !guild_id.is_empty() => {")
@@ -6457,7 +6457,7 @@ class _RsEmitter:
 
     def _eq_expr(self, field: str, t: Type, side: str = "other") -> str:
         """`self.<field> == <side>.<field>`, except a fn-typed field,
-        which compares by pointer identity (Arc::ptr_eq — the same
+        which compares by pointer identity (Arc::ptr_eq - the same
         rule as `==` on fn values)."""
         if _is_fn(t):
             return (f"std::sync::Arc::ptr_eq(&self.{field}, "
@@ -6487,7 +6487,7 @@ class _RsEmitter:
             else self._mangle(decl.name)
         self._push_scope()
         saved_used = self._fn_used
-        # The module-level names are statics — a param or a local
+        # The module-level names are statics - a param or a local
         # with the same name would shadow one (E0530), so the
         # used-name set starts with them and `_bind_fresh` renames
         # the collision (`x` -> `x_`).
@@ -6527,7 +6527,7 @@ class _RsEmitter:
         body_lines: list[str] = []
         if ensures:
             # `_newr_result` is declared ONCE, at the top of the
-            # function — every `return` assigns it (a `let` per
+            # function - every `return` assigns it (a `let` per
             # return would be a redeclaration). A void function
             # still gets one (of type `()`) so its `ensures`
             # clauses can read `result`.
@@ -6545,7 +6545,7 @@ class _RsEmitter:
                                            new_scope=False))
         if ensures and not (rest and isinstance(rest[-1], A.Return)):
             # The implicit return (falling off the end) is also a
-            # return — check the `ensures` against the default.
+            # return - check the `ensures` against the default.
             default = self._rs_default(ret) \
                 if ret is not None else "()"
             body_lines.append(f"{bp}_newr_result = {default};")
@@ -6732,15 +6732,15 @@ class _RsEmitter:
         """A general (non-bot) program: header, `mod` declarations
         for the runtime and every file-module import, top-level
         lets as `static Mutex<Option<T>>` statics (R2: no
-        initializer — `main()` / `__newr_init()` assigns them in
+        initializer - `main()` / `__newr_init()` assigns them in
         file order, so top-level functions can read them and
         side-effecting initializers run in order), structs, enums,
         functions, then `fn main()` (the entry file, always
-        emitted — rustc needs a `main`) or `pub fn __newr_init()`
-        (a file module — the entry file calls it in import order).
-        Definitions are hoisted — a function body reads module
+        emitted - rustc needs a `main`) or `pub fn __newr_init()`
+        (a file module - the entry file calls it in import order).
+        Definitions are hoisted - a function body reads module
         globals at call time, so emitting the `function` before
-        the statements is safe — but the statements themselves
+        the statements is safe - but the statements themselves
         (lets, assignments, prints, ...) must run in the order
         written."""
         self.program = program
@@ -6792,7 +6792,7 @@ class _RsEmitter:
         lines = self._header(main_path)
         if self.rt_helpers:
             # A module file reads the runtime through the crate
-            # root (the entry file declares `mod newr_rt;` — the
+            # root (the entry file declares `mod newr_rt;` - the
             # patch in `emit_program_rs` adds it when only a
             # module uses the runtime).
             lines.append("mod newr_rt;" if is_main
@@ -6828,15 +6828,15 @@ def _rs_stem(stem: str) -> str:
 def _rs_cargo_toml(stem: str, file_stem: str, *,
                    uses_sqlite: bool) -> str:
     """The Cargo build file for a bot program: serenity 0.12.5 and
-    poise 0.7.1 (both pinned, verified live — see
+    poise 0.7.1 (both pinned, verified live - see
     tests/test_emitter_rs.py), tokio 1, rusqlite 0.32 with the
-    bundled feature only when a store is used. Two binaries — the
-    bot and the standalone registration script — with
+    bundled feature only when a store is used. Two binaries - the
+    bot and the standalone registration script - with
     `default-run` so a bare `cargo run` still runs the bot."""
     artifact = "".join(ch.lower() if ch.isalnum() else "-"
                        for ch in stem).strip("-") or "bot"
     lines = [
-        "# Generated by newr — do not edit by hand.",
+        "# Generated by newr - do not edit by hand.",
         "[package]",
         f'name = "{artifact}"',
         'version = "1.0.0"',
@@ -6868,14 +6868,14 @@ def emit_program_rs(program: A.Program, *, main_path: str,
                     sources: dict[str, str],
                     line_comments: bool = False,
                     output_stem: str | None = None) -> EmitResult:
-    """Emit a CHECKED program to Rust — one `.rs` per `.newr` file.
+    """Emit a CHECKED program to Rust - one `.rs` per `.newr` file.
 
     `main_path` is the input file as passed (the header names it);
     `sources` maps file paths to their text (for diagnostics and
     `--line-comments`). `output_stem` is the `-o` stem. The result's
     `files` maps an output basename (`hello.rs`) to its text; the
     main file keeps the raw stem (a file name need not be a valid
-    identifier — the runner and the CLI expect `<source stem>.rs`);
+    identifier - the runner and the CLI expect `<source stem>.rs`);
     the sanitized stem is only for Rust identifiers (module names,
     binary names). `main_file` is the main output's basename;
     `uses_rt` says whether any file needs `newr_rt` (the caller
@@ -6901,7 +6901,7 @@ def emit_program_rs(program: A.Program, *, main_path: str,
     if program.bot is not None or program.stores:
         # The standalone registration script rides along as a
         # second output file, and the Cargo build file (serenity
-        # + poise always, rusqlite only when a store is used —
+        # + poise always, rusqlite only when a store is used -
         # the CLI writes every file in result.files, so the
         # Cargo.toml lands next to the sources automatically).
         deploy = em._emit_deploy_file(program, file_stem + ".rs")

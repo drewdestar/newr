@@ -7,7 +7,7 @@
 // helpers. It is stdlib-only (java.base) and dependency-free.
 //
 // It lives in the compiler package as `compiler/newr_rt.kt` and
-// `newr build --target kt` copies it — byte-identical — next to
+// `newr build --target kt` copies it - byte-identical - next to
 // an emitted `.kt` file when (and only when) that program uses a
 // helper from it. Do not edit a copied file by hand: edit this file
 // in the newr repo and rebuild.
@@ -92,9 +92,9 @@ object NewrRt {
 
     /** Division or modulo by zero. Same code rule as above: the
      * Python twin is constructed without a code, so e.code is none
-     * in a `catch`. The builtin sites — `0.0 ** -1`, where Python
+     * in a `catch`. The builtin sites - `0.0 ** -1`, where Python
      * raises ZeroDivisionError itself, and float `/` by zero, where
-     * Python's native `/` raises it — throw
+     * Python's native `/` raises it - throw
      * codedError("ZeroDivisionError", ...) in powFloat and fdiv
      * instead (§18 fix 2: fdiv was missed by the §17.4 item-4 list). */
     class NewrDivisionByZeroError(message: String) : NewrError(message)
@@ -129,7 +129,7 @@ object NewrRt {
     /** A null of any type, for the absent side of a `Result`
      * (`ok`'s error slot, `err`'s value slot). The cast is to a
      * type parameter, so it is erased at runtime and never throws
-     * — unlike `null as NewrError`, which would. */
+     * - unlike `null as NewrError`, which would. */
     @Suppress("UNCHECKED_CAST")
     private fun <T> nullValue(): T = null as T
 
@@ -179,7 +179,7 @@ object NewrRt {
         // newr `**` on ints: checked, bounded before computing.
         // A negative exponent is an error (an int result cannot
         // represent it). The exponent is bounded by repeated
-        // squaring with a check at every multiply — `10 ** 10**9`
+        // squaring with a check at every multiply - `10 ** 10**9`
         // raises instead of allocating by computing blindly.
         if (b < 0) {
             throw NewrError("negative exponent for int pow")
@@ -210,7 +210,7 @@ object NewrRt {
 
     fun tdiv(a: Long, b: Long): Long {
         // newr `/` on ints: truncating division (toward zero).
-        // Kotlin `/` already truncates — the check is the two error
+        // Kotlin `/` already truncates - the check is the two error
         // cases.
         if (b == 0L) {
             throw NewrDivisionByZeroError("integer division by zero")
@@ -236,7 +236,7 @@ object NewrRt {
     fun powFloat(a: Double, b: Double): Double {
         // newr `**` on floats: IEEE semantics. Java `Math.pow`
         // already returns NaN for a negative base with a fractional
-        // exponent (Python returns a complex there — newr has no
+        // exponent (Python returns a complex there - newr has no
         // complex type, so the answer is NaN) and Infinity on
         // overflow. The one case Java gets wrong is a zero base
         // with a negative exponent: Java gives Infinity, Python
@@ -244,7 +244,7 @@ object NewrRt {
         if (a == 0.0 && b < 0) {
             // Python raises the builtin ZeroDivisionError here (not
             // the NewrError subclass), so a `catch e:` sees code
-            // "ZeroDivisionError" — codedError, not the class.
+            // "ZeroDivisionError" - codedError, not the class.
             throw codedError("ZeroDivisionError",
                 "0.0 cannot be raised to a negative power")
         }
@@ -269,10 +269,10 @@ object NewrRt {
         // non-zero dividend and NaN for 0/0). `b == 0` covers -0
         // as well. Python's native `/` raises the BUILTIN
         // ZeroDivisionError, so this throws the coded error
-        // (§18 fix 2), not the codeless class — a `catch e:` sees
+        // (§18 fix 2), not the codeless class - a `catch e:` sees
         // e.code == "ZeroDivisionError" on both targets. (Float `%`
         // is different: both targets route it through fmod, which
-        // raises the codeless NewrDivisionByZeroError — that parity
+        // raises the codeless NewrDivisionByZeroError - that parity
         // is correct.)
         if (b == 0.0) {
             throw codedError("ZeroDivisionError", "float division by zero")
@@ -352,7 +352,7 @@ object NewrRt {
 
     /** Round the exact decimal (digits / 10**scale) to `n` places,
      * half away from zero, as a double. `n` below -308 rounds every
-     * finite double to (signed) zero — 10**309 already exceeds the
+     * finite double to (signed) zero - 10**309 already exceeds the
      * largest finite double, so no huge power is ever built. */
     private fun roundExactToDouble(sign: Long, digits: BigInteger,
                                    scale: Long, n: Long): Double {
@@ -369,7 +369,7 @@ object NewrRt {
     }
 
     /** newr `round()`: half-away-from-zero (schoolbook), on the
-     * EXACT value of the float — not its shortest repr.
+     * EXACT value of the float - not its shortest repr.
      * `round(2.675, 2)` is 2.67, because the float 2.675 is stored
      * slightly below 2.675. `round(x)` returns an `int` (int64
      * range-checked); `round(x, n)` returns a `float`. Non-finite
@@ -377,7 +377,7 @@ object NewrRt {
      * `round(inf, n)` returns `inf`, `round(nan, n)` returns `nan`.
      * An int input rounds its exact value too (unlike the JS
      * runtime, which returns an int input unchanged when ndigits
-     * is given — `round(5, -1)` is 10 in Python, 5 in JS). */
+     * is given - `round(5, -1)` is 10 in Python, 5 in JS). */
     fun roundHalfAway(x: Double): Long {
         if (!x.isFinite()) {
             // Python raises the builtin OverflowError here.
@@ -595,7 +595,7 @@ object NewrRt {
      * (Double.toString(5e-324) is "4.9E-324", Python repr is
      * "5e-324"). So the digits are derived here from the EXACT
      * decimal expansion: the shortest prefix that parses back to
-     * the same double (round to nearest, ties to even — David
+     * the same double (round to nearest, ties to even - David
      * Gay's dtoa mode 0, the rule behind Python's repr). */
     fun floatStr(x: Double): String {
         if (x.isNaN()) {
@@ -612,7 +612,7 @@ object NewrRt {
         }
         val neg = x < 0
         val ax = Math.abs(x)
-        // Exact decimal digits of ax (finite expansion — every
+        // Exact decimal digits of ax (finite expansion - every
         // binary fraction has one) plus the decimal exponent of
         // the leading digit.
         val exact = BigDecimal(ax)
@@ -795,7 +795,7 @@ object NewrRt {
 
     /** newr `Result[T, E]` (SPEC §10): the value form of errors.
      * `_value` / `_error` are typed `T` / `E` (not `T?` / `E?`)
-     * so emitted code reads them without a null assertion — the
+     * so emitted code reads them without a null assertion - the
      * absent side holds `null` at runtime via `nullValue()` (the
      * Java twin's `new Result<>(true, value, null)`). */
     class Result<T, E>(val _isOk: Boolean, val _value: T, val _error: E) {
@@ -909,7 +909,7 @@ object NewrRt {
      * holds the copy). Defaults to an empty list before main runs.
      * The JVM's main() args exclude the program name, but newr's
      * env.args is sys.argv 1:1 (Python: sys.argv, JS:
-     * process.argv.slice(1)) — argv[0] is the program, so
+     * process.argv.slice(1)) - argv[0] is the program, so
      * setMainArgs prepends the main object name. */
     var _mainArgs: Array<String> = arrayOf()
 
@@ -950,7 +950,7 @@ object NewrRt {
      * NaN is never equal to NaN (not even inside a collection). */
     fun eq(a: Any?, b: Any?): Boolean {
         if (a === b) {
-            // Same reference — but NaN is not == itself even as a
+            // Same reference - but NaN is not == itself even as a
             // boxed Double, and `a === b` on two distinct NaN boxes
             // is false anyway; a single NaN box compared to itself
             // reaches here, so exclude it.
@@ -1033,7 +1033,7 @@ object NewrRt {
     // ---------------------------------------------------------------- ?. / ?? / accessors
 
     /** newr `?.`: `null` when `v` is `null`, else `f(v)`. The test
-     * is `== null`, never truthiness — `0`, `""` and `[]` are
+     * is `== null`, never truthiness - `0`, `""` and `[]` are
      * values, not absences. A whole `?.` chain collapses into one
      * call with the full postfix path inside `f`, so the base
      * expression is evaluated exactly once. */
@@ -1047,7 +1047,7 @@ object NewrRt {
         return v ?: dflt()
     }
 
-    /** newr `list[i]`: SPEC §9.2 — out-of-range indexing is a
+    /** newr `list[i]`: SPEC §9.2 - out-of-range indexing is a
      * runtime error. Valid indices are `0 <= i < len(lst)`; a
      * negative index is out of range (never a wrap). */
     fun listIndex(lst: List<*>, i: Long): Any? {
@@ -1057,7 +1057,7 @@ object NewrRt {
         return lst[i.toInt()]
     }
 
-    /** newr `list.get(i, default)`: P9 — a negative index is
+    /** newr `list.get(i, default)`: P9 - a negative index is
      * out-of-range (no wrap-around); anything outside
      * `0 <= i < len(lst)` returns `default`. */
     fun listGet(lst: List<*>, i: Long, dflt: Any?): Any? {
@@ -1141,7 +1141,7 @@ object NewrRt {
             "TypeError", null)
     }
 
-    /** `{"k": v, ...}` — alternating key/value pairs into a
+    /** `{"k": v, ...}` - alternating key/value pairs into a
      * LinkedHashMap (insertion order). Unlike `Map.ofEntries`,
      * null keys and values are allowed. */
     @Suppress("UNCHECKED_CAST")
@@ -1193,7 +1193,7 @@ object NewrRt {
 
     /** `s[i]` by code point (P5). Negative indices wrap like
      * Python; out of range raises IndexError (the JS runtime's
-     * `[...s][i]` returns undefined there — a JS latent bug). */
+     * `[...s][i]` returns undefined there - a JS latent bug). */
     fun strIndex(s: String, idx: Long): String {
         val cps = chars(s)
         val i = if (idx < 0) cps.size + idx else idx
@@ -1307,7 +1307,7 @@ object NewrRt {
     private val TIME_FORMATS: Set<String> = setOf(
         "%Y-%m-%d", "%H:%M", "%Y-%m-%d %H:%M", "%d/%m/%Y", "%H:%M:%S")
 
-    /** newr `time.format(ts, fmt)`: UTC, never local time (P4) —
+    /** newr `time.format(ts, fmt)`: UTC, never local time (P4) -
      * the same program prints the same output on every machine.
      * The format must be one of the spec's fixed set (§12.2). */
     fun timeFormat(ts: Long, fmt: String): String {

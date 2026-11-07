@@ -1,24 +1,24 @@
 """The Java emitter (M4, SPEC.md §18).
 
 ``newr build --target dart`` lowers a *checked* program (the front
-end has already run: parse -> resolve -> check) to readable Java —
+end has already run: parse -> resolve -> check) to readable Java -
 one `.newr` file -> one `.dart` file, structure preserved, user names
 verbatim, helpers only in `newr_rt.dart` (copied next to the output
-as `NewrRt.dart` when used — javac requires the file name to match
+as `NewrRt.dart` when used - javac requires the file name to match
 the public class, so the CLI renames on copy, K1).
 
 Readability is a requirement, not a nicety: the output is code a
-human would write — the Java goldens (`goldens/dart/`) are the style
+human would write - the Java goldens (`goldens/dart/`) are the style
 oracle, and the emitter reproduces them byte-for-byte
 (BUILD_REPORT.md §21, K1–K13).
 
 The emitter NEVER runs on an unchecked program: the CLI checks first
 and exits 4 on errors. If it meets a node without a type (which only
-happens on an unchecked program), it raises `EmitterError` — a clean
+happens on an unchecked program), it raises `EmitterError` - a clean
 refusal, never a TypeError traceback.
 
 Module system (K1): one public class per file, named after the file
-stem verbatim (the class name IS the file stem — Java requires the
+stem verbatim (the class name IS the file stem - Java requires the
 public class to live in the same-named file). File modules become
 their own public classes in their own files; imported names are
 qualified `Module.name`. A program with no `main` file stem gets
@@ -47,7 +47,7 @@ _BUILTIN_NAMES = frozenset(BUILTINS)
 # colliding with one of these is mangled with a trailing underscore
 # (D20, mirrored from the Python/JS emitters). The `NewrRt` runtime
 # helpers are called qualified (`NewrRt.add`), so user names that
-# match a helper are harmless — but the class name `NewrRt` itself,
+# match a helper are harmless - but the class name `NewrRt` itself,
 # the `main` method, its `args` parameter, and the dart.lang type
 # names the emitter writes (`String`, `int`, ...) must not be
 # shadowed by a user struct/enum/fn name in the same file.
@@ -160,7 +160,7 @@ def _dart_float(value: float) -> str:
 # Java precedence (higher binds tighter), loosest -> tightest.
 # The emitter's precedence-climbing printer uses this table; newr's
 # own table (SPEC §9.2) maps onto it, with the traps documented
-# where they bite — notably unary `-`: `-x ** y` parses as
+# where they bite - notably unary `-`: `-x ** y` parses as
 # `-(x ** y)` in newr, and Java has no `**`, so the power helper
 # call binds as a primary; and `!a == b` is `(!a) == b` in Java,
 # not `!(a == b)` as newr's `not` reads it.
@@ -173,7 +173,7 @@ _PREC = {
     "add": 9,      # + -
     "mul": 10,     # * / %
     "unary": 11,   # -x !x
-    "pow": 12,     # ** (emitted as a helper call — primary)
+    "pow": 12,     # ** (emitted as a helper call - primary)
     "primary": 13,  # calls, indexing, member access, atoms
 }
 
@@ -243,7 +243,7 @@ def _is_struct_or_enum(t: Type | None) -> bool:
 def _needs_eq(t: Type | None) -> bool:
     """True when `==` on a value of this type needs structural
     equality (`NewrRt.eq`) instead of `==`: lists, dicts, sets,
-    Results, structs and enums (and nullable forms of them — `eq`
+    Results, structs and enums (and nullable forms of them - `eq`
     handles `null` on either side). Primitives, functions, errors
     and Discord entities compare by identity (`==`)."""
     if t is None:
@@ -301,7 +301,7 @@ class _DartEmitter:
         # name). The CLI passes the `-o` stem; the default is the
         # main source stem, falling back to "Main".
         self.output_stem = output_stem or "Main"
-        # Imports collected while emitting (per output file — reset
+        # Imports collected while emitting (per output file - reset
         # for each module file).
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
@@ -329,13 +329,13 @@ class _DartEmitter:
         # (for rename allocation in _bind_fresh). Reset per function.
         self._fn_used: set[str] = set()
         # Hoists for the statement being emitted: each is a list of
-        # lines (base indent 0) to emit before the statement —
+        # lines (base indent 0) to emit before the statement -
         # hoisted lambda consts and lambda snapshot locals.
         self._hoists: list[list[str]] | None = None
         # True while emitting the DIRECT top-level statement list of
         # a file (main() / the module static block). A `let` there
         # assigns the static field instead of declaring a local
-        # (K2) — a local would shadow the field and top-level
+        # (K2) - a local would shadow the field and top-level
         # functions would read the still-zero field (conformance
         # toplevel_order). Nested blocks reset it (their `let` is a
         # genuine local, even when it shadows a module name).
@@ -456,8 +456,8 @@ class _DartEmitter:
         """Bind `name` in the current scope.
 
         Java has real block scope (`int x` in an `if` block does
-        not clobber the outer name), so — unlike the Python emitter
-        — shadowing an enclosing name needs NO renaming: the inner
+        not clobber the outer name), so - unlike the Python emitter
+        - shadowing an enclosing name needs NO renaming: the inner
         binding is a different variable, exactly as newr reads it.
         Only keyword / emitter-reserved mangling applies (D20).
         """
@@ -469,7 +469,7 @@ class _DartEmitter:
     def _bind_fresh(self, name: str, type: Type | None = None,
                     kind: str = "local") -> _Binding:
         """Bind `name` in the current scope WITHOUT renaming against
-        enclosing scopes — for function/lambda parameters, where
+        enclosing scopes - for function/lambda parameters, where
         shadowing an enclosing name is the correct semantics. Only
         the current function's used-name set is consulted, so two
         parameters mangling to the same Java name still get distinct
@@ -523,8 +523,8 @@ class _DartEmitter:
     def _render_imports(self) -> list[str]:
         """The import block, Dart style: `dart:` imports first,
         then `package:` imports, then the runtime (`newr_rt.dart`,
-        only when a helper is used — usage-tracked, Gleam-style),
-        then file modules (`import '<stem>.dart' as <bound>;` —
+        only when a helper is used - usage-tracked, Gleam-style),
+        then file modules (`import '<stem>.dart' as <bound>;` -
         the bound name is the reference in the emitted code)."""
         lines: list[str] = []
         if getattr(self, "uses_io", False):
@@ -653,7 +653,7 @@ class _DartEmitter:
     def _dart_entity_type(self, name: str) -> str:
         """A Discord entity type (SPEC §7.1) -> its nyxx class.
         Only reachable in bot files. (Verified live against
-        nyxx 6.9.1 — see tests/test_emitter_dart.py.)"""
+        nyxx 6.9.1 - see tests/test_emitter_dart.py.)"""
         mapping = {
             "user": "User",
             "member": "Member",
@@ -677,7 +677,7 @@ class _DartEmitter:
     def _struct_dart_name(self, name: str) -> str:
         """The Dart class name for a struct/enum type: bare in its
         own file, `<bound>.Name` when imported (the import prefix
-        is the BOUND name — the alias when the import is aliased —
+        is the BOUND name - the alias when the import is aliased -
         and the import line is recorded, so the file compiles).
         An imported struct/enum reached only through its TYPE is
         found by searching the imported file modules for the
@@ -701,7 +701,7 @@ class _DartEmitter:
                   fn_target: Type | None = None) -> str:
         """Emit an expression, parenthesised when its precedence is
         below `min_prec`. `fn_target` is the expected fn type when
-        the expression is a lambda — the context's target type, so
+        the expression is a lambda - the context's target type, so
         the lambda needs no cast (Java lambdas are poly
         expressions)."""
         text, prec = self._emit_expr(node, fn_target)
@@ -727,7 +727,7 @@ class _DartEmitter:
                 self.emit_expr(i, 0,
                                fn_target=elem if _is_fn(elem) else None)
                 for i in node.elements)
-            # Arrays.asList (not List.of — List.of rejects null
+            # Arrays.asList (not List.of - List.of rejects null
             # elements, and a list[T?] may hold null) with an
             # explicit element-type witness, so a literal of only
             # nulls still has the right type.
@@ -782,7 +782,7 @@ class _DartEmitter:
             return self._emit_embed(node)
         if isinstance(node, (A.Member, A.Index, A.Call)):
             # Any optional link anywhere in the chain routes the
-            # WHOLE chain through _emit_chain (D9) — including
+            # WHOLE chain through _emit_chain (D9) - including
             # trailing non-optional links (`a?.b.c`), which must
             # short-circuit too.
             if self._chain_has_optional(node):
@@ -831,7 +831,7 @@ class _DartEmitter:
                     f"`{node.name}`", span=node.span)
             if binding.kind in ("struct", "enum"):
                 self._fail(
-                    f"`{node.name}` is not a value — use a variant "
+                    f"`{node.name}` is not a value - use a variant "
                     "or construct it", span=node.span)
             # A user fn as a value is the function itself (first-
             # class functions, SPEC §9.5); a local/param/handler
@@ -942,7 +942,7 @@ class _DartEmitter:
         if not parts:
             return '""', _PREC["primary"]
         # A `+` chain starting with a non-string operand would be
-        # ARITHMETIC (`{x}{y}` -> `x + y`), not concatenation — so
+        # ARITHMETIC (`{x}{y}` -> `x + y`), not concatenation - so
         # an interpolation whose first part is an expression starts
         # with `"" + `.
         if node.parts[0].text is None:
@@ -956,7 +956,7 @@ class _DartEmitter:
         handler bindings use their interp form (the mention / name
         form); everything else goes through `toStr` (P8). A bare
         non-string operand of `+` must be wrapped in `toStr` or the
-        `+` would be arithmetic — ints are the only exception
+        `+` would be arithmetic - ints are the only exception
         (they stringify in a `+` chain)."""
         if isinstance(expr, A.Name):
             binding = self._lookup(expr.name)
@@ -986,7 +986,7 @@ class _DartEmitter:
             self._need_rt("toStr")
             return f"NewrRt.toStr({self.emit_expr(expr, 0)})"
         # A Discord entity (or anything else): render through
-        # toStr — Dart has no implicit toString in a `+` chain.
+        # toStr - Dart has no implicit toString in a `+` chain.
         self._need_rt("toStr")
         return f"NewrRt.toStr({self.emit_expr(expr, 0)})"
 
@@ -1006,7 +1006,7 @@ class _DartEmitter:
                 # `T? or T` (SPEC §7.2): the default when the value
                 # is absent. Java `||` would also take the default
                 # for a present-but-falsy value (0L, ""), so it is
-                # not the same — use coalesce.
+                # not the same - use coalesce.
                 self._need_rt("coalesce")
                 left = self.emit_expr(node.left, 0)
                 right = self.emit_expr(node.right, 0)
@@ -1049,7 +1049,7 @@ class _DartEmitter:
                         rt.name in self.structs or rt.name in self.enums:
                     # Structural equality (K6): `eq` is deep for
                     # lists/Maps/Sets/Results/structs, and treats
-                    # `null` as equal only to `null` — exactly
+                    # `null` as equal only to `null` - exactly
                     # newr's `==` for nullable collection values too.
                     self._need_rt("eq")
                     expr = f"NewrRt.eq({left}, {right})"
@@ -1058,7 +1058,7 @@ class _DartEmitter:
                     return expr, _PREC["primary"]
                 # `==` on a boxed value is IDENTITY in Java (a
                 # nullable int `1000L == 1000L` is false) and on a
-                # String it is identity too — use null-safe
+                # String it is identity too - use null-safe
                 # Objects.equals unless BOTH sides are non-nullable
                 # primitives, where bare `==` is correct.
                 if lt.nullable or rt.nullable or \
@@ -1123,7 +1123,7 @@ class _DartEmitter:
         # `-a + b` is `-(a + b)`).
         # D19: the int64 minimum is written `-9223372036854775808`
         # in newr. Its positive magnitude is out of int64 range, so
-        # the checker leaves the literal's own type unset — the
+        # the checker leaves the literal's own type unset - the
         # plain `neg(...)` form would also be wrong (it would check
         # the out-of-range literal first). Emit the minimum directly.
         if isinstance(node.operand, A.Lit) and \
@@ -1135,7 +1135,7 @@ class _DartEmitter:
             return f"NewrRt.neg({self.emit_expr(node.operand, 0)})", \
                 _PREC["primary"]
         operand = self.emit_expr(node.operand, _PREC["pow"])
-        # Java traps: `--x` is the decrement operator —
+        # Java traps: `--x` is the decrement operator -
         # parenthesise a `**` operand or a unary operand
         # (`-(powInt(a, 2))`, `-(-x)`).
         if (isinstance(node.operand, A.BinOp) and node.operand.op == "**") \
@@ -1171,7 +1171,7 @@ class _DartEmitter:
                 if binding is not None and binding.kind == "enum":
                     return self._emit_enum_call(obj.name, func.name, node)
             # §20: qualified imported fielded-variant construction,
-            # `m_helper.Shape.Circle(radius: 1.5)` — the declaration
+            # `m_helper.Shape.Circle(radius: 1.5)` - the declaration
             # comes from the imported module, for field reordering.
             imported = self._imported_enum(func)
             if imported is not None:
@@ -1197,7 +1197,7 @@ class _DartEmitter:
         if name == "input":
             if self._is_bot:
                 self.warnings.append(
-                    "input() in a bot program blocks on stdin — bots "
+                    "input() in a bot program blocks on stdin - bots "
                     "have no stdin (D21)")
             self._need_rt("input")
             args = [self.emit_expr(a, 0) for a in node.args]
@@ -1229,7 +1229,7 @@ class _DartEmitter:
         if name == "ok":
             self._need_rt("ok")
             t = self._type_of(node)
-            # The runtime's ok is `ok<T>(T value)` — ONE type
+            # The runtime's ok is `ok<T>(T value)` - ONE type
             # parameter (the error type is fixed to NewrError);
             # emitting two type arguments does not compile
             # (conformance opt_methods).
@@ -1305,7 +1305,7 @@ class _DartEmitter:
         return values
 
     def _emit_print(self, node: A.Call) -> tuple[str, int]:
-        """`print` renders every argument with `toStr` (P8) — the
+        """`print` renders every argument with `toStr` (P8) - the
         runtime `print` helper does that mapping internally, so the
         emitted call is bare. A `?` argument propagates first (the
         temp + early return are hoisted before the statement, D7).
@@ -1382,7 +1382,7 @@ class _DartEmitter:
         t = self._type_of(arg)
         text = self.emit_expr(arg, 0)
         if name == "str":
-            # A nullable str's runtime value is null when absent —
+            # A nullable str's runtime value is null when absent -
             # bare rendering would print "null", not newr's "none"
             # (P8), so nullable values go through toStr.
             if _is_str(t) and not t.nullable:
@@ -1392,7 +1392,7 @@ class _DartEmitter:
         if name == "int":
             if _is_int(t):
                 return text, _PREC["primary"]
-            # float (truncation), str (parsing), bool (0/1) — all
+            # float (truncation), str (parsing), bool (0/1) - all
             # through toInt, which returns a int in every case.
             self._need_rt("toInt")
             return f"NewrRt.toInt({text})", _PREC["primary"]
@@ -1462,7 +1462,7 @@ class _DartEmitter:
 
     def _file_module_class(self, binding: _Binding) -> str:
         """The Dart reference for a file-module import: the BOUND
-        name (the alias when the import is aliased) — the import
+        name (the alias when the import is aliased) - the import
         line `import '<stem>.dart' as <bound>;` is recorded here,
         so the emitted file compiles. (Java used the file STEM as
         the class name; Dart uses the import prefix.)"""
@@ -1503,7 +1503,7 @@ class _DartEmitter:
                            field_name: str, field_type: Type | None) -> str:
         """`expr.field` for an enum field. When variants disagree
         on the field's type, the union field is Object and the
-        access needs a cast to the field's declared (boxed) type —
+        access needs a cast to the field's declared (boxed) type -
         otherwise a `int` field read as Object would not compile
         where a int is expected."""
         decl = self._find_enum_decl(enum_name)
@@ -1529,7 +1529,7 @@ class _DartEmitter:
     # object expression. `channel.name` reads through the
     # _channelName helper (only guild text channels have a name
     # in nyxx); `member.guild` and `interaction.guild` are NOT
-    # here — they need an async fetch, so _entity_field_expr
+    # here - they need an async fetch, so _entity_field_expr
     # fails cleanly on them instead.
     _ENTITY_GETTERS: dict[str, dict[str, str]] = {
         "user": {"id": "{obj}.id",
@@ -1567,7 +1567,7 @@ class _DartEmitter:
             # expression cannot await. Use the `guild` binding.
             self._fail(f"`{obj_type.name}.guild` cannot be read "
                        "synchronously in Dart (nyxx needs an async "
-                       "fetch for it) — use the `guild` binding "
+                       "fetch for it) - use the `guild` binding "
                        "instead", span=span)
         table = self._ENTITY_GETTERS.get(obj_type.name)
         if table is None or field not in table:
@@ -1591,15 +1591,15 @@ class _DartEmitter:
                     return self._emit_enum_variant(node, binding)
                 if binding.kind == "struct":
                     self._fail(
-                        f"struct `{obj.name}` is not a value — construct it",
+                        f"struct `{obj.name}` is not a value - construct it",
                         span=node.span)
                 if binding.kind == "store":
                     self._fail(
-                        f"store `{obj.name}` is not a value — use its "
+                        f"store `{obj.name}` is not a value - use its "
                         "economy functions", span=node.span)
                 if binding.kind == "fn":
                     self._fail(
-                        f"function `{obj.name}` is not a value — call it",
+                        f"function `{obj.name}` is not a value - call it",
                         span=node.span)
             if obj.name in MODULES:
                 # A named module used without an import: the name is
@@ -1622,7 +1622,7 @@ class _DartEmitter:
         # ERROR_FIELDS): message (str) and code (str?). Java's
         # NewrError keeps `code` as a public field, but `message`
         # lives in Throwable and is only reachable via getMessage()
-        # (the field is private) — a bare `.message` does not
+        # (the field is private) - a bare `.message` does not
         # compile (conformance try_catch).
         if obj_type.name == "error":
             obj_text = self.emit_expr(obj, _PREC["primary"])
@@ -1631,7 +1631,7 @@ class _DartEmitter:
             return f"{obj_text}.{self._mangle(node.name)}", \
                 _PREC["primary"]
         # §16 (hole 2): a method used as a value is a lambda, not a
-        # Java attribute — a int has no `is_some`, an ArrayList has
+        # Java attribute - a int has no `is_some`, an ArrayList has
         # no `len`. A real struct field stays a plain attribute.
         if t.name == "fn" and not self._is_plain_field(obj_type,
                                                        node.name):
@@ -1651,7 +1651,7 @@ class _DartEmitter:
         if entity is not None:
             return entity, _PREC["primary"]
         # An enum field whose variants disagree on the type reads
-        # through the Object union field — cast to the declared type.
+        # through the Object union field - cast to the declared type.
         if self._find_enum_decl(obj_type.name) is not None:
             return (self._enum_field_access(obj_text, obj_type.name,
                                            node.name, t),
@@ -1708,7 +1708,7 @@ class _DartEmitter:
         type arguments substituted. A nullable method's "T" is the
         receiver's inner type; a method found only in the nullable
         table on a NON-nullable receiver is a rebased `?.` method
-        inside an `optChain` lambda (D38) — the receiver is proven
+        inside an `optChain` lambda (D38) - the receiver is proven
         non-none there, so "T" is the receiver itself."""
         table = None
         mapping: dict = {}
@@ -1734,7 +1734,7 @@ class _DartEmitter:
 
     def _is_plain_field(self, recv_type: Type, name: str) -> bool:
         """True when `name` is a real field of `recv_type` (a struct
-        field) — a plain attribute access, never a method value.
+        field) - a plain attribute access, never a method value.
         Provider/entity types have no tables here, so they report
         False and the method-signature lookup decides."""
         decl = self.structs.get(recv_type.name)
@@ -1853,7 +1853,7 @@ class _DartEmitter:
                 return f"NewrRt.splitStr({obj_text}, {args[0]})", \
                     _PREC["primary"]
             if name == "join":
-                # newr `"sep".join(parts)` — Java joins the LIST
+                # newr `"sep".join(parts)` - Java joins the LIST
                 # with the separator.
                 return f"{args[0]}.join({obj_text})", \
                     _PREC["primary"]
@@ -1878,7 +1878,7 @@ class _DartEmitter:
             if name == "get":
                 self._need_rt("listGet")
                 # listGet returns Object (the runtime is untyped
-                # for lists) — cast to the element type, which is
+                # for lists) - cast to the element type, which is
                 # the call's own type (modules.py: list.get
                 # returns T). The checker guarantees two
                 # arguments (index, default); a one-argument
@@ -1898,7 +1898,7 @@ class _DartEmitter:
                 if len(args) == 2:
                     expr = (f"({obj_text}.containsKey({args[0]}) ? "
                             f"{obj_text}[{args[0]}] : {args[1]})")
-                    # The index returns V? — cast the ternary to
+                    # The index returns V? - cast the ternary to
                     # the call's type so a non-nullable assignment
                     # compiles (the key exists in the taken branch,
                     # so the value is never null there when V is
@@ -1923,7 +1923,7 @@ class _DartEmitter:
         elif tname == "Result":
             if name in ("is_ok", "is_err"):
                 # The Java Result exposes isOk/isErr as METHODS
-                # (newr_rt.dart) — a bare access would be the
+                # (newr_rt.dart) - a bare access would be the
                 # method itself, not the bool.
                 method = "isOk" if name == "is_ok" else "isErr"
                 return f"{obj_text}.{method}()", _PREC["primary"]
@@ -1962,8 +1962,8 @@ class _DartEmitter:
             # Indexing is the checked form: a negative or out-of
             # range index raises IndexError (rt listIndex), exactly
             # like newr's `xs[i]`. (`list.get` is the defaulting
-            # form — see _emit_method_call.) listIndex returns
-            # Object, so cast to the element's boxed type — a bare
+            # form - see _emit_method_call.) listIndex returns
+            # Object, so cast to the element's boxed type - a bare
             # result cannot be assigned to a `int` or compared
             # with `!=` (conformance list_index_error, list_ops,
             # nullable_propagate).
@@ -2002,7 +2002,7 @@ class _DartEmitter:
         return False
 
     def _emit_chain(self, node: A.Expr) -> tuple[str, int]:
-        """`?.` lowering (D9, corrected — the Java twin of the JS
+        """`?.` lowering (D9, corrected - the Java twin of the JS
         emitter's `_emit_chain`): one `optChain` call per optional
         link, nested; non-optional links after an optional one fold
         into the nearest lambda body. `a?.b.c` is one call;
@@ -2035,13 +2035,13 @@ class _DartEmitter:
             recv_type = self._type_of(inner_recv)
             # Inside the lambda the receiver is proven non-none
             # (optChain only calls it then), so the parameter and
-            # the rebased base carry the STRIPPED (inner) type —
+            # the rebased base carry the STRIPPED (inner) type -
             # otherwise a method call on it would dispatch as if the
             # value were still nullable.
             inner_type = Type(recv_type.name, params=recv_type.params,
                               nullable=False)
             # §16 (hole 1): a segment must also end before any link
-            # whose receiver can be `none` INSIDE the lambda — a
+            # whose receiver can be `none` INSIDE the lambda - a
             # nullable field (`o?.inner.name`) or a nullable method
             # result (`r?.unwrap().upper()` on `Result[str?, _]?`).
             # The checker's `expr_type` conflates the `?.`
@@ -2051,7 +2051,7 @@ class _DartEmitter:
             # in-lambda result type, so `_rebase` types the clones
             # exactly: a Member link's nullability inside the lambda
             # is its FIELD's nullability, not the checker's chain
-            # type — without this, a method after a nullable field
+            # type - without this, a method after a nullable field
             # dispatches against `T?` and fails with E4001.
             in_lambda: dict[int, Type | None] = {}
             cur_type = self._in_lambda_link_type(links[i], inner_type)
@@ -2069,7 +2069,7 @@ class _DartEmitter:
             self._push_scope()
             binding = self._bind_fresh("_v", type=inner_type,
                                        kind="param")
-            # The rebased base is a Name for the NEWR name `_v` —
+            # The rebased base is a Name for the NEWR name `_v` -
             # the lookup returns the binding's Java name (which may
             # be `_v_1` in a nested chain).
             new_base = A.Name(span=links[i].span, name="_v",
@@ -2088,7 +2088,7 @@ class _DartEmitter:
     def _callable_body(self, expr: A.Expr, param_dart: str,
                        param_type: Type, body_type: Type) -> str:
         """Emit `expr` as a lambda body `(<type> _v) => ...` (the
-        parameter carries its type, D1 — no cast). If the body
+        parameter carries its type, D1 - no cast). If the body
         needs hoists (a nested block-body lambda), the lambda
         becomes a hoisted `final` const and its name is returned
         instead, so the hoisted statements run at call time,
@@ -2117,8 +2117,8 @@ class _DartEmitter:
         `old_base` (by identity) with `new_base`, and clearing the
         `optional` flags (the optionality is handled by the
         `optChain` wrapper, not inside the lambda body). Types are
-        copied onto the clones — the checker already typed the
-        original nodes — except when `in_lambda_types` maps a link
+        copied onto the clones - the checker already typed the
+        original nodes - except when `in_lambda_types` maps a link
         to its in-lambda type (§16, hole 1): the checker's chain
         type conflates the `?.` short-circuit with a field's own
         nullability, and inside the lambda only the latter survives,
@@ -2154,7 +2154,7 @@ class _DartEmitter:
                 name=node.func.name, optional=False,
                 expr_type=node.func.expr_type)
             # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
-            # is nullable only because the `?.` short-circuits —
+            # is nullable only because the `?.` short-circuits -
             # inside the lambda the receiver is proven non-none, so
             # the result is the plain (stripped) type. Without this,
             # a later link (`.upper()` in `s?.unwrap().upper()`)
@@ -2163,7 +2163,7 @@ class _DartEmitter:
             # (`a?.b`) may be nullable because the FIELD itself is
             # nullable, which survives inside the lambda. When the
             # caller supplies the exact in-lambda type (§16), that
-            # wins over this heuristic — it is exact where D38
+            # wins over this heuristic - it is exact where D38
             # over-strips (a method whose own return type is
             # nullable, e.g. `unwrap()` on `Result[str?, _]`).
             expr_type = node.expr_type
@@ -2183,7 +2183,7 @@ class _DartEmitter:
 
         Inside an `optChain` lambda the receiver is proven
         non-none, so this is the link's result type with the `?.`
-        short-circuit removed — but a nullable FIELD type or a
+        short-circuit removed - but a nullable FIELD type or a
         nullable method return survives. Returns None when the type
         cannot be determined (provider/entity types); the caller
         treats None as nullable and splits the segment, which is
@@ -2200,7 +2200,7 @@ class _DartEmitter:
                 params, ret = sig
                 return fn_of(params, ret)
             # A field on a provider/entity type (e.g. a Discord
-            # member's `name`): the type is unknown — treat as
+            # member's `name`): the type is unknown - treat as
             # nullable (split the segment).
             return None
         if isinstance(link, A.Index):
@@ -2225,7 +2225,7 @@ class _DartEmitter:
                      fn_target: Type | None = None) -> tuple[str, int]:
         """Closures capture by value (D10, J8): free variables are
         snapshotted into hoisted `final` locals before the enclosing
-        statement — a Java lambda may only capture effectively-final
+        statement - a Java lambda may only capture effectively-final
         locals, so a snapshot local (never reassigned) is exactly
         the captured value. A block body cannot be an inline lambda
         body with statements, so it is hoisted to a `final`
@@ -2306,7 +2306,7 @@ class _DartEmitter:
             b = self._lookup(name)
             # "global-let" is included: a top-level `let` is mutable,
             # so a lambda reading it at call time would see a LATER
-            # value — capture by value (D10) requires a snapshot.
+            # value - capture by value (D10) requires a snapshot.
             # (A top-level `const` is registered the same way; it
             # never changes, so snapshotting it is harmless.) Module
             # functions / structs / enums / modules / stores are
@@ -2499,7 +2499,7 @@ class _DartEmitter:
         that answer's line to carry the components.
 
         `top_level` marks the direct top-level statement list of a
-        file (main() / the module static block) — see
+        file (main() / the module static block) - see
         `_in_top_level`; nested blocks always pass False."""
         if new_scope:
             self._push_scope()
@@ -2519,7 +2519,7 @@ class _DartEmitter:
                     self._last_answer = (len(lines) - 1, kind)
                 elif isinstance(st, (A.ButtonDecl, A.SelectDecl)):
                     # The component's instantiation lines must come
-                    # BEFORE the answer they attach to — the answer
+                    # BEFORE the answer they attach to - the answer
                     # references the components variable, so defining
                     # it after the answer would be a compile error.
                     if self._last_answer is not None:
@@ -2566,7 +2566,7 @@ class _DartEmitter:
                 # A top-level `let`/`const` is a static field of the
                 # class (so top-level functions can read it), and
                 # its initializer runs here, in file order, inside
-                # main() (or the module's static block) — a field
+                # main() (or the module's static block) - a field
                 # initializer at declaration time would run before
                 # main() and break file order for side-effecting
                 # initializers (K2). Emitting a local declaration
@@ -2665,7 +2665,7 @@ class _DartEmitter:
                     f"{binding.dart}, {value});"]
         # float / str / %= : bare augmented assignment (no overflow
         # check applies; `+=` on a str is concatenation; `%` on an
-        # int cannot overflow — -9223372036854775808 % -1 is 0 in Java).
+        # int cannot overflow - -9223372036854775808 % -1 is 0 in Java).
         return [f"{p}{binding.dart} {stmt.op} {value};"]
 
     def _emit_if(self, stmt: A.If, indent: int) -> list[str]:
@@ -2695,7 +2695,7 @@ class _DartEmitter:
         else:
             self._fail(f"cannot iterate over a `{it_type}` value")
         # The iterable is emitted BEFORE the loop variable is bound
-        # (it cannot see the loop variable — `for x in x` reads the
+        # (it cannot see the loop variable - `for x in x` reads the
         # enclosing `x`).
         iterable = self.emit_expr(stmt.iterable, 0)
         self._push_scope()
@@ -2767,7 +2767,7 @@ class _DartEmitter:
             if stmt.value is None:
                 return [f"{p}return;"]
             self._fail("a top-level `return` with a value is not "
-                       "supported — a top-level `return` exits the "
+                       "supported - a top-level `return` exits the "
                        "program")
         ensures = ctx["ensures"]
         ret_type = ctx["return_type"]
@@ -2860,7 +2860,7 @@ class _DartEmitter:
                                                      scrut_type)
             if arm.guard is not None:
                 # The guard may reference the pattern's bindings
-                # (e.g. `x if x > 100:`) — bind each name to its
+                # (e.g. `x if x > 100:`) - bind each name to its
                 # pattern expression text while emitting it.
                 self._push_scope()
                 for name, expr_text, typ in bindings:
@@ -2871,7 +2871,7 @@ class _DartEmitter:
                 cond = f"{cond} && {guard}" if cond else guard
             arms.append((cond, bindings, arm))
         # The last unconditional arm becomes `else:`; otherwise the
-        # final `else` throws (defense — the checker proves
+        # final `else` throws (defense - the checker proves
         # exhaustiveness, so it is unreachable in a checked program).
         last_uncond = (arms and arms[-1][0] is None)
         for i, (cond, bindings, arm) in enumerate(arms):
@@ -2932,7 +2932,7 @@ class _DartEmitter:
         if isinstance(pattern, A.EnumPattern):
             # The enum is ONE class; the variant is its discriminant
             # field `_newr_variant` (a null scrutinee matches no
-            # variant — the `none` pattern handles it).
+            # variant - the `none` pattern handles it).
             cond = (f"({expr_text} != null && {expr_text}._newr_variant"
                     f" == {_dart_str(pattern.variant)})")
             bindings: list = []
@@ -3027,7 +3027,7 @@ class _DartEmitter:
         Result-returning function; a nullable operand returns `null`
         from a nullable-returning function. The mismatched kinds
         (D30) and a nullable `Result` (G-M2-6) are clean
-        `EmitterError`s — the checker should have rejected them, and
+        `EmitterError`s - the checker should have rejected them, and
         there is no defined early-return value to invent."""
         operand = prop.expr
         t = self._type_of(operand)
@@ -3041,7 +3041,7 @@ class _DartEmitter:
         temp_type = self._dart_type(t)
         if ctx.get("in_handler"):
             # A handler returns nothing, so `?` just exits the
-            # handler (a bare `return`) — there is no value to
+            # handler (a bare `return`) - there is no value to
             # propagate. (A handler that may exit early without
             # answering is the discord checker's E2010, not the
             # emitter's problem.)
@@ -3049,7 +3049,7 @@ class _DartEmitter:
                 self._hoists_add([
                     f"final {temp_type} {temp} = {text};",
                     # §18 fix 1 (JS twin): isErr is a METHOD on the
-                    # Result — a bare access is the method itself
+                    # Result - a bare access is the method itself
                     # (always truthy), so `?` early-returned on
                     # every value. The unwrapped value lives in
                     # `._value` (there is no `.value` field).
@@ -3068,17 +3068,17 @@ class _DartEmitter:
                 return temp
             if t.name == "Result" and t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             self._fail("`?` needs a `Result[T, E]` or a `T?` value")
         if t.name == "Result" and t.params:
             if t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             if ret is None or ret.name != "Result":
                 self._fail("`?` on a `Result` value inside a function "
-                           "that does not return a `Result` (D30 — the "
+                           "that does not return a `Result` (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"final {temp_type} {temp} = {text};",
@@ -3090,7 +3090,7 @@ class _DartEmitter:
         if t.nullable:
             if ret is None or not ret.nullable:
                 self._fail("`?` on a nullable value inside a function "
-                           "that does not return a nullable (D30 — the "
+                           "that does not return a nullable (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"final {temp_type} {temp} = {text};",
@@ -3107,7 +3107,7 @@ class _DartEmitter:
                           binding: _Binding) -> tuple[str, int]:
         if binding.kind == "file-module":
             # A function in an imported .newr file: a plain call on
-            # the imported module — and the import itself (K1: one
+            # the imported module - and the import itself (K1: one
             # `.dart` per imported `.newr`, named by its module
             # name). Struct construction through a file module needs
             # `new` (a Java class is not callable without it).
@@ -3181,7 +3181,7 @@ class _DartEmitter:
                 self._need_math()
                 return f"math.sqrt({args[0]})", _PREC["primary"]
             if name == "floor":
-                # dart:math has no top-level floor — it is the
+                # dart:math has no top-level floor - it is the
                 # double method, returning int.
                 return f"({args[0]}).floor()", _PREC["primary"]
             if name == "ceil":
@@ -3222,7 +3222,7 @@ class _DartEmitter:
         """A named-module member used as a value: a constant, or a
         function (which becomes a lambda, D29). `binding.module` is
         the real module name (for dispatch); `binding.dart` is the
-        Java reference (the alias, when the import is aliased) —
+        Java reference (the alias, when the import is aliased) -
         except for a file module, whose class name is the file stem
         (`_file_module_class`)."""
         real = binding.module or binding.dart
@@ -3237,7 +3237,7 @@ class _DartEmitter:
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
                 self._fail(f"`file.{node.name}` cannot be used as a "
-                           "value (it needs a statement — the `with` "
+                           "value (it needs a statement - the `with` "
                            "block cannot live inside a lambda)")
             params = t.params[:-1]  # the last param is the return type
             names = [f"_a{i}" for i in range(len(params))]
@@ -3278,16 +3278,16 @@ class _DartEmitter:
         (D17/P11, J9's Java twin). Every mutation takes its
         idempotency `key:`; the checker enforces that it is present.
         The sqlite3 package is synchronous, so there is no `await`
-        — but the §19 guard still applies: the `bot` instance only
+        - but the §19 guard still applies: the `bot` instance only
         exists inside
         a handler, so a store call at the top level, inside a
         (sync) top-level fn, or inside a lambda is a clean E4001
         instead of uncompilable code."""
         # The Bot method is `bot.<store>_<op>` with the RAW store
-        # name (the JS/Python spelling — and the name the Bot
+        # name (the JS/Python spelling - and the name the Bot
         # class's methods use). binding.dart is the MANGLED name
         # ("economy" is emitter-reserved, so it would be
-        # "economy_") — using it here would call a method that
+        # "economy_") - using it here would call a method that
         # does not exist.
         store_name = (node.func.obj.name
                       if isinstance(node.func, A.Member)
@@ -3298,7 +3298,7 @@ class _DartEmitter:
         if ctx is None or not ctx.get("in_handler"):
             self._fail(
                 f"a store call (`{store_name}.{method}`) is only "
-                "possible inside a command, event, or task handler — "
+                "possible inside a command, event, or task handler - "
                 "top-level functions and statements run outside the "
                 "bot's handler context",
                 span=node.span)
@@ -3331,7 +3331,7 @@ class _DartEmitter:
                            "naming a declared table")
             # The Bot method returns Object (one method serves all
             # tables); the checker knows the row type, so cast to
-            # the row class — registered in the module scope by
+            # the row class - registered in the module scope by
             # _emit_bot_file (the row class IS the table name).
             binding = self._lookup(table.value)
             if binding is None or binding.kind != "struct":
@@ -3382,7 +3382,7 @@ class _DartEmitter:
         (D16, J10's Java twin). Template placeholders that are
         handler bindings (user, guild, ...) are auto-passed in their
         interpolation form; the rest must be explicit arguments (the
-        checker enforces it — E2009). The kwargs map is a `<String,
+        checker enforces it - E2009). The kwargs map is a `<String,
         Object?>` literal (a Map literal accepts null values)."""
         index, _default = self._strings_index()
         entry = None
@@ -3427,7 +3427,7 @@ class _DartEmitter:
     def _emit_embed_lines(self, node: A.EmbedExpr, indent: int) -> tuple[list[str], str]:
         """Build an EmbedBuilder on the lines before the send call
         (MessageBuilder.embeds takes builders directly, so there
-        is no .build() step — the Java twin built a MessageEmbed
+        is no .build() step - the Java twin built a MessageEmbed
         instead). Returns the lines and the embed variable's name
         (a fresh temp per embed)."""
         p = "  " * indent
@@ -3500,7 +3500,7 @@ class _DartEmitter:
         body_lines: list[str] = []
         if ensures:
             # `_newrResult` is declared ONCE, at the top of the
-            # function — every `return` assigns it (a `final` per
+            # function - every `return` assigns it (a `final` per
             # return would be a redeclaration). A void function
             # still gets one (of type Void) so its `ensures`
             # clauses can read `result`.
@@ -3518,7 +3518,7 @@ class _DartEmitter:
                                            new_scope=False))
         if ensures and not (rest and isinstance(rest[-1], A.Return)):
             # The implicit return (falling off the end) is also a
-            # return — check the `ensures` against `null`.
+            # return - check the `ensures` against `null`.
             body_lines.append(f"{bp}_newrResult = null;")
             body_lines.extend(self._ensures_check_lines(ensures, indent + 1))
             if ret is None or _is_none(ret):
@@ -3550,7 +3550,7 @@ class _DartEmitter:
     def _enum_union_fields(self, decl: A.EnumDecl) -> dict[str, Type]:
         """The union of all variants' fields: name -> type. When
         two variants share a field name with DIFFERENT types, the
-        union type is Object (name "object" — the emitter casts on
+        union type is Object (name "object" - the emitter casts on
         access; the field's declared type still wins in the
         variant's factory method and in match bindings)."""
         union: dict[str, Type | None] = {}
@@ -3566,7 +3566,7 @@ class _DartEmitter:
 
     def _emit_struct(self, decl: A.StructDecl, indent: int = 0) -> list[str]:
         """A struct is a Dart class with final fields, a named-
-        parameter constructor (`Point(x: 1, y: 2)` — the call
+        parameter constructor (`Point(x: 1, y: 2)` - the call
         sites pass kwargs), and ==/hashCode/toString (the newr
         rendering `Point(x: 1, y: 2)`, via NewrRt.toStr)."""
         p = "  " * indent
@@ -3731,7 +3731,7 @@ class _DartEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"// Generated by newr from {main_path} — do not edit by hand.",
+            f"// Generated by newr from {main_path} - do not edit by hand.",
             f"// Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:
@@ -3782,13 +3782,13 @@ class _DartEmitter:
                 self.fns_by_dart[b.dart] = decl
         # The top level's used-name set starts with every module-level
         # Java name, so a `let` in a top-level block cannot reuse one
-        # (at module level Java has no block scope for the top level —
+        # (at module level Java has no block scope for the top level -
         # the name would clobber the module binding).
         self._fn_used = set(self._module_used)
 
     def _emit_general_file(self, program: A.Program, main_path: str):
         """A general (non-bot) program: header, imports, then
-        top-level declarations — `late` variables for the top-level
+        top-level declarations - `late` variables for the top-level
         lets/consts (K2's Dart twin: a `late` top-level var is
         assigned in main()/newrInit() in file order, so top-level
         functions can read it and side-effecting initializers run
@@ -3796,13 +3796,13 @@ class _DartEmitter:
         then `void main(List<String> args)` with the top-level
         STATEMENTS in file order (SPEC §8). A file module gets
         `void newrInit()` instead of main() (its top-level
-        statements run when the entry file calls it — the entry
+        statements run when the entry file calls it - the entry
         file calls newrInit() for each directly-imported file
         module that has statements, in import order; transitive
         inits happen through each module's own newrInit).
-        Definitions are hoisted — a function body reads module
+        Definitions are hoisted - a function body reads module
         globals at call time, so emitting the `function` before
-        the statements is safe — but the statements themselves
+        the statements is safe - but the statements themselves
         (lets, assignments, prints, ...) must run in the order
         written. (M2 evaluation #1.)"""
         self.program = program
@@ -3816,7 +3816,7 @@ class _DartEmitter:
         is_main = self._is_main_file
         body: list[str] = []
         # Top-level lets/consts: `late` top-level variables (no
-        # initializers — main() / newrInit() assigns them in file
+        # initializers - main() / newrInit() assigns them in file
         # order). A `const` is `late final`.
         for st in program.stmts:
             if isinstance(st, (A.Let, A.Const)):
@@ -3881,7 +3881,7 @@ class _DartEmitter:
     def _emit_file_set(self, program: A.Program, main_path: str,
                        is_main: bool = True):
         """Emit one program and every file module it imports (recursively).
-        Returns (files, uses_rt). `is_main` marks the top file — the
+        Returns (files, uses_rt). `is_main` marks the top file - the
         only role difference left is that the top file is the entry
         point (a bot's `main()` guard, a general file's top-level
         statements); a file module gets a `newrInit()` function."""
@@ -3899,7 +3899,7 @@ class _DartEmitter:
             sub_path = imp.resolved_path or imp.path
             # The header names the file as the user would see it:
             # relative to the working directory when it is under it
-            # (D2 — so building `examples/shop.newr` and building
+            # (D2 - so building `examples/shop.newr` and building
             # `examples/shop_items.newr` directly give the same
             # shop_items.dart header).
             import os
@@ -3926,18 +3926,18 @@ class _DartEmitter:
     # ------------------------------------------------------------ bot emitter
     # nyxx 6.9.1 + nyxx_commands 6.1.0 bot emission (M5 Dart bot
     # phase). The Dart twin of the JS emitter's bot section: the
-    # same programs, the same semantics — slash commands via
+    # same programs, the same semantics - slash commands via
     # ChatCommand, a Bot class with sqlite3 store methods (P11),
     # component handlers inline after an await (nyxx_commands'
-    # await model — no handler maps), a standalone REST deploy
+    # await model - no handler maps), a standalone REST deploy
     # program, and a pubspec.yaml.
     #
     # nyxx differences from discord.js (verified live against
-    # the 6.9.1 / 6.1.0 packages — see tests/test_emitter_dart.py
+    # the 6.9.1 / 6.1.0 packages - see tests/test_emitter_dart.py
     # and ~/.m5-dart/probe-bot/probe.dart):
     # - Commands are ChatCommand values with an `id(...)` execute
     #   closure; options are the closure's parameters (mirrors
-    #   load them — @Choices for choices, a const CombineConverter
+    #   load them - @Choices for choices, a const CombineConverter
     #   for min/max).
     # - Components are await-based: ComponentId.generate carries
     #   the `only: author` gate (allowedUser) and the timeout
@@ -3946,11 +3946,11 @@ class _DartEmitter:
     #   the on_timeout body runs in the InteractionTimeoutException
     #   catch. The timeout also disables the rows first (the
     #   collector's `end` callback, nyxx-shaped).
-    # - The store is synchronous (package:sqlite3) — no await,
+    # - The store is synchronous (package:sqlite3) - no await,
     #   no locks (Dart is single-threaded, like the JS emitter).
     # - Modals use LabelComponentBuilder + TextInputBuilder.
     # - `member.guild` and `interaction.guild` have no sync
-    #   nyxx equivalent (they need an async fetch) — a clean
+    #   nyxx equivalent (they need an async fetch) - a clean
     #   E4001, use the `guild` binding instead (a known gap).
     # - The `embed` type is EmbedBuilder: MessageBuilder.embeds
     #   takes builders, there is no separate built type to pass
@@ -4053,7 +4053,7 @@ class _DartEmitter:
         """The GatewayIntents constants to enable, sorted. The
         declared intents, plus the ones the events need (member
         events need members, message events need message_content)
-        — the JS emitter's _bot_intents, nyxx spellings."""
+        - the JS emitter's _bot_intents, nyxx spellings."""
         intents = set(program.bot.intents or [])
         kinds = {ev.kind for ev in program.events}
         if "member_join" in kinds or "member_remove" in kinds:
@@ -4180,7 +4180,7 @@ class _DartEmitter:
             self._emit_task(task)
 
         # The channel helpers (only when a channel is rendered
-        # as text or named — the flags are set while the commands
+        # as text or named - the flags are set while the commands
         # and events above are emitted).
         if self._used_channel_text:
             if body:
@@ -4324,13 +4324,13 @@ class _DartEmitter:
     # One long-lived sqlite3 connection per store (created in
     # setup(), before login), a commit per mutation, the ledger
     # and the balance in one transaction, and a duplicate
-    # idempotency key replays instead of double-applying — the
+    # idempotency key replays instead of double-applying - the
     # Dart twin of the JS emitter's _emit_store_methods. The
     # sqlite3 package is synchronous, so there is no await and
     # no lock (Dart is single-threaded, like the JS emitter).
     # Balances are stored as TEXT and parsed with int.parse;
     # arithmetic goes through NewrRt.add/sub, never raw +/- on
-    # ints (checked — a silently wrapped balance is a money
+    # ints (checked - a silently wrapped balance is a money
     # bug). `db.execute` / `db.select` take the parameters
     # inline, so no prepared statement is ever left open.
 
@@ -4426,7 +4426,7 @@ class _DartEmitter:
 
     def _sql_ledger_has_key(self, db: str, key_expr: str, p: str) \
             -> list[str]:
-        """Lines declaring `bool dup` — whether the ledger
+        """Lines declaring `bool dup` - whether the ledger
         already holds `key_expr`."""
         return [
             f"{p}final dupRows = {db}.select('SELECT 1 FROM ledger "
@@ -4681,7 +4681,7 @@ class _DartEmitter:
         many were registered, close. Run once, then run the bot."""
         stem = Path(bot_filename).stem
         lines = self._header(self.main_path,
-                             "Command registration — run once, "
+                             "Command registration - run once, "
                              "then run the bot.")
         lines.append("")
         lines.append("import 'dart:io';")
@@ -4743,7 +4743,7 @@ class _DartEmitter:
                           "role": "Role"}
 
     def _command_var_name(self, name: str) -> str:
-        """`_newrCmdPing` for `/ping` — unique per file."""
+        """`_newrCmdPing` for `/ping` - unique per file."""
         words = "".join(ch if ch.isalnum() else " " for ch in name).split()
         base = "".join(w.capitalize() for w in words) or "Command"
         return "_newrCmd" + base
@@ -4820,7 +4820,7 @@ class _DartEmitter:
         """One parameter of the execute closure: the converter
         annotation (a const CombineConverter for a min/max int
         or number, @Choices for choices), the parameter type
-        (the converter's type — a channel option is a
+        (the converter's type - a channel option is a
         GuildTextChannel), and the default for an optional
         option. An optional parameter is wrapped in `[...]`;
         the annotation goes INSIDE the brackets."""
@@ -5017,9 +5017,9 @@ class _DartEmitter:
         self._fail(f"unknown event kind `{ev.kind}`")
 
     def _task_fn_name(self, task: A.TaskDecl) -> str:
-        """`_every_1h` for a 1h task — the JS emitter's naming
+        """`_every_1h` for a 1h task - the JS emitter's naming
         (a numeric suffix when the same period repeats). The
-        name is computed once per task and cached — main() and
+        name is computed once per task and cached - main() and
         the definition must agree."""
         key = id(task)
         if key in self._task_fn_names:
@@ -5058,7 +5058,7 @@ class _DartEmitter:
         login, like the general emitter), then the token check,
         the store setup, the gateway login, the listener
         registrations, and the task schedules. The locals are
-        `_newrToken` / `_newrCommands` / `_newrClient` — a
+        `_newrToken` / `_newrCommands` / `_newrClient` - a
         top-level `let token` is a `late` var, and a local named
         `token` would shadow it inside main()."""
         lines = ["Future<void> main(List<String> args) async {"]
@@ -5175,7 +5175,7 @@ class _DartEmitter:
 
     def _answer_call(self, kind: str, arg: str, is_embed: bool,
                      ephemeral: bool = False) -> str:
-        """The nyxx call that answers on `kind` — `await`ed, so
+        """The nyxx call that answers on `kind` - `await`ed, so
         the reply happens before the next statement and an
         edit/followup after a reply is safe. `reply` here is the
         interaction reply; `edit` and `followup` go through the
@@ -5291,7 +5291,7 @@ class _DartEmitter:
 
     def _author_id_expr(self, ctx: dict) -> str | None:
         """The invoking user's id in this handler, for the
-        `only: author` gate — or None when the handler has no
+        `only: author` gate - or None when the handler has no
         user in scope (a ready/task handler)."""
         kind = ctx.get("kind")
         if kind in ("command", "component"):
@@ -5311,7 +5311,7 @@ class _DartEmitter:
                           p: str) -> list[str]:
         """The `only: roles` gate at the top of a component
         handler: the invoking member's roles are read from the
-        role cache (falling back to a fetch per role — a
+        role cache (falling back to a fetch per role - a
         PartialRole carries only its id), and the gate answers
         ephemerally and returns when none matches (the JS
         message, verbatim). `p` is the indent of the gate's
@@ -5363,7 +5363,7 @@ class _DartEmitter:
         timeout = stmt.timeout if stmt.timeout is not None else 180
         # The handler body is emitted now (it references the
         # component context variable), but it runs after the
-        # answer — _attach_components inserts the await block.
+        # answer - _attach_components inserts the await block.
         self._push_handler(
             "component", ["user", "guild", "channel", "interaction"],
             reply="interaction",
@@ -5537,7 +5537,7 @@ class _DartEmitter:
         lines.append(f"{p}  ),")
         lines.append(f"{p});")
         # The modal's submit (or its timeout) runs inline, after
-        # the modal is shown — a modal attaches to no message,
+        # the modal is shown - a modal attaches to no message,
         # so there is nothing for _attach_components to do.
         self._push_handler(
             "component", ["user", "guild", "channel", "interaction"],
@@ -5615,7 +5615,7 @@ class _DartEmitter:
         (extending an existing components list when a second
         component attaches to the same answer), capture the
         message when a timeout needs it (shared across attaches
-        to the same answer — later components alias it), and
+        to the same answer - later components alias it), and
         insert each component's await block after the answer."""
         if not self._pending_components:
             return
@@ -5755,12 +5755,12 @@ def emit_program_dart(program: A.Program, *, main_path: str,
                       sources: dict[str, str],
                       line_comments: bool = False,
                       output_stem: str | None = None) -> EmitResult:
-    """Emit a CHECKED program to Dart — one `.dart` per `.newr` file.
+    """Emit a CHECKED program to Dart - one `.dart` per `.newr` file.
 
     `main_path` is the input file as passed (D2: the header names
     it); `sources` maps file paths to their text (for diagnostics
     and `--line-comments`). `output_stem` is the `-o` stem (the
-    output file stem — sanitized by `_dart_stem`). The result's
+    output file stem - sanitized by `_dart_stem`). The result's
     `files` maps an output basename (`hello.dart`) to its text;
     `main_file` is the main output's basename; `uses_rt` says
     whether any file needs `NewrRt` (the caller copies
@@ -5769,7 +5769,7 @@ def emit_program_dart(program: A.Program, *, main_path: str,
     em = _DartEmitter(program, main_path=main_path, sources=sources,
                       line_comments=line_comments, output_stem=stem)
     files, uses_rt = em._emit_file_set(program, main_path)
-    # `env.args` needs main()'s `args` in the runtime — but only
+    # `env.args` needs main()'s `args` in the runtime - but only
     # when some file actually uses it (D4: the runtime is copied
     # only when used, so hello stays runtime-free). A module file
     # may use env.args while the main file does not, and the main
@@ -5795,7 +5795,7 @@ def emit_program_dart(program: A.Program, *, main_path: str,
     if program.bot is not None:
         # The standalone registration script (J10's Dart twin)
         # rides along as a second output file, and the pubspec
-        # (nyxx always, sqlite3 only when a store is used — the CLI
+        # (nyxx always, sqlite3 only when a store is used - the CLI
         # writes every file in result.files, so the pubspec lands
         # next to the sources automatically).
         deploy = em._emit_deploy_file(program, stem + ".dart")
@@ -5810,12 +5810,12 @@ def emit_program_dart(program: A.Program, *, main_path: str,
 def _dart_pubspec(stem: str, *, uses_sqlite: bool) -> str:
     """The pubspec for a bot program: nyxx 6.9.1 +
     nyxx_commands 6.1.0, plus sqlite3 3.9.0 when a store is used
-    (all three versions verified live on pub.dev — see
+    (all three versions verified live on pub.dev - see
     tests/test_emitter_dart.py). Dart SDK ^3.0.0."""
     name = "".join(ch.lower() if ch.isalnum() else "_"
                    for ch in stem).strip("_") or "bot"
     lines = [
-        "# Generated by newr — do not edit by hand.",
+        "# Generated by newr - do not edit by hand.",
         f"name: {name}",
         "description: A newr bot.",
         "version: 1.0.0",

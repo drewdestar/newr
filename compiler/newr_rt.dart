@@ -9,7 +9,7 @@
 // dependency-free.
 //
 // It lives in the compiler package as `compiler/newr_rt.dart` and
-// `newr build --target dart` copies it — byte-identical — next to
+// `newr build --target dart` copies it - byte-identical - next to
 // an emitted `.dart` file when (and only when) that program uses a
 // helper from it. Do not edit a copied file by hand: edit this file
 // in the newr repo and rebuild.
@@ -144,7 +144,7 @@ class NewrRt {
     // newr `**` on ints: checked, bounded before computing.
     // A negative exponent is an error (an int result cannot
     // represent it). The exponent is bounded by repeated
-    // squaring with a check at every multiply — `10 ** 10**9`
+    // squaring with a check at every multiply - `10 ** 10**9`
     // raises instead of allocating by computing blindly.
     if (b < 0) {
       throw NewrError('negative exponent for int pow');
@@ -169,7 +169,7 @@ class NewrRt {
 
   static int tdiv(int a, int b) {
     // newr `/` on ints: truncating division (toward zero).
-    // Dart `~/` already truncates — the check is the two error
+    // Dart `~/` already truncates - the check is the two error
     // cases.
     if (b == 0) {
       throw NewrDivisionByZeroError('integer division by zero');
@@ -196,7 +196,7 @@ class NewrRt {
   static double powFloat(double a, double b) {
     // newr `**` on floats: IEEE semantics. Dart `math.pow`
     // already returns NaN for a negative base with a fractional
-    // exponent (Python returns a complex there — newr has no
+    // exponent (Python returns a complex there - newr has no
     // complex type, so the answer is NaN) and Infinity on
     // overflow. The one case Dart gets wrong is a zero base
     // with a negative exponent: Dart gives Infinity, Python
@@ -227,7 +227,7 @@ class NewrRt {
     // non-zero dividend and NaN for 0/0). `b == 0` covers -0
     // as well. Python's native `/` raises the BUILTIN
     // ZeroDivisionError, so this throws the coded error, not
-    // the codeless class — a `catch e:` sees
+    // the codeless class - a `catch e:` sees
     // e.code == "ZeroDivisionError" on both targets.
     if (b == 0) {
       throw codedError('ZeroDivisionError', 'float division by zero');
@@ -258,7 +258,7 @@ class NewrRt {
     // ax is now an integer-valued double. Extract its exact
     // integer value: repeatedly take the low 53 bits via
     // remainder (exact while v >= 2**53 the remainder is still
-    // exact — v is a multiple of 2**(53-k)...). The robust
+    // exact - v is a multiple of 2**(53-k)...). The robust
     // exact method: peel off bits from the top using
     // frexp-like halving. Halving an integer-valued double by
     // 2 is exact down to 1; the parity of each halving step
@@ -266,7 +266,7 @@ class NewrRt {
     var m = BigInt.zero;
     var v = ax;
     // Collect bits: v is an integer; while v > 0, the lowest
-    // bit is v % 2 (exact for integer-valued doubles — v % 2
+    // bit is v % 2 (exact for integer-valued doubles - v % 2
     // is computed exactly in binary).
     var shift = 0;
     while (v > 0) {
@@ -323,7 +323,7 @@ class NewrRt {
 
   /// Round the exact decimal (digits / 10**scale) to `n` places,
   /// half away from zero, as a double. `n` below -308 rounds every
-  /// finite double to (signed) zero — 10**309 already exceeds the
+  /// finite double to (signed) zero - 10**309 already exceeds the
   /// largest finite double, so no huge power is ever built.
   static double _roundExactToDouble(int sign, BigInt digits, int scale, int n) {
     if (n < -308) {
@@ -339,7 +339,7 @@ class NewrRt {
   }
 
   /// newr `round()`: half-away-from-zero (schoolbook), on the
-  /// EXACT value of the float — not its shortest repr.
+  /// EXACT value of the float - not its shortest repr.
   /// `round(2.675, 2)` is 2.67, because the float 2.675 is stored
   /// slightly below 2.675. `round(x)` returns an `int` (int64
   /// range-checked); `round(x, n)` returns a `float`. Non-finite
@@ -529,7 +529,7 @@ class NewrRt {
   /// (Double.toString(5e-324) is "4.9E-324", Python repr is
   /// "5e-324"). So the digits are derived here from the EXACT
   /// decimal expansion: the shortest prefix that parses back to
-  /// the same double (round to nearest, ties to even — David
+  /// the same double (round to nearest, ties to even - David
   /// Gay's dtoa mode 0, the rule behind Python's repr).
   static String floatStr(double x) {
     if (x.isNaN) return 'nan';
@@ -541,7 +541,7 @@ class NewrRt {
     }
     final neg = x < 0;
     final ax = x.abs();
-    // Exact decimal digits of ax (finite expansion — every
+    // Exact decimal digits of ax (finite expansion - every
     // binary fraction has one) plus the decimal exponent of
     // the leading digit.
     final exact = _exactDecimal(ax);
@@ -726,7 +726,7 @@ class NewrRt {
   /// NaN is never equal to NaN (not even inside a collection).
   static bool eq(Object? a, Object? b) {
     if (identical(a, b)) {
-      // Same reference — but NaN is not == itself even as a
+      // Same reference - but NaN is not == itself even as a
       // boxed double, and `identical` on two NaN doubles IS
       // true in Dart (same bit pattern), so exclude it.
       if (a is double && a.isNaN) {
@@ -809,7 +809,7 @@ class NewrRt {
   // ---------------------------------------------------------------- ?. / ?? / accessors
 
   /// newr `?.`: `null` when `v` is `null`, else `f(v)`. The test
-  /// is `== null`, never truthiness — `0`, `""` and `[]` are
+  /// is `== null`, never truthiness - `0`, `""` and `[]` are
   /// values, not absences. A whole `?.` chain collapses into one
   /// call with the full postfix path inside `f`, so the base
   /// expression is evaluated exactly once.
@@ -823,7 +823,7 @@ class NewrRt {
     return v != null ? v : dflt();
   }
 
-  /// newr `list[i]`: SPEC §9.2 — out-of-range indexing is a
+  /// newr `list[i]`: SPEC §9.2 - out-of-range indexing is a
   /// runtime error. Valid indices are `0 <= i < len(lst)`; a
   /// negative index is out of range (never a wrap).
   static T listIndex<T>(List<T> lst, int i) {
@@ -833,7 +833,7 @@ class NewrRt {
     return lst[i];
   }
 
-  /// newr `list.get(i, default)`: P9 — a negative index is
+  /// newr `list.get(i, default)`: P9 - a negative index is
   /// out-of-range (no wrap-around); anything outside
   /// `0 <= i < len(lst)` returns `default`.
   static T listGet<T>(List<T> lst, int i, T dflt) {
@@ -915,7 +915,7 @@ class NewrRt {
     throw NewrError('len() of unsupported value: $x', 'TypeError');
   }
 
-  /// `{"k": v, ...}` — alternating key/value pairs into a
+  /// `{"k": v, ...}` - alternating key/value pairs into a
   /// LinkedHashMap (insertion order). Null keys and values are
   /// allowed. (Dart has no varargs, so the pairs arrive as a
   /// list.)
@@ -1071,7 +1071,7 @@ class NewrRt {
     '%H:%M:%S',
   };
 
-  /// newr `time.format(ts, fmt)`: UTC, never local time (P4) —
+  /// newr `time.format(ts, fmt)`: UTC, never local time (P4) -
   /// the same program prints the same output on every machine.
   /// The format must be one of the spec's fixed set (§12.2).
   static String timeFormat(int ts, String fmt) {
@@ -1156,7 +1156,7 @@ class NewrRt {
   /// holds the copy). Defaults to an empty list before main runs.
   /// Dart's main() args exclude the program name, but newr's
   /// env.args is sys.argv 1:1 (Python: sys.argv, JS:
-  /// process.argv.slice(1)) — argv[0] is the program, so
+  /// process.argv.slice(1)) - argv[0] is the program, so
   /// setMainArgs prepends the main stem.
   static List<String> _mainArgs = <String>[];
 
@@ -1215,7 +1215,7 @@ class NewrRt {
 }
 
 /// newr `Result[T, E]` (SPEC §10): the value form of errors.
-/// A top-level class (not nested in NewrRt — Dart has no nested
+/// A top-level class (not nested in NewrRt - Dart has no nested
 /// classes); the emitter writes `Result<T, E>` directly.
 class Result<T, E> {
   final bool _isOk;

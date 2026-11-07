@@ -3,7 +3,7 @@
 
 Runs hyperfine for the timing benchmarks and the resource module
 for peak RSS, then PRINTS an M5 (Kotlin) section for BENCHMARKS.md
-(it does NOT write BENCHMARKS.md itself — the parent merges the
+(it does NOT write BENCHMARKS.md itself - the parent merges the
 printed section) and writes benchmarks/raw/*_kt.json (raw hyperfine
 output).
 
@@ -20,7 +20,7 @@ Method notes (see BENCHMARKS.md for the full text):
   itself starts in a fresh /tmp dir (tmpfs), so both pay the same
   fsync cost on the same filesystem (an earlier draft put one DB
   on the home disk and the other on tmpfs, and the disk one looked
-  ~100x slower — pure fsync latency, not the economy loop; and a
+  ~100x slower - pure fsync latency, not the economy loop; and a
   `cd` in hyperfine --prepare does NOT carry into the benchmark,
   so the fresh dir is made inside the timed command).
 - Kotlin programs are compiled once by the runner (kotlinc 2.2.0,
@@ -71,7 +71,7 @@ HELLO_HW_KT = """// Hand-written equivalent of the emitted hello program.
 //
 // Written by a human (not generated-then-edited) for the M5
 // benchmarks (B4/B5/B8): the same observable behavior as
-// `newr build --target kt examples/hello.newr` — print
+// `newr build --target kt examples/hello.newr` - print
 // "Hello, world!".
 
 fun main() {
@@ -85,7 +85,7 @@ LOOP_PLAIN_KT = """// Hand-written checked-int tight loop (B6/B8 comparison).
 // a human in plain Kotlin (no checked helpers): 100,000 iterations
 // of integer arithmetic, printing a checksum so the loop cannot be
 // optimized away. Kotlin `%` already takes the dividend's sign,
-// like newr's `%` (tmod) — and the values stay far below 2**63, so
+// like newr's `%` (tmod) - and the values stay far below 2**63, so
 // plain longs are exact here.
 
 fun main() {
@@ -102,7 +102,7 @@ fun main() {
 LOOP_CHECKED_KT = """// Hand-written checked-int tight loop with the newr runtime (B6).
 //
 // The same loop as benchmarks/generated/loop.newr emits, written by
-// a human using the NewrRt checked helpers directly — the honest
+// a human using the NewrRt checked helpers directly - the honest
 // comparison for "what does the checked-int runtime cost": the
 // emitted program should be within noise of this one, and both are
 // slower than the plain-int loop (loop_plain.kt).
@@ -125,7 +125,7 @@ SHOP_ECONOMY_GEN_KT = r"""// Shop economy benchmark driver (B6b): 1,000 credits 
 // final balance is printed as a checksum.
 //
 // The emitted Bot is a private nested class (`private class Bot`
-// inside `object shop`), so the driver reaches it by reflection —
+// inside `object shop`), so the driver reaches it by reflection -
 // that is the only way to drive it from outside the emitted file,
 // and the reflective lookup happens once, outside the timed loop
 // (the 1,000 credit calls go through cached Method objects).
@@ -168,7 +168,7 @@ fun main() {
 SHOP_ECONOMY_HW_KT = """// Hand-written shop economy benchmark (B6b comparison).
 //
 // The same 1,000 credits as the generated shop_economy driver,
-// written by a human with plain JDBC + sqlite-jdbc directly — the
+// written by a human with plain JDBC + sqlite-jdbc directly - the
 // same SQL shape the emitted Kotlin bot uses (balances stored as
 // TEXT, BEGIN IMMEDIATE / COMMIT per credit, INSERT ... ON CONFLICT
 // for the balance; no ledger row when the key is null, exactly like
@@ -179,14 +179,14 @@ SHOP_ECONOMY_HW_KT = """// Hand-written shop economy benchmark (B6b comparison).
 // the runner starts every run in a fresh temp dir, so the balance
 // is fresh and both drivers pay the same fsync cost on the same
 // filesystem. (An earlier draft put the hand-written DB in /tmp
-// while the generated one sat on the home disk — the generated
+// while the generated one sat on the home disk - the generated
 // driver then looked ~100x slower, purely from fsync latency.)
 //
 // The `Class.forName("dev.kord.core.Kord")` below is deliberate
 // (M2 fix #6): the generated driver loads the whole emitted shop
 // bot, which loads Kord; without the same class load here,
 // hyperfine would measure JVM + Kord startup, not the economy
-// loop. It is a load only — no Discord connection is made.
+// loop. It is a load only - no Discord connection is made.
 
 import java.io.File
 import java.sql.DriverManager
@@ -409,7 +409,7 @@ def main() -> int:
                 SHOP_ECONOMY_HW_KT, encoding="utf-8")
             _kotlinc(d, "shop_economy.kt", cp=kord_cp)
         else:
-            print("Kord jars not found under ~/.m5-kt/kord-jars-jvm — "
+            print("Kord jars not found under ~/.m5-kt/kord-jars-jvm - "
                   "skipping B6b (shop economy).")
 
         # --- Verify checksums before timing anything. ---
@@ -435,7 +435,7 @@ def main() -> int:
         print("checksums verified: loops 105003, hellos ok"
               + (", shop balances 1000" if shop_ok else ""))
 
-        # B1: compile cold (no warmup) — the Kotlin target.
+        # B1: compile cold (no warmup) - the Kotlin target.
         results["b1_hello_kt"] = _hyperfine(
             "b1_hello_kt", [PY, str(LAUNCHER), "build", "--target", "kt",
                             "examples/hello.newr", "-o",
@@ -489,7 +489,7 @@ def main() -> int:
         # --prepare in a separate shell, so a `cd` there does NOT
         # carry into the benchmark (verified: the prepare's cd is
         # ignored and the command would run in the repo dir, where
-        # each COMMIT fsyncs on the home disk at ~70 ms — the
+        # each COMMIT fsyncs on the home disk at ~70 ms - the
         # generated driver then looks ~100x slower, pure fsync
         # latency). The fresh tmpfs dir is therefore made IN the
         # timed command itself (mktemp costs ~ms, identical for
@@ -545,7 +545,7 @@ def main() -> int:
     loop_checked_ratio = ratio(results["b6_loop_gen_kt"],
                                results["b6_loop_checked_kt"])
     md = []
-    md.append("# Benchmarks — M5 (Kotlin emitter)\n")
+    md.append("# Benchmarks - M5 (Kotlin emitter)\n")
     md.append(f"Machine: {platform.system()} {platform.machine()}, "
               f"Python {platform.python_version()}, {java_ver}, "
               f"{kotlinc_ver}, Kord 0.18.1 + sqlite-jdbc 3.54.1.0, "
@@ -553,70 +553,70 @@ def main() -> int:
     md.append("All figures are measured, not promised. Raw hyperfine JSON "
               "is in `benchmarks/raw/` (`*_kt.json`). The compile "
               "benchmarks (B1/B2/B7-compile) measure the same Python "
-              "compiler as M2, emitting Kotlin instead of Python — the "
+              "compiler as M2, emitting Kotlin instead of Python - the "
               "difference is the emitter. Kotlin programs are compiled "
               "once by the runner (kotlinc 2.2.0, Kord + sqlite-jdbc on "
               "the classpath for the shop programs); the timed commands "
               "run `java -cp ... <Main>Kt` only, never the build. The "
               "B6b drivers open economy.db in the CWD and the timed "
-              "command itself starts in a fresh /tmp dir (tmpfs) — a "
+              "command itself starts in a fresh /tmp dir (tmpfs) - a "
               "`cd` in hyperfine --prepare does not carry into the "
               "benchmark, so the fresh dir is made inside the command "
-              "— so both pay the same fsync cost on the same "
+              "- so both pay the same fsync cost on the same "
               "filesystem. The generated shop Bot is a private nested "
               "class, so the generated B6b driver reaches it by "
               "reflection (once, outside the timed loop); the "
               "hand-written driver loads Kord so both sides pay the "
-              "same Kord class load (M2 fix #6) — neither makes a "
+              "same Kord class load (M2 fix #6) - neither makes a "
               "Discord connection.\n")
-    md.append("## B1 — Compile, cold (no warmup), `--target kt`\n")
+    md.append("## B1 - Compile, cold (no warmup), `--target kt`\n")
     md.append(f"- hello: {fmt(results['b1_hello_kt'])}")
     md.append(f"- shop: {fmt(results['b1_shop_kt'])}\n")
-    md.append("## B2 — Compile, warm, `--target kt`\n")
+    md.append("## B2 - Compile, warm, `--target kt`\n")
     md.append(f"- hello (no change): {fmt(results['b2_hello_kt'])}")
     md.append(f"- shop (one file changed): {fmt(results['b2_shop_change_kt'])}\n")
-    md.append("## B4 — Generated code size (Kotlin)\n")
+    md.append("## B4 - Generated code size (Kotlin)\n")
     for label, s in sizes.items():
         md.append(f"- {label}: {s['bytes']} bytes, {s['lines']} lines")
     md.append(f"- hello size ratio (generated/hand-written): "
               f"{sizes['hello_gen']['bytes']/sizes['hello_hw']['bytes']:.2f}")
     md.append(f"- loop size ratio (generated/hand-written): "
               f"{sizes['loop_gen']['bytes']/sizes['loop_hw']['bytes']:.2f}\n")
-    md.append("## B5 — Generated program startup (`java -cp ... HelloKt`)\n")
+    md.append("## B5 - Generated program startup (`java -cp ... HelloKt`)\n")
     md.append(f"- generated hello: {fmt(results['b5_hello_gen_kt'])}")
     md.append(f"- hand-written hello: {fmt(results['b5_hello_hw_kt'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b5_hello_gen_kt'], results['b5_hello_hw_kt']):.2f}\n")
-    md.append("## B6 — Generated runtime (checked-int tight loop, 100k iterations)\n")
+    md.append("## B6 - Generated runtime (checked-int tight loop, 100k iterations)\n")
     md.append(f"- generated (checked helpers, NewrRt): {fmt(results['b6_loop_gen_kt'])}")
     md.append(f"- hand-written, plain longs: {fmt(results['b6_loop_plain_kt'])}")
     md.append(f"- hand-written, NewrRt helpers: {fmt(results['b6_loop_checked_kt'])}")
     md.append(f"- ratio generated/plain: {loop_ratio:.2f}")
     md.append(f"- ratio generated/checked-hand-written: {loop_checked_ratio:.2f}")
-    md.append("  (All three print the same checksum, 105003 — the loops agree.)")
+    md.append("  (All three print the same checksum, 105003 - the loops agree.)")
     if loop_ratio > 1.20:
         md.append(f"  (Note: the {loop_ratio:.2f} generated/plain ratio is "
-                  f"over the 1.20 proposal threshold — flagged honestly, "
+                  f"over the 1.20 proposal threshold - flagged honestly, "
                   f"not hidden. It is the checked-int price "
                   f"(Math.*Exact per operation plus a tmod call), the "
                   f"same shape as M2's 2.54 and M4's 2.42: the generated "
                   f"code is within noise of hand-written code using the "
                   f"same checked helpers ({loop_checked_ratio:.2f}), and "
-                  f"the plain-long loop is not a fair target — it cannot "
+                  f"the plain-long loop is not a fair target - it cannot "
                   f"overflow-check at all.)\n")
     else:
         md.append("")
     if "b6b_shop_gen_kt" in results:
-        md.append("## B6b — Shop economy, 1,000 credits (JDBC, commit per call)\n")
+        md.append("## B6b - Shop economy, 1,000 credits (JDBC, commit per call)\n")
         md.append(f"- generated (emitted shop Bot): {fmt(results['b6b_shop_gen_kt'])}")
         md.append(f"- hand-written (JDBC + sqlite-jdbc directly): {fmt(results['b6b_shop_hw_kt'])}")
         md.append(f"- ratio (generated/hand-written): "
                   f"{ratio(results['b6b_shop_gen_kt'], results['b6b_shop_hw_kt']):.2f}")
         md.append("  (Both print the final balance 1000.)\n")
-    md.append("## B7 — Peak RSS (Kotlin)\n")
+    md.append("## B7 - Peak RSS (Kotlin)\n")
     md.append(f"- compile (shop, --target kt): {results['b7_compile_kt']['rss_mb']:.1f} MB")
     md.append(f"- run (hello, java): {results['b7_run_kt']['rss_mb']:.1f} MB\n")
-    md.append("## B8 — Hand-written parity (Kotlin)\n")
+    md.append("## B8 - Hand-written parity (Kotlin)\n")
     md.append(f"- startup ratio: "
               f"{ratio(results['b5_hello_gen_kt'], results['b5_hello_hw_kt']):.2f} "
               f"(>1.20 would be a bug report)")

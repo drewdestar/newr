@@ -15,3 +15,4 @@ Thumbs.db
 # in that dir ARE committed.
 benchmarks/generated/loop.py
 benchmarks/generated/newr_rt.py
+benchmarks/raw/dbg_*.json
