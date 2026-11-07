@@ -4,7 +4,7 @@
 [![python 3.10+](https://img.shields.io/badge/python-3.10%2B-1f2328)](SPEC.md)
 [![license MIT](https://img.shields.io/badge/license-MIT-1f2328)](LICENSE)
 
-newr is a general-purpose programming language. You write one readable source file, and the compiler produces readable code in seven target languages. A Discord bot is one use of newr, through the `discord` module. The language itself is not bot-specific.
+newr is a general-purpose programming language. You write one readable source file, and the compiler produces readable code in seven target languages. It takes the best ideas from the languages that came before it and puts them in one place, so the same language works for AI code, IT tools, security work, and anything else you build. A Discord bot is one use of newr, through the `discord` module. The language itself is not bot-specific.
 
 ## Try it
 
