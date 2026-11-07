@@ -2080,7 +2080,7 @@ repo `drewdestar/newr` at commit `127e941`.
 | J3 | `round()` half-away | **Exact via BigInt decimal expansion** (no Decimal in JS). Same P2 semantics incl. `round(2.675, 2) = 2.67`. | JS has no Decimal; the float's exact binary value is expanded to decimal digits with BigInt, then rounded half-up on the exact value. |
 | J4 | Float rendering | **Python `repr()` semantics** via the `floatStr` helper: shortest round-trip digits, exponent iff exp < -4 or >= 16, ".0" suffix for integral floats, "0.0"/"-0.0" for zero. Used by `toStr` AND by print/interp of float values. | Bare JS `String(x)` differs (e.g. `1e+21` vs Python `1e+21` — same here, but `1e-7` vs `1e-07`, and no ".0" suffix). Conformance pins the Python spellings. |
 | J5 | `str()` rendering | **Via `toStr` (P8)**, same spellings as Python: `"true"`/`"false"`/`"none"`, structs `"Point(x: 1, y: 2)"`, enums `"Color.Red"`, collections recursively with bare strings. | Same reason as P8 — bare JS rendering gives the wrong spellings. |
-| J6 | Collections | **list → Array (reference semantics, P12), dict → Map (insertion order, str keys), set → Set.** Structural `==` via rt `eq()` (deep, order-insensitive for dict, unordered for set). **Known limitation: sets/dicts keyed by value types (struct/enum) use identity in JS — Python hashes by value; no conformance program covers it.** | JS has no value-keyed Map/Set. The limitation is documented, not hidden; a value-keyed wrapper is v1.1 work if a program ever needs it. |
+| J6 | Collections | **list → Array (reference semantics, P12), dict → Map (insertion order, str keys), set → Set.** Structural `==` via rt `eq()` (deep, order-insensitive for dict, unordered for set). **Known limitation: sets of value types (struct/enum) use identity in JS — Python hashes by value; no conformance program covers it.** (Correction, §18: the J6 text used to say "sets/dicts" — the dict half is unreachable, since dict keys must be `str` (E2001); a dict keyed by a struct cannot even be written.) | JS has no value-keyed Map/Set. The limitation is documented, not hidden; a value-keyed wrapper is v1.1 work if a program ever needs it. |
 | J7 | `?.` / `??` | **Via `optChain`/`coalesce` helpers**, same D9 shape (one optChain per optional link, §16 segment splitting ported exactly from the Python emitter, incl. `_in_lambda_link_type`/`_rebase`). | JS `?.`/`??` look similar but do not short-circuit the whole postfix chain the way SPEC §9.2 promises (the §15.8 hole-1 guard). The helpers carry the exact segment semantics. |
 | J8 | Lambda capture | **Capture by value via IIFE snapshot:** `((_s0) => (params) => body)(v0)` for expr bodies; block bodies hoisted to `const _newr_fn_N = ((_s0) => (params) => {...})(v0)`. | Python's default-arg snapshot trick does NOT work in JS — default params evaluate at call time and refer to the parameter itself. The IIFE binds the snapshot at creation time. |
 | J9 | Store / economy | **node:sqlite (built into Node 24, zero deps), synchronous API.** No lock (single-threaded sync execution is atomic per op); explicit `BEGIN IMMEDIATE ... COMMIT` per op for crash atomicity; same ledger+balance, idempotency-key replay, amount-based heal-on-retry as Python. DB file `<store>.db` next to the emitted `.js`. Methods stay `async` (shape parity with Python). **Int columns stored as TEXT** (node:sqlite returns JS numbers and throws above 2^53 — verified live: insert of `9007199254740993n` and `SELECT 9223372036854775807n` both throw `RangeError`); balance arithmetic in JS with BigInt + checkInt; conversion at the boundary. `PRAGMA busy_timeout = 5000`. **Ledger read for heal: `SELECT amount FROM ledger WHERE key = ?` summed in JS (not SQL SUM) for exactness.** Transfer-leg upserts computed in JS (BigInt) then UPDATE/INSERT — never SQLite `amount + excluded.amount` on TEXT. | better-sqlite3 was the alternative (sync, but a native addon — and its Node 24 prebuild is missing on this VM, see the discord.js track note). node:sqlite is built into Node 24, so the emitted bot has zero npm dependencies besides discord.js itself. |
@@ -2393,9 +2393,10 @@ discord.js), JS golden comparison. YAML validated
   14.28.1, and the mock round-trip tests drive commands/events/
   components/store end to end, but no real Discord call was made.
   A live guild + token is still needed for P-42.
-- **Sets/dicts keyed by value types (struct/enum)** use identity
+- **Sets of value types (struct/enum)** use identity
   in JS where Python hashes by value (J6 limitation). No
-  conformance program covers it.
+  conformance program covers it. (The dict half of the old J6
+  wording is unreachable: dict keys must be `str`, E2001.)
 - **Str comparison for astral characters** is UTF-16 code units
   in JS vs code points in Python (documented drift).
 - **File-IO error codes** are host-specific (JS `"ENOENT"` vs
@@ -2430,3 +2431,182 @@ discord.js), JS golden comparison. YAML validated
   runtime, goldens/js, tests/js + 3 test files, benchmark
   fixtures + runner + 11 raw JSONs). No other files touched;
   `goldens/py/` byte-identical.
+
+## 18. M3 fix round — cold re-evaluation of `fe63ff8` (7 Nov 2026)
+
+Cold re-evaluation verdict: **NEEDS FIXES — 2 blocking items**,
+both found with the evaluator's own repro programs (not copies of
+the repo's tests). Everything else held up: suite 820/820 on
+system Python and in the evaluator's fresh venv, conformance
+71 ok js + 71 ok py, rt tests 61 checks, goldens byte-identical,
+benchmarks recomputed from the raw JSONs and matching. Both items
+are in the JS emitter/runtime; both fixed here TDD-style (failing
+test first, one sha256-verified red-check per fix).
+
+### 18.1 Fix 1 — `?`-propagate on `Result` silently returned wrong values
+
+The evaluator's repro (`chain`: `div(100, x)?` then `div(h, 2)?`):
+`chain(4)` → Python `ok(12)` (correct: 100/4=25, 25/2=12), JS
+`ok(25)` — the second division never ran. `chain(0)` → `err` on
+both (correct by accident).
+
+Root cause — two defects in the same code path,
+`compiler/emitter_js.py::_propagate_unwrapped`, in BOTH branches
+(normal, and `in_handler`):
+
+- The emitted check was `if ({temp}.isErr) {` — but `Result.isErr`
+  is a **method** in `compiler/newr_rt.js`. A bare method reference
+  is always truthy, so `?` early-returned on **every** value, Ok or
+  Err. The Python emitter emits `if {temp}.is_err():` (with parens,
+  `compiler/emitter.py:1849,1876`). The method-call path in the JS
+  emitter already knew this (`emitter_js.py` ~1343: "The JS Result
+  exposes isOk/isErr as METHODS … a bare access would be the
+  function itself, not the bool") and emits `isOk()`/`isErr()` —
+  the propagate sites were the only places that forgot.
+- The returned value was `{temp}.value` — but JS `Result` has no
+  `.value` property (it stores `._value`, no getter; verified live:
+  `rt.ok(42n).value === undefined`, `._value === 42n`). While
+  defect 1 existed this was unreachable; fixing defect 1 alone
+  would have activated defect 2. Both fixed together.
+
+**Decision:** `.isErr()` + `._value`, NOT a `value` getter on
+`Result`. Minimal, and it matches the Python emitter's call-site
+shape (`is_err()` + `.value`); `Result` already exposes value
+access via `unwrap()`/`unwrapOr()`, and a getter would be new
+public API surface for a one-site need. The nullable `?` path is
+untouched (`=== null` check, returns the temp itself — it was
+correct).
+
+Why the suite missed it: the only coverage used a *single
+trailing* `?` (`conformance/ok/result_propagate.newr` `half`, and
+`test_result_propagate`, same shape) — with the bug, `half(2)`
+early-returns `ok(5)`, the same value as correct. The bug only
+shows with two sequential propagates, or any use of the unwrapped
+value after `?`.
+
+New tests:
+
+- `tests/test_emitter_js.py::TestControlAndContracts.test_result_propagate_chain`
+  (behavioural, `run_js_ok`): the `chain` program →
+  `"12\ntrue\n"`.
+- `tests/test_emitter_js_bot.py::TestBotStructure.test_result_propagate_in_handler`
+  (structural, emitted text): a command handler doing
+  `let h = div(100, 2)?` must emit `.isErr()` and `._value`, and
+  must not emit a bare `.isErr)`. (The handler test program first
+  failed to parse — `command` is a top-level block in newr, not a
+  line inside the `bot` block; test source fixed, not the compiler.)
+- `conformance/ok/result_propagate_chain.newr` (new program, runs
+  on both targets): the `chain` shape as a PASS/FAIL program.
+
+Red-check: backup `/tmp/emitter_js.fixed.py`, sha256
+`1354f338e66eaf487f6c61336a6ee011f8de0c5bf915621a386a7446528c95d5`;
+reverting both sites to the buggy form → the chain test AND the
+handler test fail (2 failures); restored sha256-identical → both
+OK. (The first revert attempt asserted the wrong count — the fix
+comments themselves contain `._value` — and wrote nothing; the
+revert was redone with the assertion on the code lines only.)
+
+### 18.2 Fix 2 — float `/` by zero: `e.code` diverged py vs js
+
+The evaluator's repro: catch `1.0 / 0.0`, print
+`e.code ?? "none"` → Python `"ZeroDivisionError"`, JS `"none"`.
+
+Root cause: Python's float `/` is native `/` (the Python emitter
+emits it bare — `emitter.py::_emit_binop` falls through to
+`f"{left} {op} {right}"` for float division), which raises the
+**builtin** `ZeroDivisionError`. JS `fdiv`
+(`compiler/newr_rt.js`) threw `NewrDivisionByZeroError`, whose
+code is `null` per the §17.4 item-4 fix. The item-4 list was
+**incomplete**: it named four builtin sites
+(`powFloat(0, -1)`, `round(inf)`, `toInt(inf)`, `toFloat(huge
+int)`); `fdiv` is a **fifth** builtin site it missed.
+
+Scope checked, not widened: float `%` is NOT the same bug.
+Python routes float `%` through `fmod`
+(`compiler/newr_rt.py:172`), which raises the codeless
+`NewrDivisionByZeroError` — so JS `fmod` throwing the codeless
+class is correct parity, and it is untouched. (Python's native
+`%` would raise `ZeroDivisionError: float modulo`, but newr never
+emits native `%` for floats — it needs C-`fmod` dividend-sign
+semantics.) The evaluator verified the other builtin sites
+genuinely match (`0.0 ** -1.0` → `"ZeroDivisionError"` both;
+`round(inf)` / `int(inf)` → `"OverflowError"` both).
+
+Fix (one line, following the established pattern): `fdiv` now
+throws `codedError("ZeroDivisionError", "float division by zero")`
+— `asError` turns a plain `Error` with a string `.code` into a
+newr error carrying that code, so a `catch e:` sees
+`e.code == "ZeroDivisionError"` on both targets. The
+`NewrDivisionByZeroError` class comment is updated to list both
+builtin sites (powFloat, fdiv), and §17.4 item 4's "four sites"
+is corrected by this section (fdiv is the fifth).
+
+New tests:
+
+- `tests/js/rt_tests.js` "fdiv by zero": was `throwsNamed(...,
+  "NewrDivisionByZeroError")`, now `throwsCode(..., "ZeroDivisionError")`
+  for `1.0/0.0`, `0.0/0.0`, `1.0/-0.0`.
+- `tests/test_emitter_js.py::TestControlAndContracts.test_float_div_by_zero_error_code`
+  (JS): catch `1.0 / 0.0`, print `e.code ?? "none"` →
+  `"ZeroDivisionError\n"`.
+- `tests/test_emitter.py::TestErrorsAndResult.test_float_div_by_zero_error_code`
+  (Python twin): same program → `"ZeroDivisionError\n"` — passes
+  before and after the fix; it pins the Python reference behaviour.
+- `conformance/ok/arith_div_zero_catch.newr` extended: the float
+  branch now also asserts `e.code == "ZeroDivisionError"` (both
+  targets).
+
+Red-check: backup `/tmp/newr_rt.fixed.js`, sha256
+`a054091ad41e338cfcee67f8e6b908ca445ded43330408792ad055711e9bc933`;
+reverting `fdiv` to the codeless class → rt tests crash (Node
+assertion error) AND the float-code test fails; restored
+sha256-identical → 61 checks pass + test OK.
+
+### 18.3 J6 correction — the dict half is unreachable (non-blocking)
+
+The evaluator's note: J6 said "sets/dicts keyed by value types
+(struct/enum) use identity in JS". Verified live: a dict keyed by
+a struct cannot even be written — `let d = {p: 1}` and
+`let d: dict[Pt, int] = {}` are both rejected at check with
+`error[E2001]: dict keys must be \`str\``. SPEC §12 already says
+`dict[str, T]` (keys must be str), so **SPEC.md needed no change**.
+The J6 row (§17.1) and the §17.7 limitation list now say "sets of
+value types" only, each with a correction note pointing here. The
+set half stays live: `set([Pt(1,2), Pt(1,2)])` has `len` 1 in
+Python, 2 in JS; `contains` is structural `eq` on both.
+
+### 18.4 Verification
+
+- Full suite, system Python:
+  `python3 -m unittest discover -s tests -p "test_*.py"` →
+  **Ran 824 tests in 70.4 s — OK (skipped=13)** (820 baseline + 4
+  new: chain, float-code JS, handler, float-code Python).
+- Full suite, fresh venv (`/tmp/m3fix-venv`, discord.py 2.7.1 +
+  aiosqlite): **Ran 824 tests in 67.6 s — OK (skipped=2)**.
+- Conformance: `python3 conformance/run.py --target js` → **72 ok,
+  exit 0**; `--target py` → **72 ok, exit 0** (71 + the new
+  `result_propagate_chain.newr`; the 26 err programs unchanged).
+- Runtime: `node tests/js/rt_tests.js` → **61 checks passed**.
+- Evaluator repros, after the fix: `c_result.newr` → PASS on py
+  AND js; `b_int.newr` → byte-identical output on both targets
+  (including `ZeroDivisionError` and the float renderings).
+- Goldens untouched: `git diff --stat -- goldens/` empty (the
+  fixes touch no golden program's output).
+- `benchmarks/generated/newr_rt.js` snapshot: went stale at the
+  `fdiv` change (first diff at char 2837) and was re-copied per
+  the M3 arrangement — byte-identical to `compiler/newr_rt.js`
+  again.
+- CLI live (`/tmp/jscli-fix`): `newr build hello.newr --target
+  js` → `node hello.js` prints `Hello, world!`; `newr build
+  shop.newr --target js` → shop files written with the 3 baseline
+  warnings, `node --check` clean.
+- Changed files: `compiler/emitter_js.py`, `compiler/newr_rt.js`,
+  `conformance/ok/arith_div_zero_catch.newr`,
+  `tests/js/rt_tests.js`, `tests/test_emitter.py`,
+  `tests/test_emitter_js.py`, `tests/test_emitter_js_bot.py`,
+  `benchmarks/generated/newr_rt.js` (snapshot re-copy),
+  `BUILD_REPORT.md` (§18 + J6 corrections); new file
+  `conformance/ok/result_propagate_chain.newr`. **Not pushed** —
+  chie reviews and pushes.
+- Still open (unchanged): §16.4 amount-based debit/credit heal;
+  CI matrix never run (Windows/macOS); P-42 live Discord.

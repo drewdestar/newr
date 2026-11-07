@@ -1,7 +1,11 @@
 # Division by zero is a runtime error (int and float).
+# §18 fix 2: float `/` by zero reports the builtin code
+# "ZeroDivisionError" on both targets (Python raises the builtin
+# from its native `/`; JS fdiv throws the coded error).
 let passed = true
 let caught_int = false
 let caught_float = false
+let fcode = ""
 try:
   let x = 1 / 0
   print x
@@ -12,6 +16,9 @@ try:
   print y
 catch e:
   caught_float = true
+  fcode = e.code ?? "none"
+if fcode != "ZeroDivisionError":
+  passed = false
 if caught_int != true:
   passed = false
 if caught_float != true:

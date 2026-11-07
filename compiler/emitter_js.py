@@ -2114,11 +2114,16 @@ class _JSEmitter:
             if t.name == "Result" and t.params and not t.nullable:
                 self._hoists.append([
                     f"const {temp} = {text};",
-                    f"if ({temp}.isErr) {{",
+                    # §18 fix 1: isErr is a METHOD on the JS Result —
+                    # a bare access is the function itself (always
+                    # truthy), so `?` early-returned on every value.
+                    # The unwrapped value lives in `._value` (there
+                    # is no `.value` property).
+                    f"if ({temp}.isErr()) {{",
                     "  return;",
                     "}",
                 ])
-                return f"{temp}.value"
+                return f"{temp}._value"
             if t.nullable and t.name != "Result":
                 self._hoists.append([
                     f"const {temp} = {text};",
@@ -2143,11 +2148,14 @@ class _JSEmitter:
                            "checker should have rejected this)")
             self._hoists.append([
                 f"const {temp} = {text};",
-                f"if ({temp}.isErr) {{",
+                # §18 fix 1: isErr is a METHOD on the JS Result — see
+                # the handler branch above (bare `.isErr` is always
+                # truthy; the value lives in `._value`).
+                f"if ({temp}.isErr()) {{",
                 f"  return {temp};",
                 "}",
             ])
-            return f"{temp}.value"
+            return f"{temp}._value"
         if t.nullable:
             if ret is None or not ret.nullable:
                 self._fail("`?` on a nullable value inside a function "

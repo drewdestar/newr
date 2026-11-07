@@ -699,6 +699,35 @@ class TestControlAndContracts(unittest.TestCase):
                "print half(0).is_err()\n")
         self.assertEqual(run_js_ok(src), "5\ntrue\n")
 
+    def test_result_propagate_chain(self):
+        # §18 fix 1: TWO sequential `?` propagates that USE the
+        # unwrapped value. The single-trailing-`?` shape in
+        # test_result_propagate cannot see the bug: with `?` broken,
+        # half(2) early-returns ok(5) — the same value as correct.
+        # chain(4) is discriminating: 100/4=25, 25/2=12 — the second
+        # division must actually run (was: JS returned ok(25)).
+        src = ("fn div(a: int, b: int) -> Result[int, error]:\n"
+               "  return try a / b\n"
+               "fn chain(x: int) -> Result[int, error]:\n"
+               "  let h = div(100, x)?\n"
+               "  let k = div(h, 2)?\n"
+               "  return ok(k)\n"
+               "print chain(4).unwrap()\n"
+               "print chain(0).is_err()\n")
+        self.assertEqual(run_js_ok(src), "12\ntrue\n")
+
+    def test_float_div_by_zero_error_code(self):
+        # §18 fix 2: float `/` by zero must report the builtin code
+        # "ZeroDivisionError" on both targets (Python raises the
+        # builtin from its native `/`; JS fdiv must throw the coded
+        # error, not a codeless NewrDivisionByZeroError).
+        src = ("try:\n"
+               "  let f = 1.0 / 0.0\n"
+               "  print f\n"
+               "catch e:\n"
+               "  print e.code ?? \"none\"\n")
+        self.assertEqual(run_js_ok(src), "ZeroDivisionError\n")
+
     def test_nullable_propagate(self):
         src = ("fn first(xs: list[int]) -> int?:\n"
                "  if xs.len() == 0:\n    return none\n"

@@ -457,6 +457,18 @@ class TestErrorsAndResult(unittest.TestCase):
         self.assertIn("invalid literal", out)
         self.assertIn("ValueError", out)
 
+    def test_float_div_by_zero_error_code(self):
+        # §18 fix 2 (JS twin in test_emitter_js.py): float `/` by
+        # zero raises Python's builtin ZeroDivisionError from the
+        # native `/`, so e.code is "ZeroDivisionError" — the JS
+        # target's fdiv must match.
+        src = ("try:\n"
+               "  let f = 1.0 / 0.0\n"
+               "  print f\n"
+               "catch e:\n"
+               "  print e.code ?? \"none\"\n")
+        self.assertEqual(run_ok(src), "ZeroDivisionError\n")
+
     def test_finally_runs(self):
         src = ("try:\n"
                "  throw \"x\"\n"

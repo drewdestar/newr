@@ -241,6 +241,28 @@ class TestBotStructure(unittest.TestCase):
         self.assertNotIn("dispatchCommand", text)
         self.assertNotIn("const commands", text)
 
+    def test_result_propagate_in_handler(self):
+        # §18 fix 1, handler branch: `?` inside a command handler
+        # exits the handler with a bare `return` on Err and yields
+        # the unwrapped value otherwise. The emitted check must CALL
+        # the method (`.isErr()`) and read the stored field
+        # (`._value`) — a bare `.isErr` is always truthy and
+        # `.value` is undefined on a JS Result.
+        src = ("fn div(a: int, b: int) -> Result[int, error]:\n"
+               "  return try a / b\n"
+               "bot \"B\":\n"
+               "  description: \"B\"\n"
+               "\n"
+               "command go:\n"
+               "  description: \"go\"\n"
+               "  do:\n"
+               "    let h = div(100, 2)?\n"
+               "    reply \"half is {h}\"\n")
+        text = emit_js_main_text(src)
+        self.assertIn(".isErr()", text)
+        self.assertIn("._value", text)
+        self.assertNotIn(".isErr)", text)
+
     def test_on_message_ignores_own_messages(self):
         # A message event answers with `send`, not `reply` (E2008).
         text = emit_js_main_text(

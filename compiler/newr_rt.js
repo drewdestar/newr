@@ -74,9 +74,11 @@ class NewrOverflowError extends NewrError {
 class NewrDivisionByZeroError extends NewrError {
   // Division or modulo by zero. Same code rule as above: the
   // Python twin is constructed without a code, so e.code is none
-  // in a `catch`. The one builtin site — `0.0 ** -1`, where Python
-  // raises ZeroDivisionError itself — throws
-  // codedError("ZeroDivisionError", ...) in powFloat instead.
+  // in a `catch`. The builtin sites — `0.0 ** -1`, where Python
+  // raises ZeroDivisionError itself, and float `/` by zero, where
+  // Python's native `/` raises it — throw
+  // codedError("ZeroDivisionError", ...) in powFloat and fdiv
+  // instead (§18 fix 2: fdiv was missed by the §17.4 item-4 list).
   constructor(message) {
     super(message);
     this.name = "NewrDivisionByZeroError";
@@ -223,9 +225,14 @@ function fdiv(a, b) {
   // raises like Python (JS would give Infinity for a non-zero
   // dividend and NaN for 0/0). `b === 0` covers -0 as well.
   // (P6: float /0 is an error — the Python target gets this free
-  // from Python's own `/`; JS needs the check.)
+  // from Python's own `/`; JS needs the check.) Python's native
+  // `/` raises the BUILTIN ZeroDivisionError, so this throws the
+  // coded error (§18 fix 2), not the codeless class — a `catch e:`
+  // sees e.code == "ZeroDivisionError" on both targets. (Float `%`
+  // is different: both targets route it through fmod, which raises
+  // the codeless NewrDivisionByZeroError — that parity is correct.)
   if (b === 0) {
-    throw new NewrDivisionByZeroError("float division by zero");
+    throw codedError("ZeroDivisionError", "float division by zero");
   }
   return a / b;
 }

@@ -184,9 +184,11 @@ check("fdiv", () => {
 
 check("fdiv by zero", () => {
   // P6: float /0 is an error (JS `/` would give Infinity/NaN).
-  throwsNamed(() => rt.fdiv(1.0, 0.0), "NewrDivisionByZeroError");
-  throwsNamed(() => rt.fdiv(0.0, 0.0), "NewrDivisionByZeroError");
-  throwsNamed(() => rt.fdiv(1.0, -0.0), "NewrDivisionByZeroError");
+  // §18 fix 2: the code is the builtin "ZeroDivisionError", like
+  // the Python target's native `/` — not the codeless class.
+  throwsCode(() => rt.fdiv(1.0, 0.0), "ZeroDivisionError");
+  throwsCode(() => rt.fdiv(0.0, 0.0), "ZeroDivisionError");
+  throwsCode(() => rt.fdiv(1.0, -0.0), "ZeroDivisionError");
 });
 
 // ---------------------------------------------------------------- round (exact value)
