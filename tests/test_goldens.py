@@ -11,7 +11,8 @@ import difflib
 import unittest
 from pathlib import Path
 
-from conformance.run import GOLDENS, GOLDEN_DIR, ROOT, _build_to_temp
+from conformance.run import (GOLDENS, GOLDENS_JS, GOLDEN_DIR,
+                             GOLDEN_DIR_JS, ROOT, _build_to_temp)
 
 
 class TestGoldens(unittest.TestCase):
@@ -26,6 +27,36 @@ class TestGoldens(unittest.TestCase):
                                     f"golden {golden} is missing — "
                                     f"run `python3 conformance/run.py "
                                     f"--bless --only {name}`")
+                    expected = golden.read_text(encoding="utf-8")
+                    actual = built[out]
+                    if actual != expected:
+                        diff = "".join(difflib.unified_diff(
+                            expected.splitlines(keepends=True),
+                            actual.splitlines(keepends=True),
+                            fromfile=f"golden {out}",
+                            tofile=f"emitted {out}"))
+                        self.fail(f"golden {out} is stale:\n{diff}")
+
+
+class TestGoldensJs(unittest.TestCase):
+    """The JS twins (M3): same sources, `.js` outputs, compare-only.
+
+    Regeneration needs an explicit
+    `python3 conformance/run.py --bless --target js [--only <name>]`;
+    never hand-edit a golden.
+    """
+
+    def test_goldens_js_match_emitted_output(self):
+        for name in sorted(GOLDENS_JS):
+            with self.subTest(golden=name):
+                source, outputs = GOLDENS_JS[name]
+                built = _build_to_temp(Path(source), target="js")
+                for out in outputs:
+                    golden = GOLDEN_DIR_JS / out
+                    self.assertTrue(golden.is_file(),
+                                    f"golden {golden} is missing — "
+                                    f"run `python3 conformance/run.py "
+                                    f"--bless --target js --only {name}`")
                     expected = golden.read_text(encoding="utf-8")
                     actual = built[out]
                     if actual != expected:

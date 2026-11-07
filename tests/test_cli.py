@@ -141,11 +141,9 @@ class TestBuild(unittest.TestCase):
             self.assertTrue(out.is_file())
 
     def test_build_js_target_is_exit_1(self):
-        with tempfile.TemporaryDirectory() as d:
-            f = write(d, "hello.newr", 'print "Hello, world!"\n')
-            r = run_cli("build", "--target", "js", str(f))
-            self.assertEqual(r.returncode, 1)
-            self.assertIn("M3", r.stderr)
+        # M3: `--target js` now EMITS (the M2 refusal is obsolete).
+        # This test is replaced by TestBuildJs below.
+        raise unittest.SkipTest("M2-only; replaced by TestBuildJs")
 
     def test_build_fast_emit_is_exit_1(self):
         # D27: --fast + emission is refused (emission needs checked
@@ -213,6 +211,104 @@ class TestBuild(unittest.TestCase):
             fast = run_cli("build", "--fast", "--check", str(f))
             self.assertEqual(fast.returncode, 0, fast.stdout + fast.stderr)
             self.assertIn("not verified", fast.stderr)
+
+
+class TestBuildJs(unittest.TestCase):
+    """`newr build --target js` (M3): same contract as the Python
+    target — emit, -o, --check, --fast refusal, exit-4 on errors."""
+
+    def test_build_js_emits_js_next_to_input_and_runs(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", "--target", "js", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            out = Path(d) / "hello.js"
+            self.assertTrue(out.is_file())
+            self.assertIn("Hello, world!", out.read_text(encoding="utf-8"))
+            run = subprocess.run(["node", str(out)],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(run.stdout, "Hello, world!\n")
+
+    def test_build_js_output_flag(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            out = Path(d) / "sub" / "greeting.js"
+            r = run_cli("build", "--target", "js", str(f), "-o", str(out))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue(out.is_file())
+
+    def test_build_js_copies_runtime_when_used(self):
+        with tempfile.TemporaryDirectory() as d:
+            # int arithmetic needs the checked helpers (uses_rt).
+            f = write(d, "calc.newr",
+                      "let x: int = 2 + 3\nprint x\n")
+            r = run_cli("build", "--target", "js", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue((Path(d) / "newr_rt.js").is_file())
+            run = subprocess.run(["node", str(Path(d) / "calc.js")],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.stdout, "5\n")
+
+    def test_build_js_no_runtime_when_unused(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", "--target", "js", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertFalse((Path(d) / "newr_rt.js").exists())
+
+    def test_build_js_file_import_emits_both_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "items.newr",
+                  'pub fn price(item: str) -> int:\n'
+                  '  if item == "brick":\n'
+                  '    return 118\n'
+                  '  return 0\n')
+            f = write(d, "main.newr",
+                      'import "items.newr"\nprint items.price("brick")\n')
+            r = run_cli("build", "--target", "js", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue((Path(d) / "main.js").is_file())
+            self.assertTrue((Path(d) / "items.js").is_file())
+            run = subprocess.run(["node", str(Path(d) / "main.js")],
+                                 capture_output=True, text=True, cwd=d)
+            self.assertEqual(run.stdout, "118\n", run.stderr)
+
+    def test_build_js_type_error_exits_4_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "bad.newr", "let x: float = 5\nprint x\n")
+            r = run_cli("build", "--target", "js", str(f))
+            self.assertEqual(r.returncode, 4)
+            self.assertFalse((Path(d) / "bad.js").exists())
+
+    def test_build_js_fast_emit_is_exit_1(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", "--target", "js", "--fast", str(f))
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("--fast", r.stderr)
+
+    def test_build_js_check_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", "--target", "js", "--check", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertFalse((Path(d) / "hello.js").exists())
+
+    def test_build_js_bot_also_writes_deploy_file(self):
+        # The standalone registration script rides along for bots.
+        src = (ROOT / "examples" / "hello_bot.newr").read_text(
+            encoding="utf-8")
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello_bot.newr", src)
+            r = run_cli("build", "--target", "js", str(f))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue((Path(d) / "hello_bot.js").is_file())
+            self.assertTrue((Path(d) / "hello_bot_deploy.js").is_file())
+            check = subprocess.run(
+                ["node", "--check", str(Path(d) / "hello_bot_deploy.js")],
+                capture_output=True, text=True)
+            self.assertEqual(check.returncode, 0, check.stderr)
 
 
 class TestMachineOutput(unittest.TestCase):

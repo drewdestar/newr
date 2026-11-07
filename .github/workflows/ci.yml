@@ -19,9 +19,9 @@
 #   per runner would not prove cross-OS portability at all.)
 #
 # Per-target emitter jobs: the Python emitter job (python-emitter)
-# landed in M2. The JS emitter job lands in M3 with its own job,
-# and a failure in one target's job never blocks another target's
-# release.
+# landed in M2, the JavaScript emitter job (js-emitter) in M3, each
+# with its own job; a failure in one target's job never blocks
+# another target's release.
 
 name: CI
 
@@ -280,3 +280,92 @@ jobs:
       # now (compare-only; regeneration needs --bless, never by hand).
       - name: Golden comparison
         run: python -m unittest tests.test_goldens -v
+
+  # M3: the JavaScript emitter job. One job per target; a failure
+  # here never blocks the other targets' jobs, and vice versa.
+  # Node 24 is the floor (node:sqlite is built in from 24; J9/J10).
+  # Python is still needed — the compiler itself is Python, and
+  # the full suite includes the Python emitter tests too.
+  js-emitter:
+    name: js emitter (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: ["24"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes. The JS bot tests use the in-repo
+      # mock discord.js (tests/js/mocks) — no npm install needed
+      # for the suite — but the example runs below load the emitted
+      # bot against REAL discord.js, so it is installed here.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Install discord.js 14.28.1 (for the example runs)
+        run: npm install --no-save --prefix "${{ runner.temp }}/djs" discord.js@14.28.1
+
+      - name: Full test suite (incl. JS emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target js`, runs the emitted JS under Node, and requires
+      # a PASS verdict from each.
+      - name: Conformance corpus (JS)
+        run: python conformance/run.py --target js
+
+      # Build every example and run the emitted JS. The bots
+      # (hello_bot, showcase, shop) stop at the DISCORD_TOKEN guard
+      # when no token is set: exit 1 with the token message — that
+      # is the expected behaviour here, and it proves the emitted
+      # bot got far enough to run its main(). NODE_PATH points at
+      # the real discord.js installed above (the emitted bot
+      # requires it at load time).
+      - name: Build + run the examples (JS)
+        shell: bash
+        env:
+          NODE_PATH: ${{ runner.temp }}/djs/node_modules
+        run: |
+          python newr build --target js examples/hello.newr -o hello_out.js
+          node hello_out.js
+          python newr build --target js examples/shop.newr -o shop_out.js
+          node --check shop_out.js shop_items.js shop_deploy.js newr_rt.js
+          if node shop_out.js 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target js examples/hello_bot.newr -o hello_bot_out.js
+          if node hello_bot_out.js 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target js examples/showcase.newr -o showcase_out.js
+          if node showcase_out.js 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M3 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (JS)
+        run: python -m unittest tests.test_goldens.TestGoldensJs -v

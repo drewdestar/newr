@@ -2051,3 +2051,382 @@ later round rather than risking the verified template here.
   `ok/method_as_value.newr`,
   `err/call_nullable_fn_value.newr`). **Not pushed** — chie
   reviews and pushes.
+
+## 17. M3 — JavaScript emitter (7 Nov 2026)
+
+M3 builds `newr build --target js`: a readable-JavaScript emitter
+(CommonJS), the `newr_rt.js` checked-int runtime, per-target goldens
+in `goldens/js/`, the same 71-program conformance corpus running
+under Node, and honest benchmarks B1–B8 for JS. Research handoff:
+the discord.js survey (`/tmp/djs-survey.md`, 293 lines — the
+starter track's verified patterns: `Client` + `GatewayIntentBits`,
+`client.once(Events.ClientReady)`, `InteractionCreate` dispatch with
+`commandMap`, `MessageFlags.Ephemeral`, standalone REST `put`
+registration, `ActionRowBuilder`/`ButtonBuilder` collectors,
+`ModalBuilder`, `EmbedBuilder`; no `tasks.loop` equivalent — plain
+`setInterval` is a Node inference, not a track pattern; no `_t`
+helper exists in the track — M1 is English-only).
+
+Baseline at M3 start: suite **685 green** (re-evaluation of
+`127e941` CLEAN, 06:11 WIB 7 Nov 2026), conformance 71 ok + 26 err,
+repo `drewdestar/newr` at commit `127e941`.
+
+### 17.1 The 13 JS decisions — decided before coding (J1–J13)
+
+| # | Question | Decision (M3) | Reason |
+|---|---|---|---|
+| J1 | Module system | **CommonJS** (`require` / `module.exports`). `"use strict";` first line after the header. | `node file.js` just works with no package.json; discord.js 14 and node:sqlite are both require-able. No top-level await (all awaits inside async fns, as in Python). |
+| J2 | int64 in JS | **BigInt.** Every int literal `123n`; all int arithmetic via rt helpers (`add`/`sub`/`mul`/`neg`/`powInt`/`tdiv`/`tmod`/`checkInt`). Floats are JS numbers. Mixed int/float ops are checker-rejected. | JS numbers are f64 — they cannot represent int64 exactly above 2^53 and cannot throw on overflow. BigInt is the only exact representation; the cost is measured honestly in B6 (generated/plain 1.22, generated/checked-hand-written 1.09 — the gap is the BigInt price, §17.7). |
+| J3 | `round()` half-away | **Exact via BigInt decimal expansion** (no Decimal in JS). Same P2 semantics incl. `round(2.675, 2) = 2.67`. | JS has no Decimal; the float's exact binary value is expanded to decimal digits with BigInt, then rounded half-up on the exact value. |
+| J4 | Float rendering | **Python `repr()` semantics** via the `floatStr` helper: shortest round-trip digits, exponent iff exp < -4 or >= 16, ".0" suffix for integral floats, "0.0"/"-0.0" for zero. Used by `toStr` AND by print/interp of float values. | Bare JS `String(x)` differs (e.g. `1e+21` vs Python `1e+21` — same here, but `1e-7` vs `1e-07`, and no ".0" suffix). Conformance pins the Python spellings. |
+| J5 | `str()` rendering | **Via `toStr` (P8)**, same spellings as Python: `"true"`/`"false"`/`"none"`, structs `"Point(x: 1, y: 2)"`, enums `"Color.Red"`, collections recursively with bare strings. | Same reason as P8 — bare JS rendering gives the wrong spellings. |
+| J6 | Collections | **list → Array (reference semantics, P12), dict → Map (insertion order, str keys), set → Set.** Structural `==` via rt `eq()` (deep, order-insensitive for dict, unordered for set). **Known limitation: sets/dicts keyed by value types (struct/enum) use identity in JS — Python hashes by value; no conformance program covers it.** | JS has no value-keyed Map/Set. The limitation is documented, not hidden; a value-keyed wrapper is v1.1 work if a program ever needs it. |
+| J7 | `?.` / `??` | **Via `optChain`/`coalesce` helpers**, same D9 shape (one optChain per optional link, §16 segment splitting ported exactly from the Python emitter, incl. `_in_lambda_link_type`/`_rebase`). | JS `?.`/`??` look similar but do not short-circuit the whole postfix chain the way SPEC §9.2 promises (the §15.8 hole-1 guard). The helpers carry the exact segment semantics. |
+| J8 | Lambda capture | **Capture by value via IIFE snapshot:** `((_s0) => (params) => body)(v0)` for expr bodies; block bodies hoisted to `const _newr_fn_N = ((_s0) => (params) => {...})(v0)`. | Python's default-arg snapshot trick does NOT work in JS — default params evaluate at call time and refer to the parameter itself. The IIFE binds the snapshot at creation time. |
+| J9 | Store / economy | **node:sqlite (built into Node 24, zero deps), synchronous API.** No lock (single-threaded sync execution is atomic per op); explicit `BEGIN IMMEDIATE ... COMMIT` per op for crash atomicity; same ledger+balance, idempotency-key replay, amount-based heal-on-retry as Python. DB file `<store>.db` next to the emitted `.js`. Methods stay `async` (shape parity with Python). **Int columns stored as TEXT** (node:sqlite returns JS numbers and throws above 2^53 — verified live: insert of `9007199254740993n` and `SELECT 9223372036854775807n` both throw `RangeError`); balance arithmetic in JS with BigInt + checkInt; conversion at the boundary. `PRAGMA busy_timeout = 5000`. **Ledger read for heal: `SELECT amount FROM ledger WHERE key = ?` summed in JS (not SQL SUM) for exactness.** Transfer-leg upserts computed in JS (BigInt) then UPDATE/INSERT — never SQLite `amount + excluded.amount` on TEXT. | better-sqlite3 was the alternative (sync, but a native addon — and its Node 24 prebuild is missing on this VM, see the discord.js track note). node:sqlite is built into Node 24, so the emitted bot has zero npm dependencies besides discord.js itself. |
+| J10 | discord module | **discord.js 14.28.1, Node ≥ 24.17.0.** Bot shape: `class Bot extends Client`, commands as data (`SlashCommandBuilder` + handler map), `InteractionCreate` dispatcher, collector-based components, `setInterval` tasks, `client.login(token)` with DISCORD_TOKEN guard (same message as Python). Intents via `GatewayIntentBits`. **Registration: separate `<stem>_deploy.js` file with REST `put` (track-faithful; never on ready). `_t` helper: self-contained lookup over the emitted STRINGS (not i18next — no package.json dependency); fallback exact locale → base language → default → key; placeholders via `toStr`.** | Follows the surveyed starter track exactly where it speaks, and extrapolates only where it is silent (option getters beyond `addStringOption`, `GuildMemberAdd`/`MessageCreate` handlers, `setInterval` loops, embed setters beyond title/description/fields — all flagged as extrapolations in the survey). |
+| J11 | `print` | **rt `print(...)` helper** (`console.log(args.map(toStr).join(" "))`; single-string arg prints literally, no %-formatting). **Amended during M3:** when every argument is already a JS string (or there are no arguments), emit bare `console.log(...)` with no runtime import. | The amendment resolves the hello golden: `print("Hello, world!")` imports no runtime on either target (the Python hello golden also imports no runtime). |
+| J12 | `log` | **General programs and bots: `console.info`/`warn`/`error`** (stderr, no timestamp — documented difference from Python's logging format). | No logging library in the emitted code; the timestamp difference from Python's `logging` format is a documented drift, not a bug. |
+| J13 | Strict mode | **`"use strict";` as the first line after the header** in emitted files. | Catches duplicate params and accidental globals; emitted code uses no `this` outside classes. |
+
+Further JS traps pinned (all verified by tests, not assumed):
+`==`/`!=` → `eq(a, b)` for list/dict/set/struct/enum/Result,
+`===`/`!==` for primitives/fn/entity; `<` etc. bare (BigInt/number/
+str work; str comparison is UTF-16 code units in JS vs code points
+in Python — documented drift for astral characters); `in` by right
+type (str → `.includes`, list → rt `listContains` structural,
+set/dict → `.has`); unary minus before `**` must parenthesise (JS
+SyntaxError); `not` operand parenthesised when not a primary
+(`!a == b` is `(!a) == b` in JS); struct construction positional in
+declared field order (`new Point(1, 2)` — JS has no kwargs); enums
+as variant classes with `_newrRepr`; file modules export pub names
+via `module.exports` (getters for pub lets/consts to preserve live
+reads); top-level `return` → `process.exit(0)`; JS block scope
+means no Python-style rename-on-shadow for locals (still mangle
+keywords/reserved + rt/discord.js names); `env.args` =
+`process.argv.slice(1)` (matches Python `sys.argv` incl. program
+name at index 0); `math.floor`/`ceil` → `toInt(Math.floor(x))`
+(avoids TypeError on Infinity); `random.int` inclusive via crypto
+rejection sampling; `input()` via byte-by-byte sync stdin read;
+`try` statement → `try`/`catch` with `asError`; match → if/elif
+chain with temp + `else throw NewrError("non-exhaustive match")`;
+contracts via explicit checks raising NewrError (D5); `throw "msg"`
+→ `throw new NewrError(msg)`; file-IO error codes are host-specific
+(JS `"ENOENT"` vs Python `"FileNotFoundError"` — documented drift).
+
+Bot emitter details (J10): the `commands` array is opened by the
+first command and closed by `_close_commands()`; option bindings at
+the top of `execute` (int options → `BigInt(interaction.options.
+getInteger("name", true))` or `?? default`; optional-without-default
+→ temp + null check); the author/roles gate lives in the per-answer
+'collect' callback (the shared handler is module-level and cannot
+see the invoking interaction); on_timeout bodies are emitted at
+indent 0 and re-indented into the collector's 'end' callback; the
+deploy file requires the bot file for `commands` (`main()` is
+guarded by `require.main === module`, so requiring it does not run
+main); the bot file exports `{ bot, commands, commandMap,
+componentHandlers }` for testability. `ComponentType` is used by
+the collector code and must be in the discord.js require (caught
+by the bot tests — the mock initially lacked it too).
+
+### 17.2 What was built (file list)
+
+- `compiler/newr_rt.js` (976 lines, 28,338 bytes) — the JS runtime:
+  checked BigInt arithmetic (`add`/`sub`/`mul`/`neg`/`powInt`/
+  `tdiv`/`tmod`/`checkInt`), float helpers (`floatStr` Python-repr
+  rendering, `roundHalfAway` exact BigInt decimal expansion,
+  `powFloat`/`fmod`/`fdiv` with by-zero errors), conversions
+  (`toInt`/`toFloat`/`toBool`/`toStr`), `Result`/`Option` helpers,
+  `eq`/`optChain`/`coalesce`/`listIndex`/`listGet`/`listContains`/
+  `setRemove`/`unwrapOpt`/`range`/`print`/`input`, `NewrError` +
+  `NewrOverflowError` + `NewrDivisionByZeroError` + `codedError` +
+  `asError`, `timeFormat` (UTC, SPEC §12 fixed format set),
+  `file` helpers, `random` helpers.
+- `compiler/emitter_js.py` (4,542 lines) — the JS emitter:
+  header/helpers/scopes/imports/hoists; expression printer; lambdas/
+  collectors/match/propagate/module calls/store calls/`t`-call/embed/
+  log; statements/fn/struct/enum/file assembly/entry; the bot
+  emitter (commands, events, tasks, dispatch, channel text, main,
+  exports, reply/defer/edit/followup/send, buttons/selects/modals,
+  store/economy/table methods, strings, deploy file); `emit()` entry,
+  `emit_program_js` / `emit_program` / `emit_deploy`.
+- `compiler/cli.py` — `newr build --target js` (default stays py),
+  `-o`, `--line-comments`, `--check`, `--fast` refusal, emitter
+  errors → clean exit-4 E4001 (same contract as M2). Copies
+  `compiler/newr_rt.js` next to the output when `uses_rt`; also
+  copies the `<stem>_deploy.js` for bot programs.
+- `conformance/run.py` — `--target js` (build + run under Node,
+  same PASS contract) and `--bless --target js` (goldens/js/).
+- `goldens/js/` (7 files) — hello (188 B), hello_bot (3,474 B),
+  hello_bot_deploy (1,102 B), showcase (4,264 B), shop (15,018 B),
+  shop_items (338 B), shop_deploy (1,087 B). Compare-only by
+  default; regeneration only via explicit `--bless` after a
+  line-by-line diff review. Never hand-edited.
+- `tests/test_emitter_js.py` (83 tests), `tests/test_emitter_js_bot.py`
+  (40 tests), `tests/test_newr_rt_js.py` (1 test driving
+  `tests/js/rt_tests.js`, 61 Node checks), `tests/js/mocks/discord.js`
+  (mock discord.js — only the API surface the emitted code touches,
+  no network), `tests/js/bot-driver-lib.js` (fake interactions/
+  messages/members/collectors), `tests/test_cli.py` (+9 TestBuildJs),
+  `tests/test_conformance.py` (+1 JS run), `tests/test_goldens.py`
+  (+1 TestGoldensJs).
+- `benchmarks/run_js.py`, `benchmarks/handwritten/{hello,loop_plain,
+  loop_checked,shop_economy}.js`, `benchmarks/generated/{loop.js,
+  shop_economy.js,newr_rt.js}`, `benchmarks/raw/*_js.json` (11 files).
+  (`benchmarks/generated/newr_rt.js` is a byte-identical copy of
+  `compiler/newr_rt.js` for the checked loop — the same snapshot
+  arrangement as the Python `benchmarks/generated/newr_rt.py`; it
+  drifts if the runtime changes and must be re-copied then.)
+- `.github/workflows/ci.yml` — new `js-emitter` job (ubuntu/macos/
+  windows × Node 24; installs real discord.js 14.28.1 for the
+  example runs, `NODE_PATH` at `${{ runner.temp }}/djs/node_modules`).
+- `BENCHMARKS.md` — M3 section appended (M2 section preserved).
+
+### 17.3 Test results
+
+- Full suite, system Python:
+  `python3 -m unittest discover -s tests -p "test_*.py"` →
+  **Ran 820 tests in 70.6 s — OK (skipped=13)**.
+- Full suite, fresh venv (discord.py 2.7.1 + aiosqlite):
+  `python3 -m venv /tmp/m3-venv --clear`,
+  `/tmp/m3-venv/bin/pip install -q discord.py==2.7.1 aiosqlite`,
+  `/tmp/m3-venv/bin/python -m unittest discover -s tests -p "test_*.py"`
+  → **Ran 820 tests in 68.4 s — OK (skipped=2)**.
+- Baseline 685 + **135 new M3 tests** (83 JS emitter + 40 JS bot +
+  1 rt driver + 9 CLI JS + 1 conformance JS + 1 goldens JS). The
+  13 system skips are the 12 baseline skips + the retired
+  `test_build_js_target_is_exit_1` (M2 refusal, now a skip — the
+  behaviour it pinned is replaced by TestBuildJs).
+- `goldens/py/` byte-identical (`git diff --stat -- goldens/py/`
+  empty; `tests/test_goldens.py` passes for both targets).
+- Conformance JS: `python3 conformance/run.py --target js` →
+  **71 ok, 0 fail** (same 71 programs as Python). The 26 err
+  programs still fail at check with the same codes (front end
+  shared; `tests/test_conformance.py` covers both targets).
+- Runtime checks: `node tests/js/rt_tests.js` → **61 checks passed**.
+- CLI (live, `/tmp/jscli`): `newr build hello.newr --target js` →
+  `hello.js` written, `node hello.js` prints `Hello, world!`;
+  `newr build shop.newr --target js` → `shop.js`, `shop_items.js`,
+  `shop_deploy.js`, `newr_rt.js`, all `node --check` clean;
+  `NODE_PATH=tests/js/mocks node -e "require('./shop.js')"` loads,
+  `commandMap` has ping/buy/balance; `--check` writes nothing,
+  exit 0; `--fast` refused exit 1; `-o` writes to the given path.
+- Shop golden live (mock discord.js + real node:sqlite):
+  `bot.setup()` then `/buy brick` → `Not enough gold — brick
+  costs 118, you have 0.`; `/balance` → `Balance: 0 gold.`;
+  `economy.db` created. (An earlier ad-hoc run without `setup()`
+  failed with `Cannot read properties of null (reading 'prepare')`
+  — the store opens in `setup()`, as in Python; the test drivers
+  call it, my script did not. Not an emitter bug.)
+
+### 17.4 Bugs found and fixed during M3 (all TDD, one red-check each)
+
+1. **Result methods emitted as properties/fields — WRONG.** The
+   runtime Result has METHODS `isOk()`, `isErr()`, `unwrap()`,
+   `unwrapOr(dflt)` and stores the value in `_value` (not `.value`).
+   Fixed `is_ok` → `{obj}.isOk()`, `is_err` → `{obj}.isErr()`,
+   `unwrap` → `{obj}.unwrap()`, `unwrap_or` → `{obj}.unwrapOr(arg)`.
+   Red-check: reverting the fix → 3/3 tests fail
+   (`test_try_expr`, `test_result_propagate`,
+   `test_result_unwrap_in_chain`); restored OK.
+2. **Float `/` by zero did not throw (P6).** JS `/` gives
+   Infinity/NaN. Added `fdiv(a, b)` to `newr_rt.js` (throws
+   `NewrDivisionByZeroError` when `b === 0`, covering -0) + export
+   + 2 rt checks + emitter wiring (`/` on floats → `fdiv(...)`).
+   Red-check: reverting the `fdiv` wiring →
+   `test_float_division_by_zero_throws` fails; restored OK, 82/82
+   green again.
+3. **`_attach_components` never created the collector** (buttons
+   would be dead). Rewrote its tail — always captures the message
+   (fetchReply for replies; rewrite the answer line for
+   followup/edit/system_channel/message_channel; uses the ctx
+   message_var for timeout_edit), creates
+   `createMessageComponentCollector` (`ComponentType.Button` /
+   `StringSelect` / omitted when mixed; `time` = max timeout),
+   'collect' callback with per-component `only:` gates (author/
+   roles, scoped by customId) + routing to `componentHandlers`,
+   'end' callback (only when a component has on_timeout) that
+   disables all rows' children, edits the message, then runs each
+   on_timeout body. `_emit_button`/`_emit_select` now emit
+   on_timeout bodies at indent 0 and import `ActionRowBuilder`
+   (was missing). Caught by the bot mock round-trip tests.
+4. **Error-class `e.code` diverged from Python (conformance
+   `try_catch.newr` failed: 70/71).** Python's
+   `NewrDivisionByZeroError`/`NewrOverflowError` are NewrError
+   subclasses constructed WITHOUT a code, so a newr `catch e:`
+   sees `e.code == none`; my JS subclasses set `"ZeroDivisionError"`
+   / `"OverflowError"`. Fixed: both classes now carry code `null`
+   (told by `name`, not `code`); the four sites where Python
+   raises the BUILTIN instead (`powFloat(0, -1)`,
+   `round(inf)` ndigits=None, `toInt(inf)`, `toFloat(huge int)`)
+   now throw `codedError("ZeroDivisionError"/"OverflowError", ...)`
+   to match exactly. New `throwsNamed` helper in `rt_tests.js`
+   pins name + null code; the builtin sites stay on `throwsCode`.
+   Red-check: backup `/tmp/newr_rt.fixed.js`, sha256
+   `fe9a1297e6c417a637847c185a0b4d1f5fd3ed611a5722beb0c8031ead1f5316`;
+   reverting the two constructors → rt tests fail AND try_catch
+   prints FAIL; restored sha256-identical → 61 checks pass,
+   try_catch prints PASS, conformance 71/71.
+5. **Deploy-file header named the wrong source.**
+   `_emit_deploy_file` passed `f"{stem}_deploy.js"` to `_header`,
+   so the golden read "Generated by newr from
+   hello_bot_deploy.js". Fixed to `self.main_path` (the .newr
+   source). New test `test_deploy_file_header_names_the_source`.
+   Red-check: backup sha256
+   `0bf61854e58219b8ecba3e742c00b4ede2fac28807ce26863db8bb8acfae1e45`
+   (emitter_js.py); revert → test fails; restored
+   sha256-identical → test passes.
+6. **A file module's text depended on whether it was main or
+   import.** Only imports got a `module.exports` block, so
+   `shop_items.js` built from `shop.newr` (with exports) differed
+   from the same file built from `shop_items.newr` (without) and
+   the golden test failed. Fixed: every file with `pub` names
+   gets the exports block in BOTH roles (a no-op when there are
+   no pub names; harmless when the main file runs directly).
+   New test `test_file_module_exports_same_as_main`. Red-check:
+   backup sha256
+   `8a930ea3393bfbcc5b1947a452d5f1d13b7ceca560c36a64170be40907d2b979`;
+   revert → test errors (the revert reintroduced the removed
+   `is_main` parameter reference — a NameError, not the original
+   assertion; the substance is proven: without the unconditional
+   exports line the test fails); restored sha256-identical → test
+   passes, goldens green.
+7. **`componentHandlers` exported but never defined** when a bot
+   has no components (`ReferenceError: componentHandlers is not
+   defined` in hello_bot). Fixed: the map is always emitted
+   (possibly empty). Caught by the bot mock round-trip tests.
+8. **Option min/max:** `setMinValue(1n)` is invalid — Discord
+   takes JS numbers. Added `_emit_option_bound` (int literal →
+   digits; other int exprs → `Number(...)`).
+
+Structural fixes during the build (no separate red-checks — they
+were caught by the suite going red, fixed, suite green):
+chunk 5 of the emitter was appended inside `emit_program_js` as
+unreachable code after its `return` (moved into the `_JSEmitter`
+class); duplicate nested `def emit` dropped (`_emit_one` already
+dispatches); duplicate `_emit_embed_lines` reconciled to one
+canonical version; module-level `emit_js`/`emit_deploy` fixed to
+use `_JSEmitter`; added `emit_program = emit_program_js` alias;
+`program.is_bot` does not exist — fixed to
+`program.bot is not None` (3 sites); `_answer_call` did not know
+the `"interaction"` reply kind (mapped to `"reply"`); `list.len` /
+builtin `len` returned JS numbers, not BigInt (fixed to
+`BigInt(...)`); `ComponentType` + `StringSelectMenuOptionBuilder`
+missing from `_DISCORD_JS` (name-mangling set) and `ComponentType`
+missing from the test mock.
+
+Test-source corrections (with evidence, not emitter changes):
+`test_unary_minus_power` (checker rejects `float ** int`, E2001);
+`test_template_literal_escapes` (`${x}` is an interpolation of
+undefined `x`, E3001 — the literal form is `${{x}}`);
+`test_backslash_join` (source had one backslash, not two);
+`test_time` (`str` has no `.len()` method, E3001);
+bot-test sources needed a `description:` under bare `bot "B":`
+(an empty bot block is E1001), events are top-level (not inside
+the bot block), `reply:` sugar works only directly under a
+command/event (inside `do:` it is `reply "..."`), message events
+answer with `send` not `reply` (E2008), commands must end in a
+reply (E2010), plain strings emit double-quoted not backticked.
+
+### 17.5 Benchmarks (M3, full run — `python3 benchmarks/run_js.py`)
+
+Machine: Linux x86_64, Python 3.12.3, Node v24.22.1, hyperfine
+1.19.0. Raw JSONs in `benchmarks/raw/*_js.json`.
+
+| # | Generated | Hand-written | Ratio |
+|---|---|---|---|
+| B1 compile cold hello | 125.2 ms ± 17.5 (N=10) | — | — |
+| B1 compile cold shop | 142.0 ms ± 4.0 (N=10) | — | — |
+| B2 compile warm hello | 125.0 ms ± 22.9 (N=20) | — | — |
+| B2 compile warm shop (1 file changed) | 148.0 ms ± 13.2 (N=20) | — | — |
+| B4 hello size | 188 B, 6 lines | 285 B, 8 lines | **0.66** |
+| B4 loop size | 388 B, 14 lines | 562 B, 17 lines | **0.69** |
+| B5 startup hello | 86.1 ms ± 5.5 (N=10) | 89.3 ms ± 11.3 | **0.96** |
+| B6 loop 100k (checked, BigInt) | 107.9 ms ± 27.4 (N=10) | plain numbers 88.4 ms ± 9.7 | **1.22** |
+| B6 loop vs checked hand-written | 107.9 ms | 98.8 ms ± 6.4 | **1.09** |
+| B6b shop economy 1,000 credits | 203.9 ms ± 25.7 (N=10) | 228.4 ms ± 55.2 | **0.89** |
+| B7 peak RSS compile (shop) | 17.9 MB | — | — |
+| B7 peak RSS run (hello, node) | 61.2 MB | — | — |
+
+(All three loop versions print the same checksum, 105003. Both
+shop economy drivers print the final balance 1000.)
+
+Honest flags (same rule as M2's B3): **B6 generated/plain 1.22
+is just over the 1.20 proposal threshold — flagged, not hidden.**
+It is the BigInt price of int64 exactness in JS (J2): the
+generated code is within noise of hand-written code using the
+same checked helpers (1.09), and the generated mean has high
+variance (±27.4 ms, one run at 182.7 ms). The plain-number loop
+is not a fair target — it cannot represent int64 at all. B7 run
+61.2 MB is Node's V8 baseline, not the program (Python's run is
+11.1 MB for the same hello; the compile figure 17.9 MB is the
+same Python compiler as M2). B6b's discord.js import is satisfied
+by the in-repo mock, not real discord.js 14.28.1: both drivers
+pay the same small mock require cost, so the ratio is honest but
+the absolute times understate a real discord.js import. B1/B2
+measure the same Python compiler as M2 (125.2/142.0 ms vs M2's
+127.1/165.5 ms) — the JS emitter is not slower than the Python
+emitter at compile time.
+
+### 17.6 CI
+
+New `js-emitter` job in `.github/workflows/ci.yml`
+(ubuntu/macos/windows × Node 24): set up Python 3.12 + Node 24,
+install discord.py 2.7.1 + aiosqlite (the full suite includes the
+Python bot tests), install real discord.js 14.28.1 via
+`npm install --no-save --prefix "${{ runner.temp }}/djs"`
+(verified live: installs in ~10 s, version 14.28.1), full suite,
+`python conformance/run.py --target js`, build + run the examples
+under Node (hello prints `Hello, world!`; shop/hello_bot/showcase
+reach the DISCORD_TOKEN guard — verified live with real
+discord.js), JS golden comparison. YAML validated
+(`yaml.safe_load` — 7 jobs incl. `js-emitter`, 9 steps).
+
+### 17.7 UNVERIFIED items (M3)
+
+- **CI has never run** — the `js-emitter` job is written and its
+  steps are simulated locally, but Windows/macOS execution stays
+  UNVERIFIED until green on all three OSes (same standing note
+  as M2; the matrix exists, the runs do not).
+- **No live Discord bot has connected yet (P-42)** — the emitted
+  bots reach the DISCORD_TOKEN guard under real discord.js
+  14.28.1, and the mock round-trip tests drive commands/events/
+  components/store end to end, but no real Discord call was made.
+  A live guild + token is still needed for P-42.
+- **Sets/dicts keyed by value types (struct/enum)** use identity
+  in JS where Python hashes by value (J6 limitation). No
+  conformance program covers it.
+- **Str comparison for astral characters** is UTF-16 code units
+  in JS vs code points in Python (documented drift).
+- **File-IO error codes** are host-specific (JS `"ENOENT"` vs
+  Python `"FileNotFoundError"`).
+- **`log` timestamps**: JS emits bare `console.info/warn/error`
+  (no timestamp) where Python's logging format has one (J12).
+- **B6b absolute times** understate a real discord.js import
+  (mock stand-in — see §17.5).
+- **The `benchmarks/generated/newr_rt.js` snapshot** drifts if
+  `compiler/newr_rt.js` changes (same arrangement as the Python
+  twin; re-copy on runtime changes).
+- **discord.js option getters beyond the track**: `addIntegerOption`
+  / `getInteger` etc. follow the identical chaining pattern but
+  are not shown verbatim in the surveyed track (extrapolation,
+  flagged in the survey); the emitted shop exercises
+  `getString`/`getInteger` against the mock, not the real library.
+
+### 17.8 What is NOT in M3 (carried forward)
+
+- SPEC.md needed **no correction** for M3 (the §6 doc-comment note
+  from M2 remains the only post-freeze addition). The §16.4 open
+  item (amount-based debit/credit heal) stays open and
+  non-blocking — the JS store implements the same presence-based
+  replay as Python (§14.1 P11), with the transfer heal
+  amount-based as specified.
+- **Not pushed** — chie reviews and pushes. `git status` at the
+  end of M3: 8 modified files (`.github/workflows/ci.yml`,
+  `BENCHMARKS.md`, `BUILD_REPORT.md`, `compiler/cli.py`,
+  `conformance/run.py`, `tests/test_cli.py`,
+  `tests/test_conformance.py`, `tests/test_goldens.py`;
+  767 insertions, 57 deletions) + 26 new files/dirs (emitter,
+  runtime, goldens/js, tests/js + 3 test files, benchmark
+  fixtures + runner + 11 raw JSONs). No other files touched;
+  `goldens/py/` byte-identical.
