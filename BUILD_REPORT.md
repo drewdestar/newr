@@ -2610,3 +2610,197 @@ Python, 2 in JS; `contains` is structural `eq` on both.
   chie reviews and pushes.
 - Still open (unchanged): §16.4 amount-based debit/credit heal;
   CI matrix never run (Windows/macOS); P-42 live Discord.
+
+## 19. M3 fix round 2 — top-level declarations dropped in bot files (7 Nov 2026)
+
+Second cold re-evaluation (of `a4a9308`) verdict: **NEEDS FIXES — 1
+blocking item**. Both §18 fixes verified genuinely fixed with the
+evaluator's own repros (three-sequential-`?` chain, handler `?` via
+try-expr, all float-div and e.code variants, a 9-case probe over the
+other runtime throw sites with byte-identical py/js output, goldens
+and benchmarks holding). The new item is in the exact shape the fix
+round's own handler test uses — and the fix round 1 handler test was
+structural-only on that shape, which is why it passed while the
+program itself could not run.
+
+### 19.1 The blocking item — bot files silently dropped top-level declarations
+
+A bot file with a top-level `fn div` built exit 0 with no warning on
+both targets, and both outputs contained the call site `div(` once
+but ZERO definitions of `div`. At runtime: JS under Node with the
+repo mock → `ReferenceError: div is not defined`, reply the generic
+"Something went wrong running that command."; Python in a fresh venv
+with a fake interaction → `NameError: name 'div' is not defined`.
+Same for a struct, a top-level `let`, and an enum (`Color_Red`
+referenced but never defined), and a top-level `print` (0
+occurrences in either output). Pre-existing, not introduced by fix
+round 1 (confirmed identical at `fe63ff8`).
+
+Root cause: neither `_emit_bot_file` emitted `program.functions`
+(nor structs, enums, top-level lets, or top-level statements) —
+`compiler/emitter.py:2543` and `compiler/emitter_js.py:3411` emitted
+only the Bot class, commands, tasks, events, error handler,
+`_channel_text`, `main`. `_register_module_scope` registers the
+names so the checker/resolver accepts them, but nothing emitted
+their definitions. SPEC §8 ("declarations … are resolved across
+the whole file"), §8.2 (bot block "position is free among top-level
+items"), and §13.7 ("top-level statements and other declarations
+may appear in the same file as bot blocks") all promise this shape
+works — so the fix EMITS the declarations; the reject-at-check
+alternative would contradict SPEC.
+
+### 19.2 The fix — emit declarations in bot files (both emitters)
+
+In both `_emit_bot_file`s, before the Bot class: structs, then
+enums, then functions (hoisted, as in a general file), then the
+top-level statements in file order — reusing `_emit_struct`,
+`_emit_enum`, `_emit_fn`, `_emit_stmt_with_hoists`. Ordering
+decisions:
+
+- Declarations come after the strings/components in the Python
+  assembly (after the `componentHandlers` map in JS) and before
+  the Bot class.
+- Top-level statements run at module import/load time, before
+  `bot = Bot()` / `const bot = new Bot()` and before `main()`;
+  handlers read the declarations at call time, so the order
+  relative to the Bot class does not matter for handlers.
+- The no-declaration case stays byte-identical: the separator
+  (two blank lines before `class Bot`) is added only when
+  something was emitted. `examples/hello_bot.newr` has no
+  top-level declarations, so no golden changes shape.
+- A struct's `@dataclass` (Python) resolves its string field
+  annotations through `sys.modules` — see the harness note in
+  §19.4.
+
+### 19.3 The guard the fix forced — store calls outside handlers (both emitters)
+
+Emitting declarations naively would have turned two
+checker-accepted programs into unparseable output: a store call
+lowers to a bare `await bot.<store>_<op>(...)`, which is a
+SyntaxError at module level and inside a sync `def` / sync
+lambda. Probing found the hole is live TODAY in already-emitted
+code, not just in the new path: a store call inside a lambda in a
+handler emitted `await` inside a sync lambda on both targets
+(`'await' outside async function` / `await is only valid in async
+functions`), for a program the checker accepts with only a
+warning. SPEC §9.5 says functions "may read `store`" — but a
+sync fn cannot `await`; making store-reading fns async (with
+transitive await at call sites) is a design decision for a later
+milestone, not this fix.
+
+So both `_emit_store_call`s now fail cleanly (E4001, exit 4)
+when the innermost `_fn_ctx` entry is not a handler — i.e. at the
+top level, inside a top-level fn, or inside a lambda:
+
+```
+error[E4001]: cannot emit this program: a store call
+(`economy.balance`) is only possible inside a command, event, or
+task handler — top-level functions and statements run outside the
+bot's async context
+```
+
+The guard covers `balance`/`credit`/`debit`/`transfer`/`get`/`set`/
+`delete` (all seven ops go through the one function). Store calls
+inside command/event/task/component handlers are unaffected — they
+push handler context (`in_handler: True`).
+
+### 19.4 Tests (TDD — failing first, round-trip, not structural)
+
+Shared program `SCOPE_BOT` (in both test files): top-level `fn
+div` (`try a / b`), `struct Pt {x, y}`, `enum Color {Red, Green}`,
+`let greeting: str = "hi"`, `fn make_pt(a) -> Pt`; bot `"Scope"`
+with commands `go` (`div(100,2)?` → `"half is 50"`), `bad`
+(`div(100,0)?` → must bare-return, no reply), `show`
+(`make_pt(3)` → `"hi 3 4"`), `colour` (`Color.Red` equality →
+`"red"`).
+
+- Python `tests/test_emitter_bot.py`,
+  `TestBotMockRoundTrip.test_top_level_declarations_reach_handlers`
+  (real round-trip via `_load_bot_module` + `_FakeInteraction`,
+  asserts all four replies) and
+  `test_top_level_statement_runs_at_import` (execs the emitted
+  module with stdout captured, asserts `"loaded"` appears). RED
+  pre-fix in the fresh venv: `NameError: name 'div' is not
+  defined`; `'loaded' not found in ''`. (Skipped on system Python
+  — no discord.py there.)
+- JS `tests/test_emitter_js_bot.py`,
+  `TestBotMockRoundTrip.test_top_level_declarations_reach_handlers`
+  (via `emit_js_src` + `run_bot_driver`, fires /go, /bad, /show,
+  /colour under the Node mock). RED pre-fix: `AssertionError:
+  'Something went wrong running that command. Try again in a
+  moment.' != 'half is 50'`.
+- Guard tests (both files):
+  `TestBotStore.test_store_call_outside_handler_is_rejected` —
+  asserts `EmitterError` for a store call at the top level, in a
+  top-level fn, and in a lambda inside a handler.
+- Harness fix in `tests/test_emitter_bot.py`: `_load_bot_module`
+  now registers the synthetic module in `sys.modules` before
+  `exec` (restoring the previous entry afterwards). The struct
+  emission exposed a latent harness bug: `@dataclass` with string
+  annotations (`x: "int"`) resolves them via
+  `sys.modules[cls.__module__]`, which was `None` for the
+  unregistered module (`AttributeError: 'NoneType' object has no
+  attribute '__dict__'`). Before §19 no struct was ever emitted in
+  a bot file, so the missing registration never mattered.
+
+Red-checks (one per emitter, sha256-verified): reverted only the
+declarations emission in `compiler/emitter.py` → the Python
+round-trip test failed with `NameError: name 'div' is not
+defined`; restored via edit, hash `fcea82ede1739187532fa5d0689db8
+3c9ec656eceb6f510490311ee0e1f79608` (exact match), test green.
+Reverted only the declarations emission in
+`compiler/emitter_js.py` → the JS round-trip test failed with the
+generic error reply instead of `'half is 50'`; restored, hash
+`e9c9e936cf36457a553e3cea04fa30a2f2c43d03c744ce8b2e6fdf01c303
+2e44` (exact match), test green.
+
+### 19.5 Verification (fix round 2)
+
+- Full suite, system Python: **Ran 829 tests in 71.4 s — OK
+  (skipped=15)**. Full suite, fresh venv
+  (`~/workspace/venvs/newr-fix2`, discord.py 2.7.1 + aiosqlite):
+  **Ran 829 tests in 68.3 s — OK (skipped=2)**. 824 + 5 new
+  (2 round-trip + 1 statement + 2 guard).
+- Conformance: `python3 conformance/run.py --target js` → **72
+  ok, exit 0**; `--target py` → **72 ok, exit 0**. No bot ok
+  program was added, and none can be: the harness builds AND runs
+  every ok program requiring exit 0 + last line `PASS`, and a bot
+  file's `main()` without `DISCORD_TOKEN` exits non-zero on both
+  targets (Python raises `SystemExit("set the DISCORD_TOKEN
+  environment variable")`; JS throws → exit 1). Runtime behaviour
+  of bots is covered by the mock round-trip tests instead.
+- Runtime: `node tests/js/rt_tests.js` → **61 checks passed**.
+- Evaluator repros, after the fix (fresh builds, run live):
+  `c_bot.newr` → py /go `'half is 50'`, /bad `[]` (silent);
+  js /go `'half is 50'`, /bad 0 replies. `d_scope.newr` →
+  `class Pt` / `def make_pt` / `greeting = ` present on both
+  targets. `i_enum.newr` → `Color_Red` defined + used on both
+  targets (4 occurrences py, 3 js). `e_stmt.newr` → the
+  top-level statement prints at module load on both targets
+  (Python import; Node require under the mock).
+- Guard live (CLI, both targets, exit 4 E4001): store call at
+  the top level, in a top-level fn, and in a lambda in a handler
+  all fail cleanly with the §19.3 diagnostic; the lambda case
+  previously produced unparseable output.
+- Goldens untouched: `git diff --stat -- goldens/` empty (the
+  no-declaration case is byte-identical by construction).
+- §18 fixes untouched: the diff to `compiler/emitter.py` /
+  `compiler/emitter_js.py` contains no `isErr` / `._value` /
+  `fdiv` / `ZeroDivisionError` lines; int `1/0` e.code `"none"`
+  unchanged (parity on both sides, not a divergence).
+- Same-drop check: `_emit_bot_file` has exactly one caller per
+  emitter — `_emit_one`, the `_emit_file_set` dispatch — so
+  imported file modules go through the same path (and the
+  resolver rejects bot blocks in imported files anyway, E3006:
+  "a `bot` block must live in the main file"). No other emitter
+  path can drop declarations this way.
+- Changed files: `compiler/emitter.py`,
+  `compiler/emitter_js.py`, `tests/test_emitter_bot.py`,
+  `tests/test_emitter_js_bot.py`, `BUILD_REPORT.md` (§19).
+  **Not pushed** — chie reviews and pushes.
+- Still open (unchanged): §16.4 amount-based debit/credit heal;
+  CI matrix never run (Windows/macOS); P-42 live Discord. New
+  open item from §19.3: async functions — SPEC §9.5 promises a
+  top-level fn "may read `store`", which needs async fn lowering
+  (transitive `await` at call sites) in a later milestone; until
+  then the emitter fails cleanly with E4001.

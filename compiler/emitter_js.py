@@ -2327,9 +2327,23 @@ class _JSEmitter:
                          binding: _Binding) -> tuple[str, int]:
         """`economy.balance(user)` etc. -> `await bot.<store>_<op>(...)`
         (D17/P11, J9). Every mutation takes its idempotency `key:`;
-        the checker enforces that it is present."""
+        the checker enforces that it is present.
+
+        §19 guard (mirrors the Python emitter): the `await` is only
+        valid inside an async handler (command / event / task /
+        component). At the top level, inside a (sync) top-level fn,
+        or inside a lambda there is no async context — emitting the
+        `await` would produce a SyntaxError in the generated file.
+        Fail cleanly instead of emitting unparseable code."""
         store_name = binding.js
         method = node.func.name
+        ctx = self._fn_ctx[-1] if self._fn_ctx else None
+        if ctx is None or not ctx.get("in_handler"):
+            self._fail(
+                f"a store call (`{store_name}.{method}`) is only "
+                "possible inside a command, event, or task handler — "
+                "top-level functions and statements run outside the "
+                "bot's async context")
         key_arg = {name: value for name, value, _span in node.kwargs}.get("key")
         key = (self.emit_expr(key_arg, 0) if key_arg is not None else None)
         if method == "balance":
@@ -3431,6 +3445,32 @@ class _JSEmitter:
         lines = self._header(main_path, bot.description)
         # The body is emitted first (imports are usage-tracked).
         body: list[str] = []
+        # §19: the file's top-level declarations are part of a bot
+        # file (SPEC §8, §8.2, §13.7) — structs/enums/functions
+        # first (hoisted, as in a general file), then the top-level
+        # statements in file order. They run at module load time,
+        # before `const bot = new Bot()` and main(); handlers read
+        # them at call time. Before this fix the bot file dropped
+        # them entirely, so a handler calling a file-module fn died
+        # with ReferenceError even though the checker accepted it.
+        for decl in program.structs:
+            body.extend(self._emit_struct(decl))
+            body.append("")
+        for decl in program.enums:
+            body.extend(self._emit_enum(decl))
+            body.append("")
+        for decl in program.functions:
+            body.extend(self._emit_fn(decl))
+            body.append("")
+        for st in program.stmts:
+            body.extend(self._emit_stmt_with_hoists(st, 0))
+        # Two blank lines before the class when declarations were
+        # emitted (the no-declaration case stays byte-identical).
+        if body:
+            while body and body[-1] == "":
+                body.pop()
+            body.append("")
+            body.append("")
         body.extend(self._emit_bot_class(program))
         body.append("")
         body.append("")

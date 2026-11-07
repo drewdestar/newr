@@ -20,7 +20,7 @@ from pathlib import Path
 
 from compiler.checker import check_program
 from compiler.discord_check import check_discord, discord_providers
-from compiler.emitter import emit_program
+from compiler.emitter import EmitterError, emit_program
 from compiler.resolver import resolve_file
 from tests.test_emitter import emit_main_text, emit_src, full_program
 
@@ -427,6 +427,51 @@ class TestBotStore(unittest.TestCase):
                          text)
 
 
+    def test_store_call_outside_handler_is_rejected(self):
+        # §19: a store call lowers to `await bot.<store>_<op>`, which
+        # is only valid inside an async handler. At the top level,
+        # inside a (sync) top-level fn, or inside a lambda, the
+        # checker accepts the shape but the emitter must fail cleanly
+        # instead of emitting `await` outside an async function
+        # (a SyntaxError in the generated file on both targets).
+        store = (
+            "store economy:\n"
+            "  table balances (user: str, balance: int)\n"
+            "  ledger true\n\n"
+        )
+        bot = (
+            'bot "B":\n'
+            '  description: "B"\n\n'
+            'command ping:\n'
+            '  description: "Ping"\n'
+            '  do:\n'
+            '    reply "pong"\n'
+        )
+        # Top-level statement.
+        with self.assertRaises(EmitterError):
+            emit_src(store + 'let b: int = economy.balance("alice")\n\n'
+                     + bot)
+        # Top-level fn.
+        with self.assertRaises(EmitterError):
+            emit_src(store +
+                     "fn bal() -> int:\n"
+                     '  return economy.balance("alice")\n\n' + bot)
+        # Lambda inside a handler (was live-broken: the emitted
+        # `await` sat inside a sync lambda, unparseable output).
+        lam = (
+            'bot "B":\n'
+            '  description: "B"\n\n'
+            'command ping:\n'
+            '  description: "Ping"\n'
+            '  do:\n'
+            '    let f = fn() -> int:\n'
+            '      return economy.balance("alice")\n'
+            '    reply "done"\n'
+        )
+        with self.assertRaises(EmitterError):
+            emit_src(store + lam)
+
+
 class TestBotComponents(unittest.TestCase):
     def test_button_view(self):
         text = emit_shop_text()
@@ -516,6 +561,75 @@ class TestBotBindings(unittest.TestCase):
 
 # ---------------------------------------------------------------- mock round-trip
 
+# §19: a bot file's top-level declarations (fn, struct, enum, let)
+# must be emitted — before the fix, a handler calling a file-module
+# fn died with NameError: the definitions were silently dropped
+# from the bot file (the checker accepted the program).
+SCOPE_BOT = """fn div(a: int, b: int) -> Result[int, error]:
+  return try a / b
+
+struct Pt:
+  x: int
+  y: int
+
+enum Color:
+  Red
+  Green
+
+let greeting: str = "hi"
+
+fn make_pt(a: int) -> Pt:
+  return Pt(x: a, y: a + 1)
+
+bot "Scope":
+  description: "Top-level declarations used by handlers"
+
+command go:
+  description: "Divide via a top-level fn"
+  do:
+    let h = div(100, 2)?
+    reply "half is {h}"
+
+command bad:
+  description: "Err path must bare-return, no reply"
+  do:
+    let h = div(100, 0)?
+    reply "should never print {h}"
+
+command show:
+  description: "Struct + let from the top level"
+  do:
+    let p = make_pt(3)
+    reply "{greeting} {p.x} {p.y}"
+
+command colour:
+  description: "Enum from the top level"
+  do:
+    let c = Color.Red
+    if c == Color.Red:
+      reply "red"
+    else:
+      reply "green"
+"""
+
+
+def _ensure_newr_rt():
+    """Make `newr_rt` importable for an in-process exec of emitted
+    bot code: load compiler/newr_rt.py under its plain module name
+    (the CLI copies it next to the output; here there is no file).
+    Returns the previous sys.modules entry (None when absent)."""
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location(
+        "newr_rt", root / "compiler" / "newr_rt.py")
+    mod = importlib.util.module_from_spec(spec)
+    prev = sys.modules.get("newr_rt")
+    sys.modules["newr_rt"] = mod
+    spec.loader.exec_module(mod)
+    return prev
+
+
 class _FakeResponse:
     def __init__(self):
         self.sent = []
@@ -564,11 +678,26 @@ class _FakeInteraction:
 
 
 def _load_bot_module(text, name):
-    """Compile + exec emitted bot source in a fresh module namespace."""
+    """Compile + exec emitted bot source in a fresh module namespace.
+
+    The module is registered in sys.modules first: emitted structs
+    use @dataclass with string annotations, and dataclasses resolves
+    those through sys.modules[cls.__module__]. (Before §19 no struct
+    was ever emitted in a bot file, so the missing registration was
+    latent.) The previous entry, if any, is restored afterwards."""
+    import sys
     import types
     mod = types.ModuleType(name)
     mod.__dict__["__name__"] = name
-    exec(compile(text, name, "exec"), mod.__dict__)
+    prev = sys.modules.get(name)
+    sys.modules[name] = mod
+    try:
+        exec(compile(text, name, "exec"), mod.__dict__)
+    finally:
+        if prev is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = prev
     return mod
 
 
@@ -626,6 +755,54 @@ class TestBotMockRoundTrip(unittest.TestCase):
                                "hello_bot_chan_mock")
         self.assertEqual(mod._channel_text(_FakeChannel()), "#general")
         self.assertEqual(mod._channel_text(None), "")
+
+    def test_top_level_declarations_reach_handlers(self):
+        # §19: the bot file's top-level fn/struct/enum/let must be
+        # emitted — a handler calling a file-module fn used to die
+        # with NameError (the definitions were silently dropped).
+        # This is a ROUND-TRIP test: the bot actually runs and the
+        # real replies are asserted, not the emitted text.
+        result = emit_src(SCOPE_BOT)
+        text = result.files[result.main_file]
+        prev = _ensure_newr_rt()
+        try:
+            mod = _load_bot_module(text, "scope_bot_mock")
+        finally:
+            if prev is None:
+                sys.modules.pop("newr_rt", None)
+            else:
+                sys.modules["newr_rt"] = prev
+        inter = _FakeInteraction()
+        asyncio.run(mod.cmd_go.callback(inter))
+        self.assertEqual(inter.response.sent[0][0], "half is 50")
+        inter_bad = _FakeInteraction()
+        asyncio.run(mod.cmd_bad.callback(inter_bad))
+        self.assertEqual(inter_bad.response.sent, [])
+        inter_show = _FakeInteraction()
+        asyncio.run(mod.cmd_show.callback(inter_show))
+        self.assertEqual(inter_show.response.sent[0][0], "hi 3 4")
+        inter_colour = _FakeInteraction()
+        asyncio.run(mod.cmd_colour.callback(inter_colour))
+        self.assertEqual(inter_colour.response.sent[0][0], "red")
+
+    def test_top_level_statement_runs_at_import(self):
+        # §19: a top-level statement in a bot file runs when the
+        # module loads (before main()), same as in a general file —
+        # proven by executing the module and capturing stdout.
+        import contextlib
+        import io
+        src = ("print \"loaded\"\n"
+               "bot \"B\":\n"
+               "  description: \"B\"\n"
+               "\n"
+               "command ping:\n"
+               "  description: \"Ping\"\n"
+               "  reply: \"Pong!\"\n")
+        text = emit_main_text(src)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            _load_bot_module(text, "stmt_bot_mock")
+        self.assertIn("loaded", buf.getvalue())
 
     def test_transfer_fresh_replay_and_insufficient(self):
         async def scenario(bot):

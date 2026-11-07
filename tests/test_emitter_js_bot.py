@@ -26,7 +26,7 @@ from pathlib import Path
 
 from compiler.checker import check_program
 from compiler.discord_check import check_discord, discord_providers
-from compiler.emitter_js import emit_program
+from compiler.emitter_js import EmitterError, emit_program
 from compiler.resolver import resolve_file
 from tests.test_emitter_js import emit_js_main_text, emit_js_src, full_program
 
@@ -423,6 +423,48 @@ class TestBotStore(unittest.TestCase):
         self.assertNotIn("asyncio.Lock", text)
         self.assertNotIn("aiosqlite", text)
 
+    def test_store_call_outside_handler_is_rejected(self):
+        # §19 (mirrors the Python emitter): a store call lowers to
+        # `await bot.<store>_<op>`, only valid inside an async
+        # handler. At the top level, inside a (sync) top-level fn,
+        # or inside a lambda, the emitter must fail cleanly instead
+        # of emitting `await` outside an async function.
+        store = (
+            "store economy:\n"
+            "  table balances (user: str, balance: int)\n"
+            "  ledger true\n\n"
+        )
+        bot = (
+            'bot "B":\n'
+            '  description: "B"\n\n'
+            'command ping:\n'
+            '  description: "Ping"\n'
+            '  do:\n'
+            '    reply "pong"\n'
+        )
+        # Top-level statement.
+        with self.assertRaises(EmitterError):
+            emit_js_src(store + 'let b: int = economy.balance("alice")\n\n'
+                        + bot)
+        # Top-level fn.
+        with self.assertRaises(EmitterError):
+            emit_js_src(store +
+                        "fn bal() -> int:\n"
+                        '  return economy.balance("alice")\n\n' + bot)
+        # Lambda inside a handler.
+        lam = (
+            'bot "B":\n'
+            '  description: "B"\n\n'
+            'command ping:\n'
+            '  description: "Ping"\n'
+            '  do:\n'
+            '    let f = fn() -> int:\n'
+            '      return economy.balance("alice")\n'
+            '    reply "done"\n'
+        )
+        with self.assertRaises(EmitterError):
+            emit_js_src(store + lam)
+
 
 class TestBotComponents(unittest.TestCase):
     def test_button_row_and_collector(self):
@@ -532,6 +574,88 @@ def run_hello_driver(driver_js):
 
 @unittest.skipUnless(NODE, "node is not installed")
 class TestBotMockRoundTrip(unittest.TestCase):
+    def test_top_level_declarations_reach_handlers(self):
+        # §19: the bot file's top-level fn/struct/enum/let must be
+        # emitted — a handler calling a file-module fn used to die
+        # with ReferenceError: div is not defined (the definitions
+        # were silently dropped). This is a ROUND-TRIP test: the bot
+        # actually runs under the Node mock and the real replies are
+        # asserted, not the emitted text.
+        src = """fn div(a: int, b: int) -> Result[int, error]:
+  return try a / b
+
+struct Pt:
+  x: int
+  y: int
+
+enum Color:
+  Red
+  Green
+
+let greeting: str = "hi"
+
+fn make_pt(a: int) -> Pt:
+  return Pt(x: a, y: a + 1)
+
+bot "Scope":
+  description: "Top-level declarations used by handlers"
+
+command go:
+  description: "Divide via a top-level fn"
+  do:
+    let h = div(100, 2)?
+    reply "half is {h}"
+
+command bad:
+  description: "Err path must bare-return, no reply"
+  do:
+    let h = div(100, 0)?
+    reply "should never print {h}"
+
+command show:
+  description: "Struct + let from the top level"
+  do:
+    let p = make_pt(3)
+    reply "{greeting} {p.x} {p.y}"
+
+command colour:
+  description: "Enum from the top level"
+  do:
+    let c = Color.Red
+    if c == Color.Red:
+      reply "red"
+    else:
+      reply "green"
+"""
+        result = emit_js_src(src, "scope_bot.newr")
+        driver = """
+const { bot } = require("./scope_bot.js");
+const { Events } = require("discord.js");
+const lib = require("./bot-driver-lib.js");
+(async () => {
+  const go = lib.makeInteraction({ commandName: "go", isChatInputCommand: () => true });
+  await bot._fire(Events.InteractionCreate, go);
+  const bad = lib.makeInteraction({ commandName: "bad", isChatInputCommand: () => true });
+  await bot._fire(Events.InteractionCreate, bad);
+  const show = lib.makeInteraction({ commandName: "show", isChatInputCommand: () => true });
+  await bot._fire(Events.InteractionCreate, show);
+  const colour = lib.makeInteraction({ commandName: "colour", isChatInputCommand: () => true });
+  await bot._fire(Events.InteractionCreate, colour);
+  console.log(JSON.stringify({
+    go: go.replies[0] && go.replies[0].content,
+    badReplies: bad.replies.length,
+    show: show.replies[0] && show.replies[0].content,
+    colour: colour.replies[0] && colour.replies[0].content,
+  }));
+  process.exit(0);
+})().catch((e) => { console.error(e); process.exit(1); });
+"""
+        out = run_bot_driver(driver, result.files)
+        self.assertEqual(out["go"], "half is 50")
+        self.assertEqual(out["badReplies"], 0)
+        self.assertEqual(out["show"], "hi 3 4")
+        self.assertEqual(out["colour"], "red")
+
     def test_ping_and_greet_replies(self):
         driver = """
 const { bot } = require("./hello_bot.js");
