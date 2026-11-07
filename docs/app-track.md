@@ -1,0 +1,293 @@
+# M8 Full Stack: database, backend, frontend, UI/UX, one source, all OSes
+
+Status: draft design doc, 7 Nov 2026, by chie. Not built yet. This doc is the
+research step for M8, written because the user asked for the way ("cari cara")
+to make newr build database-backed backends, frontends, UI/UX, and full-stack
+apps on every compatible OS.
+
+Standing process rule (user, 7 Nov 2026 16:59 WIB): every new M milestone
+starts with evaluation and research first, before building. This doc is that
+step for M8. Building starts only after this doc is reviewed against the real
+codebase, and each M8 phase repeats the same order: research and eval, build,
+verify.
+
+M numbering: M7 is not a stop. It is only the last milestone written down so
+far. M8 is the next number. The numbering continues as needed (M9, M10, ...),
+and the real rule is the user's own order: keep going until absolute
+("sampai mutlak").
+
+## 1. Goal
+
+One readable newr source builds a complete app:
+
+- a database layer (store data, query it, transactions),
+- a backend (HTTP server, routes, JSON in and out),
+- a frontend (pages or screens that call the backend),
+- UI/UX (widgets and layout the user actually sees and taps),
+- packaged for the OS it runs on (apk, exe, dmg, AppImage, web).
+
+The same source must keep working on all seven emitter targets
+(py, js, java, cs, rs, kt, dart). Where a target cannot do something
+natively, the doc says so plainly instead of pretending otherwise.
+
+## 2. Where newr stands today (checked live, 7 Nov 2026)
+
+What already exists:
+
+- Seven emitters: py (M2), js (M3), java and cs (M4), rs, kt, dart (M5,
+  in flight). The emitters cover every OS between them: Dart/Flutter for
+  mobile, desktop and web; Kotlin for Android; C# for Windows and desktop;
+  Java for Android and desktop; JS for web; Rust native; Python everywhere.
+- A module system with a proven domain-module pattern. Core modules live
+  as signature tables in `compiler/modules.py` (math, time, random, file,
+  env). The `discord` module is the proof that a domain module works: its
+  signatures and limits live in their own files
+  (`compiler/discord_check.py`, 1115 lines; `compiler/discord_limits.py`,
+  190 lines), the resolver lists it in `NAMED_MODULES`
+  (`compiler/resolver.py`), and the Python emitter has a dedicated
+  bot-program path that emits a real discord.py program
+  (`compiler/emitter.py`, bot path near line 2637).
+- A store pattern already exists in generated code: the emitted discord.py
+  bot uses aiosqlite as its store (the emitter's third-party set includes
+  `discord`, `discord.ext`, `aiosqlite`).
+- SPEC already plans two pieces of this: HTTP fetch is v1.1 and the `json`
+  module is v1.1 (SPEC section 20).
+
+What does not exist yet:
+
+- No `db` module, no `http` module, no `ui` module, no `app` module.
+  Modules today are only math, time, random, file, env, t, discord, log.
+- No app example (examples are hello, hello_bot, shop, showcase only).
+- No packaging story beyond M7 (standalone binaries and the browser
+  playground, see `docs/run-anywhere.md`).
+
+So the gap is modules plus packaging, not a new compiler. That is the way.
+
+## 3. The way: copy the discord pattern, four times
+
+Every new module follows the exact path `discord` already walked:
+
+1. Signatures: a table in the checker style (`compiler/modules.py` for
+   core, a new `compiler/<name>_check.py` for a domain module).
+2. Resolver: add the name to `NAMED_MODULES` in `compiler/resolver.py`
+   and to `RESERVED_BUILTIN_NAMES` in `compiler/modules.py`.
+3. Limits: a `<name>_limits.py` file with the honest limits of the
+   module, the way `discord_limits.py` holds Discord's limits.
+4. Emitters: each of the seven emitters maps the module calls to the
+   native library on its target, plus runtime helpers in `newr_rt.*`
+   where the mapping needs shared code.
+5. Conformance: `ok` programs in `conformance/ok/` that print PASS on
+   every target the module claims to support. A target that cannot pass
+   does not ship the module (SPEC section 18).
+6. Goldens: pinned generated outputs for the module's example programs,
+   blessed only from a green run, never hand-edited.
+
+No module ships on fewer than all seven targets unless the doc for that
+module names the missing target and why, and the gap is tracked as an
+open item, not hidden.
+
+## 4. The four new modules (draft API, not final)
+
+### 4.1 `db`: database, sqlite first
+
+Why sqlite first: it is a single file, needs no server, and every one
+of the seven targets has a sqlite library. Postgres and MySQL come
+later, as a second driver, not in M8.
+
+Draft surface (newr syntax, same style as `file.read` and `math.sqrt`):
+
+- `db.open(path: str)` opens or creates a database file, returns a handle.
+- `db.exec(handle, sql: str, args: list)` runs a statement, returns rows
+  affected.
+- `db.query(handle, sql: str, args: list)` runs a select, returns a list
+  of dicts.
+- `db.close(handle)` closes the handle.
+
+Rules: one connection per handle, like the bot store today. Writes that
+belong together go in one transaction; a failed step rolls the whole
+transaction back. SQL stays SQL (a string), the module does not invent
+its own query language in M8. Parameter binding is mandatory in the
+generated code, never string-built SQL, so injection is closed by
+construction.
+
+Per-target natives: Python aiosqlite/sqlite3, JS better-sqlite3 (Node)
+and sql.js (browser), Java sqlite-jdbc, C# Microsoft.Data.Sqlite, Rust
+rusqlite, Kotlin sqlite-jdbc (JVM) and android.database.sqlite
+(Android), Dart sqflite (mobile) and sqlite3 (desktop). The browser
+target stores in IndexedDB via sql.js where a plain file is impossible;
+that difference is documented per target, not papered over.
+
+### 4.2 `http`: backend server plus fetch client
+
+Draft surface:
+
+- `http.serve(port: int)` starts a server for the routes of this program.
+- `http.route(method: str, path: str, handler: fn)` registers one route.
+  Handlers take a request (method, path, headers, body) and return a
+  response (status, headers, body).
+- `http.get(url: str)` and `http.post(url: str, body: str)` fetch a URL,
+  return a response value. This is the SPEC v1.1 fetch item, pulled into
+  M8 because the frontend needs it to call the backend.
+
+Rules: JSON is the only body format in M8 (the `json` module lands with
+it: `json.encode`, `json.decode`). No auth, no sessions, no cookies in
+M8; those are M9 material. The server binds localhost by default and
+only listens on all interfaces when the program says so explicitly.
+
+Per-target natives: Python stdlib http.server or a tiny WSGI host,
+JS Node http, Java built-in HttpServer, C# ASP.NET minimal API or
+HttpListener, Rust a small embedded server (axum or std-only), Kotlin
+Ktor or HttpServer, Dart shelf. The frontend target (JS in a browser)
+cannot serve; on that target `http.serve` is a checker error, and the
+program is split so the server part builds only for server targets
+(see section 5).
+
+### 4.3 `ui`: widgets and layout
+
+This is the hardest module, and the doc is honest about why: no single
+UI API looks and behaves identically on every OS. Two shapes were
+considered:
+
+- (a) One small widget set mapped per target (text, button, input,
+  list, image, stack, row, column). Each target renders it with its
+  native toolkit. This is the recommendation.
+- (b) One target-specific UI module per platform. Rejected for M8: it
+  splits the language into seven dialects, which breaks the one-source
+  promise.
+
+Draft surface (shape a):
+
+- `ui.text(s: str)`, `ui.button(label: str, on_tap: fn)`,
+  `ui.input(hint: str)`, `ui.list(items: list)`, `ui.image(path: str)`,
+  `ui.row(children: list)`, `ui.column(children: list)`,
+  `ui.show(root)` renders the tree.
+
+Rules: the widget set stays small in M8 (seven widgets plus two layout
+containers). Styling is tokens, not pixels: `ui.style` takes named
+values (primary color, spacing scale) and each target maps them to its
+own theme. No custom drawing, no animation API in M8. State is plain
+newr values; a tap handler mutates state and the tree re-renders.
+
+Per-target natives: JS renders to the DOM; Dart renders to Flutter
+widgets (this is why the Dart emitter matters for UI); Kotlin renders
+to Jetpack Compose on Android; C# renders to WinUI or MAUI; Java
+renders to JavaFX; Rust renders to a native GUI crate or to a webview
+hosting the JS frontend; Python renders to a webview or Tk as a
+fallback. Where a target cannot render a widget natively in M8, the
+module falls back to the webview path and the conformance program for
+that target says so.
+
+### 4.4 `app`: manifest and packaging
+
+Draft surface:
+
+- `app.manifest(name: str, version: str, ...)` declares the app: name,
+  version, icon, permissions, entry point.
+- `newr build --target <t> --app` (a CLI flag, not a module call)
+  produces the installable artifact for that target.
+
+Packaging per OS: Android apk via the Kotlin or Dart target (needs the
+Android SDK); Windows exe/msi via the C# target; macOS dmg via the Dart
+target (needs Xcode on a Mac for signing, unsigned otherwise); Linux
+AppImage or deb via the Rust or Python target; web via the JS target
+plus the M7 playground hosting story. M7 already covers standalone
+binaries; M8 adds the manifest, the icon and permission declarations,
+and the per-OS artifact step. Signing and store submission (Play,
+App Store, Microsoft Store) are explicitly out of M8: they need the
+user's own developer accounts.
+
+## 5. Full-stack shape: one source, split by target
+
+A full-stack app in M8 is three programs sharing one contract, not one
+file doing everything:
+
+- `shared.newr`: the data shapes (structs) and the route table both
+  sides agree on. Imported by the other two.
+- `backend.newr`: uses `db` and `http`, serves the routes, talks to
+  sqlite. Builds for py, java, cs, rs, kt (server targets).
+- `frontend.newr`: uses `http` (fetch) and `ui`, calls the backend,
+  renders screens. Builds for js, dart, kt (client targets).
+
+The checker enforces the split: `http.serve` and `db` in a program
+built for a browser target is an error with a plain message, and
+`ui.show` in a program built for a server-only target is the same.
+Shared types are checked once and must match on both sides; a drift
+between frontend and backend types is a build error, not a runtime
+surprise.
+
+A single-file full-stack program (backend plus frontend in one file,
+compiler splits it) is the M9 goal, not M8. M8 proves the three-file
+shape end to end first.
+
+## 6. Per-target map (summary)
+
+| Target | db | http serve | http fetch | ui | app package |
+|---|---|---|---|---|---|
+| py | sqlite3 | yes | yes | webview fallback | AppImage, deb |
+| js | sql.js / IndexedDB | no (checker error) | yes | DOM | web |
+| java | sqlite-jdbc | yes | yes | JavaFX | jar, deb |
+| cs | Microsoft.Data.Sqlite | yes | yes | WinUI / MAUI | exe, msi |
+| rs | rusqlite | yes | yes | webview host | binary, AppImage |
+| kt | sqlite-jdbc / android sqlite | yes | yes | Compose | apk, jar |
+| dart | sqflite / sqlite3 | yes | yes | Flutter widgets | apk, dmg, web |
+
+"Yes" means a conformance program prints PASS on that target.
+"Fallback" and "checker error" are stated in the module doc, not hidden.
+
+## 7. Phases (each: research and eval, build, verify)
+
+- M8a `db`: research sqlite libraries per target (versions, licenses,
+  browser story), then build, then conformance on all seven targets
+  plus a `todo` example program that stores and lists rows.
+- M8b `http` plus `json`: research server and fetch natives per
+  target, then build, then a `hello_api` example: backend serves one
+  JSON route, frontend fetches and prints it.
+- M8c `ui`: research the seven UI toolkits (versions, what is
+  installable on this VM, what needs a Mac or an Android SDK), then
+  build the small widget set, then a `hello_ui` example on every target
+  that can render, with screenshots at 390/768/1280 for the web target.
+- M8d `app` plus full-stack example: manifest, packaging flags, then
+  the three-file shop app (shared types, backend with db and http,
+  frontend with ui), verified live on at least one server target and
+  one client target.
+
+Each phase lands as real pull requests, one per module where feasible,
+the same way M5 is landing, so the achievement work (Pull Shark) keeps
+moving with honest PRs.
+
+## 8. Verification bar (same as M4, no exceptions)
+
+- Suite green (`python3 -m unittest discover -s tests`) in system
+  Python and a fresh venv.
+- Conformance green on every target the phase claims, counted exactly
+  (ok and FAIL lines per target, not a tail sample).
+- Goldens pinned for the new example programs, blessed only from green.
+- Live proof: the example program actually runs (backend serves, client
+  fetches, UI renders) and the output is shown, not just asserted.
+- Red-check: breaking one mapping reproduces a real failure, then the
+  fix restores the exact green hash.
+
+## 9. Honest limits and open questions
+
+Limits:
+
+- UI parity is the hard part. A button will not look identical on all
+  seven targets in M8, and the doc does not claim it will. Same layout,
+  same behavior, native look per target.
+- Packaging needs per-OS toolchains this VM does not have: Xcode for
+  signed macOS and iOS artifacts, Android SDK for apk. Unsigned and
+  web artifacts are provable here; signed store artifacts need the
+  user's machine or CI runners on those OSes.
+- No auth, no sessions, no Postgres/MySQL, no realtime (websockets),
+  no file uploads in M8. Each is a named later item, not a silent gap.
+- The browser target cannot serve HTTP or write a plain sqlite file;
+  sql.js plus IndexedDB is the documented shape there.
+
+Open questions (to settle in the M8a research, before building):
+
+- Should `db.query` return a list of dicts or a typed struct list?
+- Should the frontend fetch go through `http` only, or also a
+  generated client from the shared route table?
+- Which UI toolkit per target is the M8 default where two exist
+  (for example WinUI vs MAUI on C#, JavaFX vs Compose on desktop)?
+- Single-file full-stack in M9: what syntax marks the split?
