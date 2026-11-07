@@ -11,7 +11,7 @@ reached by the fresh fuzz seed 20261107 (case 1429: a mutated
 ``shop.newr`` where deleting the ``:`` after ``item`` turned a named
 argument into a second positional argument).
 
-TDD: written RED first against the unfixed compiler — the ``full()``
+TDD: written RED first against the unfixed compiler - the ``full()``
 tests raise the raw AttributeError (not NewrError) and the CLI tests
 see exit 1 with a traceback instead of exit 4 with ``error[E1001]``.
 
@@ -59,7 +59,7 @@ def run_cli(*args, timeout=30):
 
 
 class TestTCrashSecondPositional(unittest.TestCase):
-    """``print t("k", 1)`` — a second positional arg after the key."""
+    """``print t("k", 1)`` - a second positional arg after the key."""
 
     def test_second_positional_is_E1001(self):
         self.assertEqual(codes(full('print t("k", 1)\n')), ["E1001"])
@@ -87,7 +87,7 @@ class TestTCrashSecondPositional(unittest.TestCase):
 
 
 class TestTCrashNonStringKey(unittest.TestCase):
-    """``print t(1)`` — a non-string first argument."""
+    """``print t(1)`` - a non-string first argument."""
 
     def test_non_string_key_is_E1001(self):
         self.assertEqual(codes(full("print t(1)\n")), ["E1001"])
@@ -128,7 +128,7 @@ class TestTCallControlCases(unittest.TestCase):
     def test_named_arg_after_key_is_clean_in_core_pipeline(self):
         # NOTE: the E2009 for the unknown key `k` comes from the
         # Discord checker (compiler/discord_check.py), which the
-        # in-process `full()` helper does not run — it runs resolver
+        # in-process `full()` helper does not run - it runs resolver
         # + core checker only. The core pipeline must report nothing
         # for a well-formed `t()` call; the CLI test below pins the
         # E2009 end to end.
@@ -152,7 +152,7 @@ class TestTCallControlCases(unittest.TestCase):
 
     def test_t_call_with_no_args_is_E1001(self):
         # `t()` with no key at all hits the same error path
-        # (``func.span``) — it must also be a clean E1001.
+        # (``func.span``) - it must also be a clean E1001.
         self.assertEqual(codes(full("print t()\n")), ["E1001"])
 
 

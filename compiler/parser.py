@@ -155,7 +155,7 @@ class _Parser:
             self._depth -= 1
             self.err(tok, "too deeply nested",
                      help="split the expression or block into smaller "
-                          "pieces — newr limits nesting to 200 levels "
+                          "pieces - newr limits nesting to 200 levels "
                           "so a bad input cannot exhaust the stack")
 
     def expect(self, kind: str, value: object = None, what: str = "") -> Token:
@@ -186,9 +186,9 @@ class _Parser:
             help = None
             if self.cur.kind == "QMARK":
                 # N-05: a `?` here follows a complete statement, so it
-                # is not a ternary or a propagate — say what `?` does.
+                # is not a ternary or a propagate - say what `?` does.
                 help = ("`?` propagates a `Result`/`T?` value and goes "
-                        "right after the value, like `let x = f()?` — "
+                        "right after the value, like `let x = f()?` - "
                         "here it follows a complete statement")
             self.err(self.cur,
                      f"expected end of line, found {_describe(self.cur)}",
@@ -907,7 +907,7 @@ class _Parser:
                     span=self.span(tstart, self.tokens[self.pos - 1])))
             elif self.at_ident("ledger"):
                 self.advance()
-                # `ledger true` — no colon (SPEC.md §14).
+                # `ledger true` - no colon (SPEC.md §14).
                 ledger = self._parse_bool_lit()
             else:
                 self.err(self.cur,
@@ -1123,7 +1123,7 @@ class _Parser:
         start = self.cur
         if self.peek().kind in ("DOT", "LPAREN"):
             # `log.info(...)` / `log(...)`: a normal call. Do not consume
-            # `log` here — parse_expr treats the keyword as a Name.
+            # `log` here - parse_expr treats the keyword as a Name.
             value = self.parse_expr(0)
             value = self._maybe_propagate(value)
             self._expect_eol()

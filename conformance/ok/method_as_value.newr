@@ -1,6 +1,6 @@
 # A bare method name is a function value (BUILD_REPORT §16,
 # hole 2): `v.is_some` is `fn() -> bool`, `xs.len` is
-# `fn() -> int` — not a Python attribute that does not exist.
+# `fn() -> int` - not a Python attribute that does not exist.
 let passed = true
 let v: int? = 5
 let w: int? = none

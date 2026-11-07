@@ -1,9 +1,9 @@
 # `?` propagates a Result (D7), chained: the unwrapped value of the
 # first propagate feeds the second (two sequential `?`).
 # §18 fix 1: the single-trailing-`?` shape in result_propagate.newr
-# cannot see the old bug — with `?` broken, half(2) early-returns
+# cannot see the old bug - with `?` broken, half(2) early-returns
 # ok(5), the same value as correct. chain(4) is discriminating:
-# 100/4=25, 25/2=12 — the second division must actually run.
+# 100/4=25, 25/2=12 - the second division must actually run.
 fn div(a: int, b: int) -> Result[int, error]:
   return try a / b
 

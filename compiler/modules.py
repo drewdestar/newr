@@ -2,7 +2,7 @@
 
 The core builtins and core modules (``math``, ``time``, ``random``,
 ``file``, ``env``) are part of the language, so this module is imported by
-the core checker. It contains NO Discord data — the discord module's
+the core checker. It contains NO Discord data - the discord module's
 signatures live in ``discord_check.py`` / ``discord_limits.py``.
 
 Signatures are data: ``(parameter types, return type)``. A parameter
@@ -15,7 +15,7 @@ checker special-cases some builtins (``_call_builtin``: ``print``,
 ``ok``/``err``, ``set``, ``float``/``range``) and some signatures
 carry checker-only keys (``"optional"``, ``"overload_return"``,
 ``"variadic"``). Where the table and the checker disagree, the
-checker's behaviour wins — and the disagreement is a bug to fix, not
+checker's behaviour wins - and the disagreement is a bug to fix, not
 a feature to document.
 """
 
@@ -29,7 +29,7 @@ from .ast_nodes import BOOL, FLOAT, INT, STR, Type, list_of
 BUILTINS: dict[str, dict] = {
     "print": {"params": ["..."], "return": Type("none"), "variadic": True},
     # N-10: `input()` takes 0-1 args (SPEC.md SS12.1: `input(prompt:
-    # str = "")`) — the prompt is optional, so params is [] and the
+    # str = "")`) - the prompt is optional, so params is [] and the
     # prompt is the one optional argument.
     "input": {"params": [], "return": STR, "optional": [STR]},
     "len": {"params": ["lenable"], "return": INT},
@@ -87,7 +87,7 @@ MODULES: dict[str, dict[str, dict]] = {
         "exists": {"params": [STR], "return": BOOL},
     },
     "env": {
-        # get(name) -> str? (exactly one absent value, spelled T? — §7.2).
+        # get(name) -> str? (exactly one absent value, spelled T? - §7.2).
         "get": {"params": [STR], "return": Type("str", nullable=True),
                 "optional": [STR], "overload_return": STR},
         # args is a value, not a function: the command-line arguments
@@ -96,7 +96,7 @@ MODULES: dict[str, dict[str, dict]] = {
     },
 }
 
-# time.format's fixed format set (SPEC.md §12.2) — not strftime.
+# time.format's fixed format set (SPEC.md §12.2) - not strftime.
 TIME_FORMATS = {"%Y-%m-%d", "%H:%M", "%Y-%m-%d %H:%M", "%d/%m/%Y", "%H:%M:%S"}
 
 # ---------------------------------------------------------------- methods on values
@@ -133,7 +133,7 @@ METHODS: dict[str, dict[str, dict]] = {
         "remove": {"params": ["T"], "return": Type("none")},
         "contains": {"params": ["T"], "return": BOOL},
     },
-    # Methods on T? — keyed "nullable" (the receiver's inner type is "T").
+    # Methods on T? - keyed "nullable" (the receiver's inner type is "T").
     "nullable": {
         "is_some": {"params": [], "return": BOOL},
         "is_none": {"params": [], "return": BOOL},

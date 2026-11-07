@@ -6,7 +6,7 @@ then the compiler was fixed to make them green.
 
 The ``full()`` helper below is deliberately the COMBINED pipeline:
 resolver diagnostics + core-checker diagnostics. A test that asserts a
-checker verdict must also assert the resolver diagnostics — the M-04
+checker verdict must also assert the resolver diagnostics - the M-04
 false-green (``test_contracts_first_are_ok`` passed while the verbatim
 spec example failed through the CLI, because the old helper ignored
 resolver diagnostics) must not recur. See tests/test_checker.py ``check()``,
@@ -34,7 +34,7 @@ LAUNCHER = ROOT / "newr"
 def full(src):
     """Parse + resolve + core-check; return COMBINED diagnostics.
 
-    A parse error raises NewrError — it is a diagnostic too, and it
+    A parse error raises NewrError - it is a diagnostic too, and it
     must be returned here, not lost: dropping it would repeat the
     M-04 false-green pattern at the parse stage.
     """
@@ -170,7 +170,7 @@ class TestNullableWidening(unittest.TestCase):
 class TestEnsuresResult(unittest.TestCase):
     def test_verbatim_spec_9_7_example_is_clean(self):
         # The exact SPEC.md SS9.7 example, through the COMBINED
-        # pipeline (resolver + checker) — the old checker-only helper
+        # pipeline (resolver + checker) - the old checker-only helper
         # passed this while the CLI failed it with E3001.
         d = full('fn withdraw(balance: int, amount: int) -> int:\n'
                  '  requires amount > 0\n'
@@ -340,7 +340,7 @@ class TestExplainLexerCodes(unittest.TestCase):
 
     def test_error_index_matches_explain(self):
         """M-11/M-13: docs/error-index.md and EXPLAIN must list exactly
-        the same codes — a code documented but not explainable (or
+        the same codes - a code documented but not explainable (or
         vice versa) is a spec/code drift."""
         import re
 

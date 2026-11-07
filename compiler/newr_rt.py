@@ -6,7 +6,7 @@ half-away rounding, the newr conversion/rendering rules, `Result`,
 and the `?.` / `??` helpers. It is stdlib-only and dependency-free.
 
 It lives in the compiler package as `compiler/newr_rt.py` and `newr
-build` copies it — byte-identical — next to an emitted `.py` file
+build` copies it - byte-identical - next to an emitted `.py` file
 when (and only when) that program uses a helper from it. Do not edit
 a copied file by hand: edit this file in the newr repo and rebuild.
 
@@ -53,7 +53,7 @@ class NewrOverflowError(NewrError, OverflowError):
 
     The base order matters (BUG-M2-2): NewrError must come FIRST,
     or constructing one never runs NewrError.__init__ and `.message`
-    is never set — a `catch e:` body reading `e.message` would
+    is never set - a `catch e:` body reading `e.message` would
     raise AttributeError instead of printing the overflow."""
 
 
@@ -102,7 +102,7 @@ def pow_int(a: int, b: int) -> int:
 
     A negative exponent is an error (an int result cannot represent
     it). The exponent is bounded by repeated squaring with a check at
-    every multiply — `10 ** 10**9` raises instead of allocating
+    every multiply - `10 ** 10**9` raises instead of allocating
     gigabytes by computing blindly.
     """
     if b < 0:
@@ -188,7 +188,7 @@ def round_half_away(x, ndigits=None):
 
     Rounds the EXACT value of the float: `Decimal(x)` (the exact
     binary expansion), not `Decimal(str(x))`. The shortest repr is
-    not the value — `str(9223372036854774784.0)` is
+    not the value - `str(9223372036854774784.0)` is
     `"9.223372036854775e+18"`, and rounding that would change an
     already-integral float. The consequence is the representation
     fact every target shares: `round(2.675, 2)` is 2.67, because the
@@ -232,7 +232,7 @@ def round_half_away(x, ndigits=None):
 
 def to_int(x) -> int:
     """newr `int(x)`: from str (parses; throws on invalid) or float
-    (truncates toward zero). The result is int64 range-checked —
+    (truncates toward zero). The result is int64 range-checked -
     `int("99999999999999999999")` succeeds in Python and must throw
     here. `int("3.5")` raises ValueError; `int("abc")` raises
     ValueError (the natural Python mapping, research §3.3)."""
@@ -263,7 +263,7 @@ def to_float(x) -> float:
 
 def to_bool(x) -> bool:
     """newr `bool(x)`: from str (`"true"`/`"false"`, exact lowercase)
-    or int (0 -> false). P7: parsing, not truthiness — `bool("false")`
+    or int (0 -> false). P7: parsing, not truthiness - `bool("false")`
     is False, and any other string raises ValueError."""
     if isinstance(x, bool):
         return x
@@ -325,7 +325,7 @@ class Result:
 
     Built with `ok(v)` / `err(e)`; `is_ok()` / `is_err()` /
     `unwrap()` (throws the error on `err`) / `unwrap_or(default)`.
-    Equality is structural (like the rest of newr — §7.7); results
+    Equality is structural (like the rest of newr - §7.7); results
     are not hashable, like a Python dataclass with `eq=True`.
     """
 
@@ -389,7 +389,7 @@ def try_result(f) -> Result:
 def opt_chain(v, f):
     """newr `?.`: `None` when `v` is `None`, else `f(v)`.
 
-    The test is `is not None`, never truthiness — `0`, `""` and `[]`
+    The test is `is not None`, never truthiness - `0`, `""` and `[]`
     are values, not absences. A whole `?.` chain collapses into one
     call with the full postfix path inside `f`, so the base
     expression is evaluated exactly once.
@@ -400,17 +400,17 @@ def opt_chain(v, f):
 def coalesce(v, default_fn):
     """newr `??`: `v` when it is not `None`, else `default_fn()`.
 
-    The default is a thunk so it is evaluated lazily — only when
+    The default is a thunk so it is evaluated lazily - only when
     the value is actually absent.
     """
     return v if v is not None else default_fn()
 
 
 def list_index(lst, i):
-    """newr `list[i]`: SPEC §9.2 — out-of-range indexing is a
+    """newr `list[i]`: SPEC §9.2 - out-of-range indexing is a
     runtime error. Valid indices are `0 <= i < len(lst)`; a negative
     index is out of range (Python would silently wrap it to the
-    last element — the silent behavior §1.1 forbids). Raises the
+    last element - the silent behavior §1.1 forbids). Raises the
     same `IndexError` Python raises for an out-of-range index, so
     `as_error` gives it code `"IndexError"` in a `catch` clause.
     """
@@ -420,7 +420,7 @@ def list_index(lst, i):
 
 
 def list_get(lst, i, default):
-    """newr `list.get(i, default)`: P9 — a negative index is
+    """newr `list.get(i, default)`: P9 - a negative index is
     out-of-range (no Python wrap-around); anything outside
     `0 <= i < len(lst)` returns `default`."""
     return lst[i] if 0 <= i < len(lst) else default
@@ -441,7 +441,7 @@ _TIME_FORMATS = {"%Y-%m-%d", "%H:%M", "%Y-%m-%d %H:%M", "%d/%m/%Y",
 
 
 def time_format(ts: int, fmt: str) -> str:
-    """newr `time.format(ts, fmt)`: UTC, never local time (P4) —
+    """newr `time.format(ts, fmt)`: UTC, never local time (P4) -
     the same program prints the same output on every machine. The
     format must be one of the spec's fixed set (§12.2)."""
     if fmt not in _TIME_FORMATS:
@@ -456,7 +456,7 @@ def file_read(path: str) -> str:
     """newr `file.read(path)`: the whole file as UTF-8 text.
 
     A helper (not an inline `with` block) so a read inside a lambda
-    body or an optional chain still happens at the right time — a
+    body or an optional chain still happens at the right time - a
     hoisted `with` would run at the enclosing statement, before the
     chain is even known to be non-none. `FileNotFoundError` etc.
     propagate as Python exceptions (wrapped by `as_error` in a

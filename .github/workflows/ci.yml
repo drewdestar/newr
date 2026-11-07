@@ -7,7 +7,7 @@
 #   distinct files. This runs on LINUX ONLY: macOS (APFS) and Windows
 #   (NTFS) default filesystems are case-insensitive, so the second file
 #   would overwrite the first and the step would be red by design on
-#   those runners — not because the compiler is wrong, but because the
+#   those runners - not because the compiler is wrong, but because the
 #   filesystem cannot represent the case. The compiler rule itself
 #   (imports are case-sensitive, SPEC.md SS3.3) is tested in the suite.
 # - No Unix-exec-bit assumptions: nothing here relies on a file being
@@ -50,7 +50,7 @@ jobs:
         run: python -m unittest discover -s tests
 
       # Cross-platform: every text read_text()/open() must say
-      # encoding="utf-8" explicitly (binary-mode opens are exempt —
+      # encoding="utf-8" explicitly (binary-mode opens are exempt -
       # none exist yet). `python` (not `python3`) is the command on
       # all three OSes after setup-python; `python3` is not guaranteed
       # on windows-latest.
@@ -58,7 +58,7 @@ jobs:
         shell: bash
         run: |
           if grep -rn -E "(read_text|open)\(" compiler/ --include="*.py" | grep -v 'encoding='; then
-            echo "::error::read_text()/open() without encoding= found in compiler/ — use encoding=\"utf-8\""
+            echo "::error::read_text()/open() without encoding= found in compiler/ - use encoding=\"utf-8\""
             exit 1
           fi
 
@@ -70,7 +70,7 @@ jobs:
           python newr check hello-crlf.newr
 
       # Cross-platform: two modules differing only by case must stay
-      # distinct. Linux only — see the header comment for why macOS
+      # distinct. Linux only - see the header comment for why macOS
       # and Windows cannot run this step.
       - name: Case-only module-collision test
         if: runner.os == 'Linux'
@@ -126,7 +126,7 @@ jobs:
       # launcher supplies the __main__.py entry point; the .pyz is
       # invoked the same way as the launcher, via `python newr.pyz ...`.
       # This artifact is what the zipapp-diff matrix job downloads on
-      # every OS — a .pyz built on Linux must run unchanged on
+      # every OS - a .pyz built on Linux must run unchanged on
       # Windows/macOS.
       - name: Build zipapp
         run: python -m zipapp . -o newr.pyz -p "/usr/bin/env python3"
@@ -155,7 +155,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # The SAME .pyz built on ubuntu (build-zipapp job), not a fresh
-      # local build — that is the whole point of the cross-OS check.
+      # local build - that is the whole point of the cross-OS check.
       - name: Download the ubuntu-built zipapp
         uses: actions/download-artifact@v4
         with:
@@ -188,7 +188,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # The v0 golden files must exist and be byte-identical to the v0
-      # originals. The hashes below are the v0 originals' SHA-256.
+      # originals. The hashes below are the pinned originals' SHA-256
+      # (refreshed 2026-11-07 for the em-dash removal; program text unchanged).
       # Emitter golden comparison (regenerating goldens from the .newr
       # sources and diffing) lands in M2, when the emitters do.
       - name: v0 golden files exist and match the v0 originals
@@ -199,8 +200,8 @@ jobs:
           python -c "
           import hashlib, sys
           expected = {
-              'examples/hello.py': '1eb3265be38e2639a1fe1339d121c5feedfa1ace413749a20e67f7b997543f00',
-              'examples/showcase.py': 'a8222f1be0f901ac9994c3978ed92dfeb38b2695830baba098dbc9206bf504d7',
+              'examples/hello.py': 'ac278c9874a121377ac19f19a4fedbea112bc6d4268c9e6d8e6776557d794359',
+              'examples/showcase.py': '45eab8e1daa5fafa4f33d441e1eaedf4dfa7a3b9e39175d89e6d357ada2d12c2',
           }
           for path, want in expected.items():
               got = hashlib.sha256(open(path, 'rb').read()).hexdigest()
@@ -245,7 +246,7 @@ jobs:
 
       # Build every example and run the emitted Python. The bots
       # (hello_bot, showcase, shop) stop at the DISCORD_TOKEN guard
-      # when no token is set: exit 1 with the token message — that
+      # when no token is set: exit 1 with the token message - that
       # is the expected behaviour here, and it proves the emitted
       # bot got far enough to run its main().
       - name: Build + run the examples
@@ -284,7 +285,7 @@ jobs:
   # M3: the JavaScript emitter job. One job per target; a failure
   # here never blocks the other targets' jobs, and vice versa.
   # Node 24 is the floor (node:sqlite is built in from 24; J9/J10).
-  # Python is still needed — the compiler itself is Python, and
+  # Python is still needed - the compiler itself is Python, and
   # the full suite includes the Python emitter tests too.
   js-emitter:
     name: js emitter (${{ matrix.os }}, Node ${{ matrix.node-version }})
@@ -310,8 +311,8 @@ jobs:
       # discord.py + aiosqlite are needed for the Python bot
       # emitter round-trip tests (tests/test_emitter_bot.py) that
       # the full suite includes. The JS bot tests use the in-repo
-      # mock discord.js (tests/js/mocks) — no npm install needed
-      # for the suite — but the example runs below load the emitted
+      # mock discord.js (tests/js/mocks) - no npm install needed
+      # for the suite - but the example runs below load the emitted
       # bot against REAL discord.js, so it is installed here.
       - name: Install discord.py + aiosqlite
         run: python -m pip install "discord.py==2.7.1" aiosqlite
@@ -330,7 +331,7 @@ jobs:
 
       # Build every example and run the emitted JS. The bots
       # (hello_bot, showcase, shop) stop at the DISCORD_TOKEN guard
-      # when no token is set: exit 1 with the token message — that
+      # when no token is set: exit 1 with the token message - that
       # is the expected behaviour here, and it proves the emitted
       # bot got far enough to run its main(). NODE_PATH points at
       # the real discord.js installed above (the emitted bot
@@ -373,7 +374,7 @@ jobs:
   # M4: the Java emitter job. One job per target; a failure here
   # never blocks the other targets' jobs, and vice versa.
   # Java 21 is the floor (Temurin 21 LTS; the emitted code uses no
-  # feature newer than Java 17, K1). Python is still needed — the
+  # feature newer than Java 17, K1). Python is still needed - the
   # compiler itself is Python, and the full suite includes the
   # Python emitter tests too. JDA + sqlite-jdbc are downloaded from
   # Maven Central (the jars are NOT vendored in the repo).
@@ -409,7 +410,7 @@ jobs:
       # slf4j-api + trove4j are JDA runtime dependencies: the
       # emitted bot's COMMANDS initializer runs at class-load time
       # (before main's token check), and JDA's CommandDataImpl
-      # needs both to load — without them the run dies with
+      # needs both to load - without them the run dies with
       # NoClassDefFoundError instead of reaching the token guard.
       - name: Download JDA + sqlite-jdbc + JDA runtime deps
         shell: bash
@@ -432,7 +433,7 @@ jobs:
       # Build every example, compile the emitted Java, and run it.
       # The bots (hello_bot, showcase, shop) stop at the
       # DISCORD_TOKEN guard when no token is set: exit 1 with the
-      # token message — that is the expected behaviour here, and it
+      # token message - that is the expected behaviour here, and it
       # proves the emitted bot got far enough to run its main().
       - name: Build + run the examples (Java)
         shell: bash
@@ -474,7 +475,7 @@ jobs:
   # M4: the C# emitter job. One job per target; a failure here
   # never blocks the other targets' jobs, and vice versa.
   # .NET 8 is the floor (LTS; the emitted code uses no feature newer
-  # than C# 12). Python is still needed — the compiler itself is
+  # than C# 12). Python is still needed - the compiler itself is
   # Python, and the full suite includes the Python emitter tests
   # too. Discord.Net + Microsoft.Data.Sqlite come from NuGet at
   # restore time (the packages are NOT vendored in the repo).
@@ -519,7 +520,7 @@ jobs:
 
       # Build every example, build the emitted C#, and run it. The
       # bots (hello_bot, showcase, shop) stop at the DISCORD_TOKEN
-      # guard when no token is set: exit 1 with the token message —
+      # guard when no token is set: exit 1 with the token message -
       # that is the expected behaviour here, and it proves the
       # emitted bot got far enough to run its Main().
       - name: Build + run the examples (C#)

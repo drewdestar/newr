@@ -4,7 +4,7 @@
 // a human in plain JavaScript (no checked helpers): 100,000
 // iterations of integer arithmetic, printing a checksum so the loop
 // cannot be optimized away. JS `%` already takes the dividend's
-// sign, like newr's `%` (tmod) — and the values stay far below
+// sign, like newr's `%` (tmod) - and the values stay far below
 // 2**53, so plain JS numbers are exact here.
 
 let total = 0;

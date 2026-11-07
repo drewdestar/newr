@@ -3,7 +3,7 @@
 Tests verify behavior through the public interface only: the AST shape
 (node types, names, key fields) and NewrError (code E1001, byte-offset
 span) for syntax errors. Spans are checked via line_col from
-compiler.errors — line/col are derived, never stored on nodes.
+compiler.errors - line/col are derived, never stored on nodes.
 """
 
 import sys

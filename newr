@@ -4,7 +4,7 @@
 Thin launcher: adds this checkout's directory to sys.path so the
 `compiler` package is importable, then dispatches to compiler.cli.
 The installed (pip console-script) form is the same entry point:
-``compiler.cli:main`` — so this launcher also works from PowerShell
+``compiler.cli:main`` - so this launcher also works from PowerShell
 and cmd on Windows via `python newr ...` (the console script is the
 packaged form, M4).
 """

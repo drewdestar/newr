@@ -72,7 +72,7 @@ class TestEveryPathAnswers(unittest.TestCase):
 
     def test_modal_answers(self):
         # BUG-M2-3: a modal sends a response directly (send_modal),
-        # so it answers the interaction — unlike a button/select,
+        # so it answers the interaction - unlike a button/select,
         # which only attach to a reply. A command whose only action
         # is showing a modal must not be E2010.
         body = ('    modal "Feedback" (timeout: 120s):\n'

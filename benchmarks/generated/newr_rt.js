@@ -7,7 +7,7 @@
 // It is stdlib-only (node:fs, node:crypto) and dependency-free.
 //
 // It lives in the compiler package as `compiler/newr_rt.js` and `newr
-// build --target js` copies it — byte-identical — next to an emitted
+// build --target js` copies it - byte-identical - next to an emitted
 // `.js` file when (and only when) that program uses a helper from it.
 // Do not edit a copied file by hand: edit this file in the newr repo
 // and rebuild.
@@ -16,7 +16,7 @@
 // is unit-tested in tests/js/rt_tests.js (run by
 // tests/test_newr_rt_js.py).
 //
-// Module system (J1): CommonJS — `require("./newr_rt.js")` — so an
+// Module system (J1): CommonJS - `require("./newr_rt.js")` - so an
 // emitted file runs with plain `node file.js` and no package.json.
 // The runtime is required with a single destructured require:
 // `const { add, ... } = require("./newr_rt.js")`.
@@ -74,9 +74,9 @@ class NewrOverflowError extends NewrError {
 class NewrDivisionByZeroError extends NewrError {
   // Division or modulo by zero. Same code rule as above: the
   // Python twin is constructed without a code, so e.code is none
-  // in a `catch`. The builtin sites — `0.0 ** -1`, where Python
+  // in a `catch`. The builtin sites - `0.0 ** -1`, where Python
   // raises ZeroDivisionError itself, and float `/` by zero, where
-  // Python's native `/` raises it — throw
+  // Python's native `/` raises it - throw
   // codedError("ZeroDivisionError", ...) in powFloat and fdiv
   // instead (§18 fix 2: fdiv was missed by the §17.4 item-4 list).
   constructor(message) {
@@ -138,7 +138,7 @@ function powInt(a, b) {
   // newr `**` on ints: checked, bounded before computing.
   // A negative exponent is an error (an int result cannot represent
   // it). The exponent is bounded by repeated squaring with a check
-  // at every multiply — `10 ** 10**9` raises instead of allocating
+  // at every multiply - `10 ** 10**9` raises instead of allocating
   // by computing blindly.
   if (b < 0n) {
     throw new NewrError("negative exponent for int pow");
@@ -169,7 +169,7 @@ function powInt(a, b) {
 
 function tdiv(a, b) {
   // newr `/` on ints: truncating division (toward zero). BigInt `/`
-  // already truncates — the check is that the operands ARE BigInts
+  // already truncates - the check is that the operands ARE BigInts
   // (the checker guarantees it) and the two error cases.
   if (b === 0n) {
     throw new NewrDivisionByZeroError("integer division by zero");
@@ -195,14 +195,14 @@ function tmod(a, b) {
 function powFloat(a, b) {
   // newr `**` on floats: IEEE semantics. JS `**` already returns
   // NaN for a negative base with a fractional exponent (Python
-  // returns a complex there — newr has no complex type, so the
+  // returns a complex there - newr has no complex type, so the
   // answer is NaN) and Infinity on overflow. The one case JS gets
   // wrong is a zero base with a negative exponent: JS gives
   // Infinity, Python raises ZeroDivisionError.
   if (a === 0 && b < 0) {
     // Python raises the builtin ZeroDivisionError here (not the
     // NewrError subclass), so a `catch e:` sees code
-    // "ZeroDivisionError" — codedError, not the class.
+    // "ZeroDivisionError" - codedError, not the class.
     throw codedError("ZeroDivisionError",
       "0.0 cannot be raised to a negative power");
   }
@@ -224,13 +224,13 @@ function fdiv(a, b) {
   // newr `/` on floats: IEEE division, except division by zero
   // raises like Python (JS would give Infinity for a non-zero
   // dividend and NaN for 0/0). `b === 0` covers -0 as well.
-  // (P6: float /0 is an error — the Python target gets this free
+  // (P6: float /0 is an error - the Python target gets this free
   // from Python's own `/`; JS needs the check.) Python's native
   // `/` raises the BUILTIN ZeroDivisionError, so this throws the
-  // coded error (§18 fix 2), not the codeless class — a `catch e:`
+  // coded error (§18 fix 2), not the codeless class - a `catch e:`
   // sees e.code == "ZeroDivisionError" on both targets. (Float `%`
   // is different: both targets route it through fmod, which raises
-  // the codeless NewrDivisionByZeroError — that parity is correct.)
+  // the codeless NewrDivisionByZeroError - that parity is correct.)
   if (b === 0) {
     throw codedError("ZeroDivisionError", "float division by zero");
   }
@@ -311,7 +311,7 @@ function _decimalString(digits, places) {
 
 function roundHalfAway(x, ndigits = undefined) {
   // newr `round()`: half-away-from-zero (schoolbook), on the EXACT
-  // value of the float — not its shortest repr. `round(2.675, 2)`
+  // value of the float - not its shortest repr. `round(2.675, 2)`
   // is 2.67, because the float 2.675 is stored slightly below
   // 2.675. `round(x)` returns an `int` (int64 range-checked);
   // `round(x, n)` returns a `float`. Non-finite input:
@@ -451,7 +451,7 @@ function toBool(x) {
 // round-trip digits, scientific notation iff the decimal exponent
 // is < -4 or >= 16, ".0" for integral floats. JS String() differs:
 // String(1.0) is "1", String(1e16) is "10000000000000000",
-// String(0.00001) is "0.00001" — Python gives "1.0", "1e+16",
+// String(0.00001) is "0.00001" - Python gives "1.0", "1e+16",
 // "1e-05".
 function floatStr(x) {
   if (Number.isNaN(x)) {
@@ -468,7 +468,7 @@ function floatStr(x) {
   }
   const neg = x < 0;
   // Shortest digits + exponent: toExponential() gives "d.ddde±XX"
-  // (of the absolute value — the sign is handled separately).
+  // (of the absolute value - the sign is handled separately).
   const exp = Math.abs(x).toExponential();
   const m = /^(\d)(?:\.(\d+))?e([+-]?\d+)$/.exec(exp);
   const digits = (m[1] + (m[2] || "")).replace(/0+$/, "") || "0";
@@ -601,7 +601,7 @@ function tryResult(f) {
 
 function eq(a, b) {
   // newr `==`: structural equality (§7.7). Primitives compare by
-  // value (BigInt 1n is not == number 1 — the checker forbids mixed
+  // value (BigInt 1n is not == number 1 - the checker forbids mixed
   // comparisons, so that never arises from a checked program);
   // lists compare element-wise, dicts by key (order-insensitive),
   // sets unordered, structs/enums by constructor + fields, Results
@@ -693,7 +693,7 @@ function eq(a, b) {
 
 function optChain(v, f) {
   // newr `?.`: `null` when `v` is `null`, else `f(v)`. The test is
-  // `=== null`, never truthiness — `0n`, `""` and `[]` are values,
+  // `=== null`, never truthiness - `0n`, `""` and `[]` are values,
   // not absences. A whole `?.` chain collapses into one call with
   // the full postfix path inside `f`, so the base expression is
   // evaluated exactly once.
@@ -707,7 +707,7 @@ function coalesce(v, defaultFn) {
 }
 
 function listIndex(lst, i) {
-  // newr `list[i]`: SPEC §9.2 — out-of-range indexing is a runtime
+  // newr `list[i]`: SPEC §9.2 - out-of-range indexing is a runtime
   // error. Valid indices are `0 <= i < len(lst)`; a negative index
   // is out of range (never a wrap).
   if (i < 0n || i >= BigInt(lst.length)) {
@@ -717,7 +717,7 @@ function listIndex(lst, i) {
 }
 
 function listGet(lst, i, dflt) {
-  // newr `list.get(i, default)`: P9 — a negative index is
+  // newr `list.get(i, default)`: P9 - a negative index is
   // out-of-range (no wrap-around); anything outside
   // `0 <= i < len(lst)` returns `default`.
   return i >= 0n && i < BigInt(lst.length) ? lst[Number(i)] : dflt;
@@ -873,7 +873,7 @@ const _TIME_FORMATS = new Set(["%Y-%m-%d", "%H:%M", "%Y-%m-%d %H:%M",
   "%d/%m/%Y", "%H:%M:%S"]);
 
 function timeFormat(ts, fmt) {
-  // newr `time.format(ts, fmt)`: UTC, never local time (P4) — the
+  // newr `time.format(ts, fmt)`: UTC, never local time (P4) - the
   // same program prints the same output on every machine. The
   // format must be one of the spec's fixed set (§12.2).
   if (!_TIME_FORMATS.has(fmt)) {
@@ -910,7 +910,7 @@ function fileRead(path) {
   // newr `file.read(path)`: the whole file as UTF-8 text. A helper
   // (not an inline read) so a read inside a lambda body or an
   // optional chain still happens at the right time. A missing file
-  // throws a Node error (code "ENOENT" — the Python target reports
+  // throws a Node error (code "ENOENT" - the Python target reports
   // "FileNotFoundError" there; the code for host IO errors is
   // host-specific, BUILD_REPORT §17).
   return fs.readFileSync(path, "utf-8");

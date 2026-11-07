@@ -75,7 +75,7 @@ class TestConformanceRun(unittest.TestCase):
         self.assertIn("ok ", r.stdout)
 
     def test_ok_programs_build_run_and_print_pass_js(self):
-        # M3: the same corpus on the JavaScript target — built with
+        # M3: the same corpus on the JavaScript target - built with
         # `--target js`, run under Node, same PASS contract.
         r = subprocess.run([sys.executable, str(ROOT / "conformance"
                                                 / "run.py"),

@@ -2,7 +2,7 @@
 
 Writes programs under stress/corpus/ plus manifest.json describing each
 case: {name, category, expected, notes}. `expected` is the *intent* of
-the case (valid / error / crash-candidate), NOT a verdict — the harness
+the case (valid / error / crash-candidate), NOT a verdict - the harness
 records the actual outcome and the report flags mismatches.
 
 Usage: python3 gen_corpus.py [--out DIR] [--seed N]
@@ -570,7 +570,7 @@ BYTES_CASES = {
                   "lone CR must be E_BAD_LINE_ENDING (M-07)"),
     "b_crlf_error": (
         b'print "ok"\r\nprint nosuchvar\r\n', "error",
-        "CRLF file, error on line 2 — JSON offsets must match raw bytes (M-06)",
+        "CRLF file, error on line 2 - JSON offsets must match raw bytes (M-06)",
     ),
     "b_mixed_endings": (b'print "a"\r\nprint "b"\rprint "c"\n', "error",
                         "mixed CRLF + lone CR"),
@@ -580,7 +580,7 @@ BYTES_CASES = {
     "b_truncated_fn": (b"fn f(a: int) -> int:\n  return", "error",
                        "EOF mid-return"),
     "b_cesu8_surrogate": (b'print "\xed\xa0\x80"\n', "error",
-                          "CESU-8 lone surrogate bytes — must not crash"),
+                          "CESU-8 lone surrogate bytes - must not crash"),
     "b_nul_byte": (b'print "a\x00b"\n', "error",
                    "NUL byte inside string"),
     "b_nul_outside": (b'print 1\x00\n', "error", "NUL byte outside string"),

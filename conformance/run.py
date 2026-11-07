@@ -11,13 +11,13 @@ Usage:
                                              regenerate one golden
 
 Golden policy (BUILD_REPORT.md D3): goldens are compare-only by
-default — `tests/test_goldens.py` builds each golden's source to a
+default - `tests/test_goldens.py` builds each golden's source to a
 temp dir and diffs it against the golden file. Regeneration needs
 an explicit `--bless`; never hand-edit a golden. Every golden diff
 is reviewed line-by-line.
 
 The header names the input file as passed (D2), so --bless always
-builds from the repo-relative `examples/<name>.newr` path — that
+builds from the repo-relative `examples/<name>.newr` path - that
 keeps the golden header deterministic.
 """
 
@@ -112,7 +112,7 @@ def _build_to_temp(source: Path, target: str = "py") -> dict[str, str]:
     """Build a source into a temp dir; return {basename: text}.
 
     The source is passed repo-relative (e.g. `examples/shop.newr`)
-    so the emitted header names it that way (D2) — the golden
+    so the emitted header names it that way (D2) - the golden
     header is deterministic.
     """
     suffix = _SUFFIX[target]
@@ -132,7 +132,7 @@ def _build_to_temp(source: Path, target: str = "py") -> dict[str, str]:
                 continue
             files[p.name] = p.read_text(encoding="utf-8")
         if target == "cs":
-            # The .csproj is build scaffolding, not a golden — but
+            # The .csproj is build scaffolding, not a golden - but
             # the conformance runner needs it in the temp dir to
             # `dotnet run` the program (the glob above only matches
             # *.cs). bless() ignores it: GOLDENS_CS lists only .cs.
@@ -166,7 +166,7 @@ def bless(only: str | None = None, target: str = "py") -> int:
 
 def run_conformance(target: str = "py") -> int:
     """Build + run every ok program; each must exit 0 and print
-    `PASS` as its last line (the program self-verifies — the
+    `PASS` as its last line (the program self-verifies - the
     honest equivalent of Gleam's model, since v1 has no in-language
     test framework). A program may print other lines before its
     verdict."""

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="hero-title hero-desc">
+  <title id="hero-title">newr</title>
+  <desc id="hero-desc">newr, a general-purpose programming language. A new language for a new era. One readable source. Seven readable outputs.</desc>
+  <rect width="1200" height="300" fill="#0d1117"/>
+  <rect x="80" y="76" width="64" height="6" rx="3" fill="#3fb950"/>
+  <text x="80" y="172" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="96" font-weight="700" letter-spacing="-2" fill="#f0f6fc">newr</text>
+  <text x="80" y="216" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="28" fill="#c9d1d9">A new language for a new era.</text>
+  <text x="80" y="254" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="19" fill="#8b949e">One readable source. Seven readable outputs. &#183; v0.1.0</text>
+  <rect x="800" y="72" width="320" height="156" rx="8" fill="#161b22" stroke="#30363d"/>
+  <text x="824" y="114" font-family="SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace" font-size="16" fill="#8b949e"># hello.newr</text>
+  <text x="824" y="152" font-family="SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace" font-size="20" fill="#f0f6fc">print <tspan fill="#3fb950">"Hello, world!"</tspan></text>
+  <text x="824" y="192" font-family="SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace" font-size="16" fill="#8b949e">$ ./newr build --target py</text>
+</svg>

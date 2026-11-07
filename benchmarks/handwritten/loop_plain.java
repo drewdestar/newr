@@ -4,7 +4,7 @@
 // a human in plain Java (no checked helpers): 100,000 iterations
 // of integer arithmetic, printing a checksum so the loop cannot be
 // optimized away. Java `%` already takes the dividend's sign, like
-// newr's `%` (tmod) — and the values stay far below 2**63, so plain
+// newr's `%` (tmod) - and the values stay far below 2**63, so plain
 // longs are exact here.
 
 public class loop_plain {

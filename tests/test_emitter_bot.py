@@ -2,13 +2,13 @@
 
 The bot emitter turns a checked bot program into a discord.py bot:
 the v0 golden template (examples/hello.py, examples/showcase.py) is
-the reference shape — a `Bot` subclass, module-level `cmd_*`
+the reference shape - a `Bot` subclass, module-level `cmd_*`
 functions, `@bot.tree.error`, `_channel_text`, `main()`.
 
 Text-assertion tests run in the normal suite (they need no discord).
 Mock round-trip tests (a fake interaction calls a `cmd_*` function
 and the recorded reply is asserted) need discord.py 2.7.1, which
-lives only in the `newr-verify` venv — they skip without it and run
+lives only in the `newr-verify` venv - they skip without it and run
 under `~/workspace/venvs/newr-verify/bin/python -m unittest`.
 """
 
@@ -59,10 +59,10 @@ bot "ShopBot":
 
 strings en:
   "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
-  "buy.poor": "Not enough gold — {item} costs {price}, you have {balance}."
+  "buy.poor": "Not enough gold - {item} costs {price}, you have {balance}."
 strings id:
   "buy.ok": "Membeli {item} seharga {price} gold. Saldo: {balance}."
-  "buy.poor": "Gold tidak cukup — {item} harganya {price}, kamu punya {balance}."
+  "buy.poor": "Gold tidak cukup - {item} harganya {price}, kamu punya {balance}."
 
 store economy:
   table balances (user: str, balance: int)
@@ -358,7 +358,7 @@ class TestBotStatements(unittest.TestCase):
 
     def test_await_inside_fstring_field(self):
         # shop's balance reply: the store call is awaited inside the
-        # f-string field (D15 verification — must be real Python).
+        # f-string field (D15 verification - must be real Python).
         text = emit_shop_text()
         self.assertIn("f\"Balance: {await bot.economy_balance("
                       "str(interaction.user.id))} gold.\"", text)
@@ -377,7 +377,7 @@ class TestBotStrings(unittest.TestCase):
 
     def test_t_call_handler_binding_placeholder(self):
         # A template placeholder that is a handler binding (user) is
-        # auto-passed — the command does not list it as an argument.
+        # auto-passed - the command does not list it as an argument.
         src = ("bot \"B\":\n"
                "  description: \"B\"\n"
                "strings en:\n"
@@ -412,7 +412,7 @@ class TestBotStore(unittest.TestCase):
 
     def test_economy_uses_lock_and_explicit_transactions(self):
         # M2 evaluation must-fix #2: the economy ops must be atomic
-        # — one explicit transaction per op, serialised by a lock
+        # - one explicit transaction per op, serialised by a lock
         # (aiosqlite runs all ops in one thread, so a second
         # coroutine's BEGIN IMMEDIATE would block it).
         text = emit_shop_text()
@@ -488,7 +488,7 @@ class TestBotComponents(unittest.TestCase):
     def test_select(self):
         # A select attaches to a preceding reply (it does not answer
         # by itself), and its `values` (list[str]) is joined for
-        # display — a list cannot be interpolated (E2001).
+        # display - a list cannot be interpolated (E2001).
         src = ("bot \"B\":\n"
         "  description: \"B\"\n"
                "command x:\n"
@@ -562,7 +562,7 @@ class TestBotBindings(unittest.TestCase):
 # ---------------------------------------------------------------- mock round-trip
 
 # §19: a bot file's top-level declarations (fn, struct, enum, let)
-# must be emitted — before the fix, a handler calling a file-module
+# must be emitted - before the fix, a handler calling a file-module
 # fn died with NameError: the definitions were silently dropped
 # from the bot file (the checker accepted the program).
 SCOPE_BOT = """fn div(a: int, b: int) -> Result[int, error]:
@@ -758,7 +758,7 @@ class TestBotMockRoundTrip(unittest.TestCase):
 
     def test_top_level_declarations_reach_handlers(self):
         # §19: the bot file's top-level fn/struct/enum/let must be
-        # emitted — a handler calling a file-module fn used to die
+        # emitted - a handler calling a file-module fn used to die
         # with NameError (the definitions were silently dropped).
         # This is a ROUND-TRIP test: the bot actually runs and the
         # real replies are asserted, not the emitted text.
@@ -787,7 +787,7 @@ class TestBotMockRoundTrip(unittest.TestCase):
 
     def test_top_level_statement_runs_at_import(self):
         # §19: a top-level statement in a bot file runs when the
-        # module loads (before main()), same as in a general file —
+        # module loads (before main()), same as in a general file -
         # proven by executing the module and capturing stdout.
         import contextlib
         import io
@@ -836,7 +836,7 @@ class TestBotMockRoundTrip(unittest.TestCase):
     def test_transfer_crash_between_legs_then_retry_heals(self):
         # M2 evaluation must-fix #2: seed alice 100, simulate a
         # crash between the two legs (out-leg committed, in-leg
-        # never ran), then retry — the retry must HEAL the transfer
+        # never ran), then retry - the retry must HEAL the transfer
         # (credit bob the missing 50), not report success on a
         # half-done transfer. Total money is conserved (100).
         async def scenario(bot):

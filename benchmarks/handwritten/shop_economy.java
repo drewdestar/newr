@@ -1,7 +1,7 @@
 // Hand-written shop economy benchmark (B6b comparison).
 //
 // The same 1,000 credits as benchmarks/generated/shop_economy.java,
-// written by a human with plain JDBC + sqlite-jdbc directly — the
+// written by a human with plain JDBC + sqlite-jdbc directly - the
 // same SQL shape the emitted Java bot uses (balances stored as TEXT,
 // BEGIN IMMEDIATE / COMMIT per credit, INSERT ... ON CONFLICT for
 // the balance; no ledger row when the key is null, exactly like the
@@ -12,14 +12,14 @@
 // the runner starts every run in a fresh temp dir, so the balance
 // is fresh and both drivers pay the same fsync cost on the same
 // filesystem. (An earlier draft put the hand-written DB in /tmp
-// while the generated one sat on the home disk — the generated
+// while the generated one sat on the home disk - the generated
 // driver then looked ~100x slower, purely from fsync latency.)
 //
 // The `Class.forName("net.dv8tion.jda.api.JDABuilder")` below is
 // deliberate (M2 fix #6): the generated driver loads the whole
 // emitted shop bot, which loads JDA; without the same class load
 // here, hyperfine would measure JVM + JDA startup, not the economy
-// loop. It is a load only — no Discord connection is made.
+// loop. It is a load only - no Discord connection is made.
 
 import java.io.File;
 import java.sql.Connection;

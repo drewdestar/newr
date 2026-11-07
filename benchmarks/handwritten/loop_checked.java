@@ -1,7 +1,7 @@
 // Hand-written checked-int tight loop with the newr runtime (B6).
 //
 // The same loop as benchmarks/generated/loop.newr emits, written by
-// a human using the NewrRt checked helpers directly — the honest
+// a human using the NewrRt checked helpers directly - the honest
 // comparison for "what does the checked-int runtime cost": the
 // emitted program should be within noise of this one, and both are
 // slower than the plain-int loop (loop_plain.java).

@@ -331,7 +331,7 @@ class Checker:
             # N-05: `option[int]` is the spelling from other languages;
             # in newr nullability is `T?`.
             self._error(span, "E3001", "unknown type `option`",
-                        help="nullability is spelled `T?` in newr — "
+                        help="nullability is spelled `T?` in newr - "
                              "write `int?` instead of `option[int]`")
             return
         self._error(span, "E3001", f"unknown type `{t.name}`",
@@ -394,7 +394,7 @@ class Checker:
             # R4: `none` is compatible with any `T?` in check position.
             return t
         if expected.nullable and t == _strip_nullable(expected):
-            # R4b (M-03): a `T` value widens to `T?` — a nullable
+            # R4b (M-03): a `T` value widens to `T?` - a nullable
             # type is inhabited by its inner values as well as `none`.
             return t
         if t != expected:
@@ -445,7 +445,7 @@ class Checker:
         if self._depth > MAX_NESTING_DEPTH:
             self._depth -= 1
             self._error(expr.span, "E1001", "too deeply nested",
-                        help="split the expression into smaller pieces — "
+                        help="split the expression into smaller pieces - "
                              "newr limits nesting to 200 levels so a bad "
                              "input cannot exhaust the stack")
             return UNKNOWN
@@ -663,7 +663,7 @@ class Checker:
                 expr.operand.value == INT64_MAX + 1:
             # M-08: `-9223372036854775808` is the int64 minimum. The
             # literal alone is out of range, but directly negated it
-            # is exactly representable — accept it without routing the
+            # is exactly representable - accept it without routing the
             # literal through _synth_Lit (which would reject it).
             return INT
         t = self.synth(expr.operand)
@@ -743,7 +743,7 @@ class Checker:
             return UNKNOWN
         # N-05: diagnose the OPERAND first. A `?` after a plain value
         # (`let x = 1 ?`) is an operand problem, not a return-type
-        # problem — reporting the return type first misleads.
+        # problem - reporting the return type first misleads.
         is_result = t.name == "Result" and bool(t.params) and not t.nullable
         is_nullable = t.nullable and t.name != "Result"
         if t.name == "Result" and t.nullable:
@@ -765,14 +765,14 @@ class Checker:
                         "`?` needs a `Result[T, E]` or a `T?` value",
                         expected="Result[T, E] or T?", found=str(t),
                         help="only a fallible value can be propagated "
-                             "with `?` — a plain value has nothing to "
+                             "with `?` - a plain value has nothing to "
                              "propagate")
             return UNKNOWN
         # The kind rule (D30, mirrored exactly from the emitter's
         # `_propagate_unwrapped`): a Result operand needs a
         # Result-returning function; a nullable operand needs a
         # nullable-returning function. A handler returns nothing, so
-        # `?` there just exits the handler (a bare `return`) — either
+        # `?` there just exits the handler (a bare `return`) - either
         # kind is allowed.
         if self._in_handler:
             return ok
@@ -927,7 +927,7 @@ class Checker:
             inner = _strip_nullable(obj_type)
             if name in METHODS.get("nullable", {}):
                 # §16 (hole 2): a bare nullable-method name is a
-                # FUNCTION value, not its return type — `v.is_some`
+                # FUNCTION value, not its return type - `v.is_some`
                 # is `fn() -> bool`, `v?.is_some` is the nullable
                 # fn `(fn() -> bool)?`. (Calls go through
                 # `_call_member`, which reads the METHODS table
@@ -943,7 +943,7 @@ class Checker:
                 if _is_unknown(ft):
                     return UNKNOWN
                 # §16 (hole 2): a fn value reached through `?.` is
-                # itself nullable — `xs?.len` is `(fn() -> int)?`,
+                # itself nullable - `xs?.len` is `(fn() -> int)?`,
                 # not a plain fn. Returning it unwrapped lied about
                 # the type, and calling it died with a raw
                 # TypeError when the receiver was `none`.
@@ -955,13 +955,13 @@ class Checker:
                              "or unwrap the value first")
             return UNKNOWN
         # M-10 (SPEC.md SS9.2): `?.` on a non-nullable receiver is an
-        # error — a non-nullable value is never `none`, so the chain
+        # error - a non-nullable value is never `none`, so the chain
         # is dead code and almost certainly a typo for `.`.
         if optional and not _in_chain:
             self._error(span, "E2001",
                         f"`?.` on a non-nullable `{obj_type}` value",
                         expected=str(obj_type), found=str(obj_type),
-                        help=f"use `.{name}` here — `?.` is only for "
+                        help=f"use `.{name}` here - `?.` is only for "
                              "`T?` values; a non-nullable value is never "
                              "`none`")
             return UNKNOWN
@@ -1020,7 +1020,7 @@ class Checker:
         if isinstance(expr, A.Member):
             return expr.optional or self._is_optional_chain(expr.obj)
         if isinstance(expr, A.Call) and isinstance(expr.func, A.Member):
-            # A method call in the chain: `s?.unwrap().upper()` —
+            # A method call in the chain: `s?.unwrap().upper()` -
             # the receiver of `.upper()` is the `?.unwrap()` call.
             return expr.func.optional or self._is_optional_chain(
                 expr.func.obj)
@@ -1097,13 +1097,13 @@ class Checker:
                 obj.name in self._ctx.enums:
             return self._member_field_type(Type(obj.name), expr.name,
                                            expr.span, expr.optional, obj)
-        # §20: qualified imported enum member — `m_helper.Shade.Red`.
+        # §20: qualified imported enum member - `m_helper.Shade.Red`.
         # The enum name itself is not a value (like a local bare enum
         # name, which the emitter also refuses), so only the full
         # chain is typed, from the imported module's enum
         # declaration. The intermediate `m_helper.Shade` node gets no
-        # type of its own — the local `Color.Red` path does not type
-        # its `Color` either — and the emitters resolve the whole
+        # type of its own - the local `Color.Red` path does not type
+        # its `Color` either - and the emitters resolve the whole
         # chain at emit time without typing the intermediate node.
         if isinstance(obj, A.Member) and isinstance(obj.obj, A.Name):
             binding = self._lookup(obj.obj.name)
@@ -1361,10 +1361,10 @@ class Checker:
                 ft = binding.type
                 if ft.name == "fn" and ft.nullable:
                     # §16 (hole 2): a nullable fn value may be
-                    # `none` — calling it directly would die with a
+                    # `none` - calling it directly would die with a
                     # raw TypeError, so it is an error at check.
                     self._error(expr.span, "E2001",
-                                f"`{name}` may be `none` — unwrap it "
+                                f"`{name}` may be `none` - unwrap it "
                                 "before calling it",
                                 expected="fn(...) -> ...", found=str(ft),
                                 help="use `.unwrap()` to get the "
@@ -1401,11 +1401,11 @@ class Checker:
                 self.synth(arg)
             return UNKNOWN
         if ft.name == "fn" and ft.nullable:
-            # §16 (hole 2): same rule as for a named fn value — a
+            # §16 (hole 2): same rule as for a named fn value - a
             # nullable fn may be `none`, so calling it directly is
             # an error at check, not a raw TypeError at runtime.
             self._error(expr.span, "E2001",
-                        "this function value may be `none` — unwrap "
+                        "this function value may be `none` - unwrap "
                         "it before calling it",
                         expected="fn(...) -> ...", found=str(ft),
                         help="use `.unwrap()` to get the function "
@@ -1462,7 +1462,7 @@ class Checker:
                 return NONE_TYPE
             if self._ctx is not None and obj.name in self._ctx.enums:
                 return self._call_enum_variant(obj.name, func.name, expr)
-        # §20: qualified imported fielded-variant construction —
+        # §20: qualified imported fielded-variant construction -
         # `m_helper.Shape.Circle(radius: 1.5)`. Mirrors the local
         # enum branch above, but takes the declaration from the
         # imported module's context instead of this file's.
@@ -1493,7 +1493,7 @@ class Checker:
                 # nullable: the plain (non-optional) form.
                 return ret
             # `?.is_some()` / `?.is_none()` / `?.unwrap()`: the chain
-            # short-circuits on `none`, so the result is nullable —
+            # short-circuits on `none`, so the result is nullable -
             # EXCEPT `?.unwrap()` on a nullable Result, where the
             # `?` unwraps the outer nullable and `.unwrap()` unwraps
             # the Result inside, so the result is the Result's value
@@ -1532,12 +1532,12 @@ class Checker:
             return UNKNOWN
         methods = self._methods_for(obj_type)
         # M-10 (SPEC.md SS9.2): `?.` on a non-nullable receiver is an
-        # error — same rule as field access in _member_field_type.
+        # error - same rule as field access in _member_field_type.
         if func.optional:
             self._error(func.span, "E2001",
                         f"`?.` on a non-nullable `{obj_type}` value",
                         expected=str(obj_type), found=str(obj_type),
-                        help=f"use `.{func.name}(...)` here — `?.` is "
+                        help=f"use `.{func.name}(...)` here - `?.` is "
                              "only for `T?` values; a non-nullable value "
                              "is never `none`")
             for arg in expr.args:
@@ -1919,7 +1919,7 @@ class Checker:
 
     def _walk_stmts(self, stmts: list, top_level: bool = False,
                     allow_contracts: bool = False) -> None:
-        # BUG-M2-1: `_in_top_level` is a flag, not a parameter —
+        # BUG-M2-1: `_in_top_level` is a flag, not a parameter -
         # nested bodies walked from a top-level statement (an
         # `if` / `for` / `while` body, a `try` catch ...) used to
         # inherit it, so a `let` inside one was treated as a
@@ -1979,7 +1979,7 @@ class Checker:
         if self._depth > MAX_NESTING_DEPTH:
             self._depth -= 1
             self._error(st.span, "E1001", "too deeply nested",
-                        help="split the block into smaller pieces — newr "
+                        help="split the block into smaller pieces - newr "
                              "limits nesting to 200 levels so a bad input "
                              "cannot exhaust the stack")
             return

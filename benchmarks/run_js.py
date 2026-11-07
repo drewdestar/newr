@@ -11,7 +11,7 @@ ratio >1.20 on runtime or >1.50 on size (generated vs hand-written)
 is a bug report, not a marketing line (proposal thresholds).
 
 The discord.js import in B6b is satisfied by the in-repo mock
-(tests/js/mocks) — real discord.js 14.28.1 is not installed in
+(tests/js/mocks) - real discord.js 14.28.1 is not installed in
 this repo, so both drivers pay the same small mock require cost
 and the ratio is the honest figure; the absolute times understate
 a real discord.js import. See BENCHMARKS.md.
@@ -95,7 +95,7 @@ def main() -> int:
     node_ver = subprocess.run([NODE, "--version"], capture_output=True,
                               text=True).stdout.strip()
 
-    # B1: compile cold (no warmup) — the JS target.
+    # B1: compile cold (no warmup) - the JS target.
     results["b1_hello_js"] = _hyperfine(
         "b1_hello_js", [PY, str(LAUNCHER), "build", "--target", "js",
                         "examples/hello.newr", "-o", "/tmp/bench_hello.js"],
@@ -187,38 +187,38 @@ def main() -> int:
         return a["mean"] / b["mean"]
 
     md = []
-    md.append("\n# Benchmarks — M3 (JavaScript emitter)\n")
+    md.append("\n# Benchmarks - M3 (JavaScript emitter)\n")
     md.append(f"Machine: {platform.system()} {platform.machine()}, "
               f"Python {platform.python_version()}, Node {node_ver}, "
               f"hyperfine {subprocess.run([str(HYPERFINE), '--version'], capture_output=True, text=True).stdout.strip()}.\n")
     md.append("All figures are measured, not promised. Raw hyperfine JSON "
               "is in `benchmarks/raw/` (`*_js.json`). The compile "
               "benchmarks (B1/B2/B7-compile) measure the same Python "
-              "compiler as M2, emitting JS instead of Python — the "
+              "compiler as M2, emitting JS instead of Python - the "
               "difference is the emitter. The B6b discord.js import is "
               "satisfied by the in-repo mock (tests/js/mocks), not real "
               "discord.js 14.28.1: both drivers pay the same small mock "
               "require cost, so the ratio is honest but the absolute "
               "times understate a real discord.js import.\n")
-    md.append("## B1 — Compile, cold (no warmup), `--target js`\n")
+    md.append("## B1 - Compile, cold (no warmup), `--target js`\n")
     md.append(f"- hello: {fmt(results['b1_hello_js'])}")
     md.append(f"- shop: {fmt(results['b1_shop_js'])}\n")
-    md.append("## B2 — Compile, warm, `--target js`\n")
+    md.append("## B2 - Compile, warm, `--target js`\n")
     md.append(f"- hello (no change): {fmt(results['b2_hello_js'])}")
     md.append(f"- shop (one file changed): {fmt(results['b2_shop_change_js'])}\n")
-    md.append("## B4 — Generated code size (JS)\n")
+    md.append("## B4 - Generated code size (JS)\n")
     for label, s in sizes.items():
         md.append(f"- {label}: {s['bytes']} bytes, {s['lines']} lines")
     md.append(f"- hello size ratio (generated/hand-written): "
               f"{sizes['hello_gen']['bytes']/sizes['hello_hw']['bytes']:.2f}")
     md.append(f"- loop size ratio (generated/hand-written): "
               f"{sizes['loop_gen']['bytes']/sizes['loop_hw']['bytes']:.2f}\n")
-    md.append("## B5 — Generated program startup (node)\n")
+    md.append("## B5 - Generated program startup (node)\n")
     md.append(f"- generated hello: {fmt(results['b5_hello_gen_js'])}")
     md.append(f"- hand-written hello: {fmt(results['b5_hello_hw_js'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b5_hello_gen_js'], results['b5_hello_hw_js']):.2f}\n")
-    md.append("## B6 — Generated runtime (checked-int tight loop, 100k iterations)\n")
+    md.append("## B6 - Generated runtime (checked-int tight loop, 100k iterations)\n")
     md.append(f"- generated (checked helpers, BigInt): {fmt(results['b6_loop_gen_js'])}")
     md.append(f"- hand-written, plain JS numbers: {fmt(results['b6_loop_plain_js'])}")
     md.append(f"- hand-written, newr_rt.js helpers: {fmt(results['b6_loop_checked_js'])}")
@@ -226,17 +226,17 @@ def main() -> int:
               f"{ratio(results['b6_loop_gen_js'], results['b6_loop_plain_js']):.2f}")
     md.append(f"- ratio generated/checked-hand-written: "
               f"{ratio(results['b6_loop_gen_js'], results['b6_loop_checked_js']):.2f}")
-    md.append("  (All three print the same checksum, 105003 — the loops agree.)\n")
-    md.append("## B6b — Shop economy, 1,000 credits (node:sqlite, sync, commit per call)\n")
+    md.append("  (All three print the same checksum, 105003 - the loops agree.)\n")
+    md.append("## B6b - Shop economy, 1,000 credits (node:sqlite, sync, commit per call)\n")
     md.append(f"- generated (emitted shop Bot): {fmt(results['b6b_shop_gen_js'])}")
     md.append(f"- hand-written (node:sqlite directly): {fmt(results['b6b_shop_hw_js'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b6b_shop_gen_js'], results['b6b_shop_hw_js']):.2f}")
     md.append("  (Both print the final balance 1000.)\n")
-    md.append("## B7 — Peak RSS (JS)\n")
+    md.append("## B7 - Peak RSS (JS)\n")
     md.append(f"- compile (shop, --target js): {results['b7_compile_js']['rss_mb']:.1f} MB")
     md.append(f"- run (hello, node): {results['b7_run_js']['rss_mb']:.1f} MB\n")
-    md.append("## B8 — Hand-written parity (JS)\n")
+    md.append("## B8 - Hand-written parity (JS)\n")
     md.append(f"- startup ratio: "
               f"{ratio(results['b5_hello_gen_js'], results['b5_hello_hw_js']):.2f} "
               f"(>1.20 would be a bug report)")
@@ -255,7 +255,7 @@ def main() -> int:
     bench_md = ROOT / "BENCHMARKS.md"
     text = bench_md.read_text(encoding="utf-8")
     # Replace a previous M3 section if re-run; else append.
-    marker = "# Benchmarks — M3 (JavaScript emitter)"
+    marker = "# Benchmarks - M3 (JavaScript emitter)"
     if marker in text:
         text = text[:text.index(marker)].rstrip() + "\n"
     bench_md.write_text(text + "\n".join(md), encoding="utf-8")

@@ -8,7 +8,7 @@
 // helpers. It is stdlib-only (System.*) and dependency-free.
 //
 // It lives in the compiler package as `compiler/newr_rt.cs` and
-// `newr build --target cs` copies it — byte-identical — next to an
+// `newr build --target cs` copies it - byte-identical - next to an
 // emitted `.cs` file when (and only when) that program uses a helper
 // from it. Do not edit a copied file by hand: edit this file in the
 // newr repo and rebuild.
@@ -108,10 +108,10 @@ public static class NewrRt
 
     /// <summary>Division or modulo by zero. Same code rule as
     /// above: the Python twin is constructed without a code, so
-    /// e.code is none in a <c>catch</c>. The builtin sites —
+    /// e.code is none in a <c>catch</c>. The builtin sites -
     /// <c>0.0 ** -1</c>, where Python raises ZeroDivisionError
     /// itself, and float <c>/</c> by zero, where Python's native
-    /// <c>/</c> raises it — throw
+    /// <c>/</c> raises it - throw
     /// CodedError("ZeroDivisionError", ...) in PowFloat and Fdiv
     /// instead (§18 fix 2: fdiv was missed by the §17.4 item-4 list).</summary>
     public class NewrDivisionByZeroError : NewrError
@@ -189,7 +189,7 @@ public static class NewrRt
         // newr `**` on ints: checked, bounded before computing.
         // A negative exponent is an error (an int result cannot
         // represent it). The exponent is bounded by repeated
-        // squaring with a check at every multiply — `10 ** 10**9`
+        // squaring with a check at every multiply - `10 ** 10**9`
         // raises instead of allocating by computing blindly.
         if (b < 0) throw new NewrError("negative exponent for int pow");
         if (a == 0) return b == 0 ? 1 : 0;
@@ -210,7 +210,7 @@ public static class NewrRt
     public static long Tdiv(long a, long b)
     {
         // newr `/` on ints: truncating division (toward zero).
-        // C# `/` already truncates — the check is the two error cases.
+        // C# `/` already truncates - the check is the two error cases.
         if (b == 0) throw new NewrDivisionByZeroError("integer division by zero");
         if (a == long.MinValue && b == -1)
             throw new NewrOverflowError("integer overflow: INT64_MIN / -1");
@@ -230,7 +230,7 @@ public static class NewrRt
     {
         // newr `**` on floats: IEEE semantics. C# `Math.Pow`
         // already returns NaN for a negative base with a fractional
-        // exponent (Python returns a complex there — newr has no
+        // exponent (Python returns a complex there - newr has no
         // complex type, so the answer is NaN) and Infinity on
         // overflow. The one case C# gets wrong is a zero base with
         // a negative exponent: C# gives Infinity, Python raises
@@ -239,7 +239,7 @@ public static class NewrRt
         {
             // Python raises the builtin ZeroDivisionError here (not
             // the NewrError subclass), so a `catch e:` sees code
-            // "ZeroDivisionError" — CodedError, not the class.
+            // "ZeroDivisionError" - CodedError, not the class.
             throw CodedError("ZeroDivisionError",
                 "0.0 cannot be raised to a negative power");
         }
@@ -263,10 +263,10 @@ public static class NewrRt
         // non-zero dividend and NaN for 0/0). `b == 0` covers -0
         // as well. Python's native `/` raises the BUILTIN
         // ZeroDivisionError, so this throws the coded error
-        // (§18 fix 2), not the codeless class — a `catch e:` sees
+        // (§18 fix 2), not the codeless class - a `catch e:` sees
         // e.code == "ZeroDivisionError" on both targets. (Float `%`
         // is different: both targets route it through Fmod, which
-        // raises the codeless NewrDivisionByZeroError — that parity
+        // raises the codeless NewrDivisionByZeroError - that parity
         // is correct.)
         if (b == 0) throw CodedError("ZeroDivisionError", "float division by zero");
         return a / b;
@@ -347,7 +347,7 @@ public static class NewrRt
     /// <summary>Round the exact decimal (digits / 10**scale) to
     /// <paramref name="n"/> places, half away from zero, as a
     /// double. <paramref name="n"/> below -308 rounds every finite
-    /// double to (signed) zero — 10**309 already exceeds the
+    /// double to (signed) zero - 10**309 already exceeds the
     /// largest finite double, so no huge power is ever built.</summary>
     private static double RoundExactToDouble(long sign, BigInteger digits,
         long scale, long n)
@@ -365,7 +365,7 @@ public static class NewrRt
     }
 
     /// <summary>newr <c>round()</c>: half-away-from-zero
-    /// (schoolbook), on the EXACT value of the float — not its
+    /// (schoolbook), on the EXACT value of the float - not its
     /// shortest repr. <c>round(2.675, 2)</c> is 2.67, because the
     /// float 2.675 is stored slightly below 2.675. <c>round(x)</c>
     /// returns an <c>int</c> (int64 range-checked);
@@ -374,7 +374,7 @@ public static class NewrRt
     /// <c>round(inf, n)</c> returns <c>inf</c>,
     /// <c>round(nan, n)</c> returns <c>nan</c>. An int input rounds
     /// its exact value too (unlike the JS runtime, which returns an
-    /// int input unchanged when ndigits is given — <c>round(5,
+    /// int input unchanged when ndigits is given - <c>round(5,
     /// -1)</c> is 10 in Python, 5 in JS).</summary>
     public static long RoundHalfAway(double x)
     {
@@ -765,7 +765,7 @@ public static class NewrRt
 
     /// <summary>Called by the generated Main(): <c>env.args</c>
     /// is <c>sys.argv</c> 1:1 (Python: <c>sys.argv</c>; JS:
-    /// <c>process.argv.slice(1)</c> — both include the program as
+    /// <c>process.argv.slice(1)</c> - both include the program as
     /// argv[0]), but .NET's Main args exclude the program name, so
     /// SetMainArgs prepends the main class name.</summary>
     public static void SetMainArgs(string prog, string[] args)
@@ -807,7 +807,7 @@ public static class NewrRt
     {
         if (ReferenceEquals(a, b))
         {
-            // Same reference — but NaN is not == itself even as a
+            // Same reference - but NaN is not == itself even as a
             // boxed double, and two distinct NaN boxes are not
             // ReferenceEquals anyway; a single NaN box compared to
             // itself reaches here, so exclude it.
@@ -884,7 +884,7 @@ public static class NewrRt
 
     /// <summary>newr <c>?.</c>: <c>null</c> when <c>v</c> is
     /// <c>null</c>, else <c>f(v)</c>. The test is <c>== null</c>,
-    /// never truthiness — <c>0</c>, <c>""</c> and <c>[]</c> are
+    /// never truthiness - <c>0</c>, <c>""</c> and <c>[]</c> are
     /// values, not absences. A whole <c>?.</c> chain collapses into
     /// one call with the full postfix path inside <c>f</c>, so the
     /// base expression is evaluated exactly once.
@@ -892,8 +892,8 @@ public static class NewrRt
     /// C# cannot spell "nullable R" for an unconstrained R
     /// (<c>R?</c> collapses to <c>R</c> unless R is
     /// struct-constrained), so the chain helper comes in two
-    /// names by result kind — <c>OptChain</c> for a reference
-    /// result, <c>OptChainVal</c> for a value result — each with a
+    /// names by result kind - <c>OptChain</c> for a reference
+    /// result, <c>OptChainVal</c> for a value result - each with a
     /// class/struct pair for the receiver (the pair differs in the
     /// parameter type, <c>T</c> vs <c>Nullable&lt;T&gt;</c>, so the
     /// overloads are legal). The emitter picks by the receiver's
@@ -909,7 +909,7 @@ public static class NewrRt
     public static R? OptChainVal<T, R>(T? v, Func<T, R> f)
         where T : class where R : struct
     {
-        // NOTE: `v == null ? default : f(v)` is wrong here — the
+        // NOTE: `v == null ? default : f(v)` is wrong here - the
         // ternary types `default` as R (0), not R? (null). The
         // explicit `return null` below is load-bearing.
         if (v == null) return null;
@@ -927,7 +927,7 @@ public static class NewrRt
     /// nullable VALUE type (a nullable field or method result at
     /// the end of a segment, e.g. <c>o?.maybe_count</c> where
     /// <c>maybe_count</c> is <c>long?</c>). The lambda already
-    /// returns <c>R?</c>, so the method returns it as-is — the
+    /// returns <c>R?</c>, so the method returns it as-is - the
     /// <c>OptChainVal</c> shape (lambda returns <c>R</c>, method
     /// returns <c>R?</c>) cannot spell this (a <c>R??</c> is not a
     /// legal type).</summary>
@@ -941,7 +941,7 @@ public static class NewrRt
 
     /// <summary>newr <c>??</c>: <c>v</c> when it is not
     /// <c>null</c>, else <c>defaultFn()</c>. The default is a thunk
-    /// so it is evaluated lazily. Two names by value kind — the
+    /// so it is evaluated lazily. Two names by value kind - the
     /// class/struct overload pair for one name resolves
     /// unpredictably at some call shapes (the compiler picks the
     /// class overload for a <c>long</c> argument and then fails its
@@ -953,12 +953,12 @@ public static class NewrRt
     /// <summary>The value-type twin of <c>Coalesce</c>. The return
     /// is <c>T</c> (not <c>T?</c>): a <c>??</c> always produces a
     /// value (the default is always provided), so the result is
-    /// non-nullable — and a <c>long?</c> result cannot be assigned
+    /// non-nullable - and a <c>long?</c> result cannot be assigned
     /// to a <c>long</c> variable without a cast (CS0266).</summary>
     public static T CoalesceVal<T>(T? v, Func<T> dflt) where T : struct =>
         v ?? dflt();
 
-    /// <summary>newr <c>list[i]</c>: SPEC §9.2 — out-of-range
+    /// <summary>newr <c>list[i]</c>: SPEC §9.2 - out-of-range
     /// indexing is a runtime error. Valid indices are
     /// <c>0 &lt;= i &lt; len(lst)</c>; a negative index is out of
     /// range (never a wrap).</summary>
@@ -969,7 +969,7 @@ public static class NewrRt
         return lst[(int)i];
     }
 
-    /// <summary>newr <c>list.get(i, default)</c>: P9 — a negative
+    /// <summary>newr <c>list.get(i, default)</c>: P9 - a negative
     /// index is out-of-range (no wrap-around); anything outside
     /// <c>0 &lt;= i &lt; len(lst)</c> returns <c>default</c>.</summary>
     public static object? ListGet(System.Collections.IList lst, long i, object? dflt) =>
@@ -1012,7 +1012,7 @@ public static class NewrRt
         if (x is System.Collections.IDictionary m) return m.Count;
         // Lists AND sets: HashSet<T> implements IEnumerable but
         // NOT the non-generic ICollection, so count by enumeration
-        // (a List<T> is also IEnumerable — one branch covers both).
+        // (a List<T> is also IEnumerable - one branch covers both).
         if (x is System.Collections.IEnumerable e)
         {
             long n = 0;
@@ -1023,10 +1023,10 @@ public static class NewrRt
                             "TypeError");
     }
 
-    /// <summary><c>{"k": v, ...}</c> — alternating key/value pairs
+    /// <summary><c>{"k": v, ...}</c> - alternating key/value pairs
     /// into a Dictionary (insertion order in practice on .NET).
     /// Unlike the Java runtime's Map.ofEntries, null values are
-    /// allowed (a null key still throws — the checker only ever
+    /// allowed (a null key still throws - the checker only ever
     /// emits str keys, which are non-null).</summary>
     public static Dictionary<string, V> DictOf<V>(params object?[] kvs)
     {
@@ -1060,7 +1060,7 @@ public static class NewrRt
 
     /// <summary><c>s[i]</c> by code point (P5). Negative indices
     /// wrap like Python; out of range raises IndexError (the JS
-    /// runtime's <c>[...s][i]</c> returns undefined there — a JS
+    /// runtime's <c>[...s][i]</c> returns undefined there - a JS
     /// latent bug).</summary>
     public static string StrIndex(string s, long idx)
     {
@@ -1181,7 +1181,7 @@ public static class NewrRt
     };
 
     /// <summary>newr <c>time.format(ts, fmt)</c>: UTC, never local
-    /// time (P4) — the same program prints the same output on every
+    /// time (P4) - the same program prints the same output on every
     /// machine. The format must be one of the spec's fixed set
     /// (§12.2).</summary>
     public static string TimeFormat(long ts, string fmt)

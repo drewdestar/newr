@@ -1,24 +1,24 @@
 """The Java emitter (M4, SPEC.md §18).
 
 ``newr build --target java`` lowers a *checked* program (the front
-end has already run: parse -> resolve -> check) to readable Java —
+end has already run: parse -> resolve -> check) to readable Java -
 one `.newr` file -> one `.java` file, structure preserved, user names
 verbatim, helpers only in `newr_rt.java` (copied next to the output
-as `NewrRt.java` when used — javac requires the file name to match
+as `NewrRt.java` when used - javac requires the file name to match
 the public class, so the CLI renames on copy, K1).
 
 Readability is a requirement, not a nicety: the output is code a
-human would write — the Java goldens (`goldens/java/`) are the style
+human would write - the Java goldens (`goldens/java/`) are the style
 oracle, and the emitter reproduces them byte-for-byte
 (BUILD_REPORT.md §21, K1–K13).
 
 The emitter NEVER runs on an unchecked program: the CLI checks first
 and exits 4 on errors. If it meets a node without a type (which only
-happens on an unchecked program), it raises `EmitterError` — a clean
+happens on an unchecked program), it raises `EmitterError` - a clean
 refusal, never a TypeError traceback.
 
 Module system (K1): one public class per file, named after the file
-stem verbatim (the class name IS the file stem — Java requires the
+stem verbatim (the class name IS the file stem - Java requires the
 public class to live in the same-named file). File modules become
 their own public classes in their own files; imported names are
 qualified `Module.name`. A program with no `main` file stem gets
@@ -47,7 +47,7 @@ _BUILTIN_NAMES = frozenset(BUILTINS)
 # colliding with one of these is mangled with a trailing underscore
 # (D20, mirrored from the Python/JS emitters). The `NewrRt` runtime
 # helpers are called qualified (`NewrRt.add`), so user names that
-# match a helper are harmless — but the class name `NewrRt` itself,
+# match a helper are harmless - but the class name `NewrRt` itself,
 # the `main` method, its `args` parameter, and the java.lang type
 # names the emitter writes (`String`, `Long`, ...) must not be
 # shadowed by a user struct/enum/fn name in the same file.
@@ -159,7 +159,7 @@ def _java_float(value: float) -> str:
 # Java precedence (higher binds tighter), loosest -> tightest.
 # The emitter's precedence-climbing printer uses this table; newr's
 # own table (SPEC §9.2) maps onto it, with the traps documented
-# where they bite — notably unary `-`: `-x ** y` parses as
+# where they bite - notably unary `-`: `-x ** y` parses as
 # `-(x ** y)` in newr, and Java has no `**`, so the power helper
 # call binds as a primary; and `!a == b` is `(!a) == b` in Java,
 # not `!(a == b)` as newr's `not` reads it.
@@ -172,7 +172,7 @@ _PREC = {
     "add": 9,      # + -
     "mul": 10,     # * / %
     "unary": 11,   # -x !x
-    "pow": 12,     # ** (emitted as a helper call — primary)
+    "pow": 12,     # ** (emitted as a helper call - primary)
     "primary": 13,  # calls, indexing, member access, atoms
 }
 
@@ -242,7 +242,7 @@ def _is_struct_or_enum(t: Type | None) -> bool:
 def _needs_eq(t: Type | None) -> bool:
     """True when `==` on a value of this type needs structural
     equality (`NewrRt.eq`) instead of `==`: lists, dicts, sets,
-    Results, structs and enums (and nullable forms of them — `eq`
+    Results, structs and enums (and nullable forms of them - `eq`
     handles `null` on either side). Primitives, functions, errors
     and Discord entities compare by identity (`==`)."""
     if t is None:
@@ -300,7 +300,7 @@ class _JavaEmitter:
         # name). The CLI passes the `-o` stem; the default is the
         # main source stem, falling back to "Main".
         self.output_stem = output_stem or "Main"
-        # Imports collected while emitting (per output file — reset
+        # Imports collected while emitting (per output file - reset
         # for each module file).
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
@@ -323,13 +323,13 @@ class _JavaEmitter:
         # (for rename allocation in _bind_fresh). Reset per function.
         self._fn_used: set[str] = set()
         # Hoists for the statement being emitted: each is a list of
-        # lines (base indent 0) to emit before the statement —
+        # lines (base indent 0) to emit before the statement -
         # hoisted lambda consts and lambda snapshot locals.
         self._hoists: list[list[str]] | None = None
         # True while emitting the DIRECT top-level statement list of
         # a file (main() / the module static block). A `let` there
         # assigns the static field instead of declaring a local
-        # (K2) — a local would shadow the field and top-level
+        # (K2) - a local would shadow the field and top-level
         # functions would read the still-zero field (conformance
         # toplevel_order). Nested blocks reset it (their `let` is a
         # genuine local, even when it shadows a module name).
@@ -450,8 +450,8 @@ class _JavaEmitter:
         """Bind `name` in the current scope.
 
         Java has real block scope (`long x` in an `if` block does
-        not clobber the outer name), so — unlike the Python emitter
-        — shadowing an enclosing name needs NO renaming: the inner
+        not clobber the outer name), so - unlike the Python emitter
+        - shadowing an enclosing name needs NO renaming: the inner
         binding is a different variable, exactly as newr reads it.
         Only keyword / emitter-reserved mangling applies (D20).
         """
@@ -463,7 +463,7 @@ class _JavaEmitter:
     def _bind_fresh(self, name: str, type: Type | None = None,
                     kind: str = "local") -> _Binding:
         """Bind `name` in the current scope WITHOUT renaming against
-        enclosing scopes — for function/lambda parameters, where
+        enclosing scopes - for function/lambda parameters, where
         shadowing an enclosing name is the correct semantics. Only
         the current function's used-name set is consulted, so two
         parameters mangling to the same Java name still get distinct
@@ -514,13 +514,13 @@ class _JavaEmitter:
     def _render_imports(self) -> list[str]:
         """The import block: java.util first (stdlib), then JDA
         (third-party), then the Xerial SQLite driver, then file
-        modules (imported by their file stem — the class name IS
+        modules (imported by their file stem - the class name IS
         the stem, K1). `java.util.*` is unconditional: emitted code
         uses `Objects.equals`, `Arrays.asList`, `ArrayList` and
         friends even in programs that use no runtime helper at all
         (conformance str_fstring_quotes compiled `Objects.equals`
         with no import in sight). The runtime is imported only when
-        a helper is used (usage-tracked, Gleam-style — D4's Java
+        a helper is used (usage-tracked, Gleam-style - D4's Java
         twin); it lives in the same (default) package, so it needs
         no import line at all."""
         lines: list[str] = ["import java.util.*;"]
@@ -635,7 +635,7 @@ class _JavaEmitter:
     def _java_fn_type(self, t: Type) -> str:
         """`fn(A, B) -> R` -> `NewrRt.Fn2<A, B, R>`. Arity 0–8
         (Fn0–Fn8 in the runtime); a fn value of higher arity is a
-        clean E4001 — v1 limit, recorded in BUILD_REPORT.md §21."""
+        clean E4001 - v1 limit, recorded in BUILD_REPORT.md §21."""
         params = t.params[:-1]
         ret = t.params[-1]
         n = len(params)
@@ -671,10 +671,10 @@ class _JavaEmitter:
         own file, `Module.Name` when imported (the binding records
         the module). An imported struct/enum reached only through
         its TYPE (a `let c = helper.Shade.Red` has type `Shade`
-        with no module on the Type — the Type class has no module
+        with no module on the Type - the Type class has no module
         field) is found by searching the imported file modules for
         the declaration and qualifying with the module's class
-        name — the file STEM, not the import alias (K1;
+        name - the file STEM, not the import alias (K1;
         conformance import_enum)."""
         binding = self._lookup(name)
         if binding is not None and binding.kind in ("struct", "enum"):
@@ -694,7 +694,7 @@ class _JavaEmitter:
                   fn_target: Type | None = None) -> str:
         """Emit an expression, parenthesised when its precedence is
         below `min_prec`. `fn_target` is the expected fn type when
-        the expression is a lambda — the context's target type, so
+        the expression is a lambda - the context's target type, so
         the lambda needs no cast (Java lambdas are poly
         expressions)."""
         text, prec = self._emit_expr(node, fn_target)
@@ -720,7 +720,7 @@ class _JavaEmitter:
                 self.emit_expr(i, 0,
                                fn_target=elem if _is_fn(elem) else None)
                 for i in node.elements)
-            # Arrays.asList (not List.of — List.of rejects null
+            # Arrays.asList (not List.of - List.of rejects null
             # elements, and a list[T?] may hold null) with an
             # explicit element-type witness, so a literal of only
             # nulls still has the right type.
@@ -739,7 +739,7 @@ class _JavaEmitter:
                 parts.append(
                     f"{self.emit_expr(k, 0)}, "
                     f"{self.emit_expr(v, 0, fn_target=val if _is_fn(val) else None)}")
-            # NewrRt.dictOf (not Map.ofEntries — that rejects null
+            # NewrRt.dictOf (not Map.ofEntries - that rejects null
             # keys and values, and a dict[str, T?] may hold null),
             # with an explicit value-type witness.
             return (f"NewrRt.<{self._java_boxed_type(val)}>"
@@ -778,7 +778,7 @@ class _JavaEmitter:
             return self._emit_embed(node)
         if isinstance(node, (A.Member, A.Index, A.Call)):
             # Any optional link anywhere in the chain routes the
-            # WHOLE chain through _emit_chain (D9) — including
+            # WHOLE chain through _emit_chain (D9) - including
             # trailing non-optional links (`a?.b.c`), which must
             # short-circuit too.
             if self._chain_has_optional(node):
@@ -827,7 +827,7 @@ class _JavaEmitter:
                     f"`{node.name}`", span=node.span)
             if binding.kind in ("struct", "enum"):
                 self._fail(
-                    f"`{node.name}` is not a value — use a variant "
+                    f"`{node.name}` is not a value - use a variant "
                     "or construct it", span=node.span)
             # A user fn as a value is the function itself (first-
             # class functions, SPEC §9.5); a local/param/handler
@@ -915,7 +915,7 @@ class _JavaEmitter:
         if not parts:
             return '""', _PREC["primary"]
         # A `+` chain starting with a non-string operand would be
-        # ARITHMETIC (`{x}{y}` -> `x + y`), not concatenation — so
+        # ARITHMETIC (`{x}{y}` -> `x + y`), not concatenation - so
         # an interpolation whose first part is an expression starts
         # with `"" + `.
         if node.parts[0].text is None:
@@ -929,7 +929,7 @@ class _JavaEmitter:
         handler bindings use their interp form (the mention / name
         form); everything else goes through `toStr` (P8). A bare
         non-string operand of `+` must be wrapped in `toStr` or the
-        `+` would be arithmetic — ints are the only exception
+        `+` would be arithmetic - ints are the only exception
         (they stringify in a `+` chain)."""
         if isinstance(expr, A.Name):
             binding = self._lookup(expr.name)
@@ -973,7 +973,7 @@ class _JavaEmitter:
                 # `T? or T` (SPEC §7.2): the default when the value
                 # is absent. Java `||` would also take the default
                 # for a present-but-falsy value (0L, ""), so it is
-                # not the same — use coalesce.
+                # not the same - use coalesce.
                 self._need_rt("coalesce")
                 left = self.emit_expr(node.left, 0)
                 right = self.emit_expr(node.right, 0)
@@ -1016,7 +1016,7 @@ class _JavaEmitter:
                         rt.name in self.structs or rt.name in self.enums:
                     # Structural equality (K6): `eq` is deep for
                     # lists/Maps/Sets/Results/structs, and treats
-                    # `null` as equal only to `null` — exactly
+                    # `null` as equal only to `null` - exactly
                     # newr's `==` for nullable collection values too.
                     self._need_rt("eq")
                     expr = f"NewrRt.eq({left}, {right})"
@@ -1025,7 +1025,7 @@ class _JavaEmitter:
                     return expr, _PREC["primary"]
                 # `==` on a boxed value is IDENTITY in Java (a
                 # nullable long `1000L == 1000L` is false) and on a
-                # String it is identity too — use null-safe
+                # String it is identity too - use null-safe
                 # Objects.equals unless BOTH sides are non-nullable
                 # primitives, where bare `==` is correct.
                 if lt.nullable or rt.nullable or \
@@ -1088,7 +1088,7 @@ class _JavaEmitter:
         # `-a + b` is `-(a + b)`).
         # D19: the int64 minimum is written `-9223372036854775808`
         # in newr. Its positive magnitude is out of int64 range, so
-        # the checker leaves the literal's own type unset — the
+        # the checker leaves the literal's own type unset - the
         # plain `neg(...)` form would also be wrong (it would check
         # the out-of-range literal first). Emit the minimum directly.
         if isinstance(node.operand, A.Lit) and \
@@ -1100,7 +1100,7 @@ class _JavaEmitter:
             return f"NewrRt.neg({self.emit_expr(node.operand, 0)})", \
                 _PREC["primary"]
         operand = self.emit_expr(node.operand, _PREC["pow"])
-        # Java traps: `--x` is the decrement operator —
+        # Java traps: `--x` is the decrement operator -
         # parenthesise a `**` operand or a unary operand
         # (`-(powInt(a, 2))`, `-(-x)`).
         if (isinstance(node.operand, A.BinOp) and node.operand.op == "**") \
@@ -1136,7 +1136,7 @@ class _JavaEmitter:
                 if binding is not None and binding.kind == "enum":
                     return self._emit_enum_call(obj.name, func.name, node)
             # §20: qualified imported fielded-variant construction,
-            # `m_helper.Shape.Circle(radius: 1.5)` — the declaration
+            # `m_helper.Shape.Circle(radius: 1.5)` - the declaration
             # comes from the imported module, for field reordering.
             imported = self._imported_enum(func)
             if imported is not None:
@@ -1164,7 +1164,7 @@ class _JavaEmitter:
         if name == "input":
             if self._is_bot:
                 self.warnings.append(
-                    "input() in a bot program blocks on stdin — bots "
+                    "input() in a bot program blocks on stdin - bots "
                     "have no stdin (D21)")
             self._need_rt("input")
             args = [self.emit_expr(a, 0) for a in node.args]
@@ -1192,7 +1192,7 @@ class _JavaEmitter:
         if name == "ok":
             self._need_rt("ok")
             t = self._type_of(node)
-            # The runtime's ok is `ok<T>(T value)` — ONE type
+            # The runtime's ok is `ok<T>(T value)` - ONE type
             # parameter (the error type is fixed to NewrError);
             # emitting two type arguments does not compile
             # (conformance opt_methods).
@@ -1268,7 +1268,7 @@ class _JavaEmitter:
         return values
 
     def _emit_print(self, node: A.Call) -> tuple[str, int]:
-        """`print` renders every argument with `toStr` (P8) — the
+        """`print` renders every argument with `toStr` (P8) - the
         runtime `print` helper does that mapping internally, so the
         emitted call is bare. A `?` argument propagates first (the
         temp + early return are hoisted before the statement, D7).
@@ -1343,7 +1343,7 @@ class _JavaEmitter:
         t = self._type_of(arg)
         text = self.emit_expr(arg, 0)
         if name == "str":
-            # A nullable str's runtime value is null when absent —
+            # A nullable str's runtime value is null when absent -
             # bare rendering would print "null", not newr's "none"
             # (P8), so nullable values go through toStr.
             if _is_str(t) and not t.nullable:
@@ -1353,7 +1353,7 @@ class _JavaEmitter:
         if name == "int":
             if _is_int(t):
                 return text, _PREC["primary"]
-            # float (truncation), str (parsing), bool (0/1) — all
+            # float (truncation), str (parsing), bool (0/1) - all
             # through toInt, which returns a long in every case.
             self._need_rt("toInt")
             return f"NewrRt.toInt({text})", _PREC["primary"]
@@ -1422,7 +1422,7 @@ class _JavaEmitter:
 
     def _file_module_class(self, binding: _Binding) -> str:
         """The Java class name for a file-module import: the file
-        STEM, not the import alias (K1 — one public class per file,
+        STEM, not the import alias (K1 - one public class per file,
         named after the stem). For `import "h_fn.newr" as h` the
         class is `h_fn`, so every reference to the module must use
         the stem; using the alias emits `h.…` against a class named
@@ -1462,7 +1462,7 @@ class _JavaEmitter:
                            field_name: str, field_type: Type | None) -> str:
         """`expr.field` for an enum field. When variants disagree
         on the field's type, the union field is Object and the
-        access needs a cast to the field's declared (boxed) type —
+        access needs a cast to the field's declared (boxed) type -
         otherwise a `long` field read as Object would not compile
         where a long is expected."""
         decl = self._find_enum_decl(enum_name)
@@ -1523,15 +1523,15 @@ class _JavaEmitter:
                     return self._emit_enum_variant(node, binding)
                 if binding.kind == "struct":
                     self._fail(
-                        f"struct `{obj.name}` is not a value — construct it",
+                        f"struct `{obj.name}` is not a value - construct it",
                         span=node.span)
                 if binding.kind == "store":
                     self._fail(
-                        f"store `{obj.name}` is not a value — use its "
+                        f"store `{obj.name}` is not a value - use its "
                         "economy functions", span=node.span)
                 if binding.kind == "fn":
                     self._fail(
-                        f"function `{obj.name}` is not a value — call it",
+                        f"function `{obj.name}` is not a value - call it",
                         span=node.span)
             if obj.name in MODULES:
                 # A named module used without an import: the name is
@@ -1554,7 +1554,7 @@ class _JavaEmitter:
         # ERROR_FIELDS): message (str) and code (str?). Java's
         # NewrError keeps `code` as a public field, but `message`
         # lives in Throwable and is only reachable via getMessage()
-        # (the field is private) — a bare `.message` does not
+        # (the field is private) - a bare `.message` does not
         # compile (conformance try_catch).
         if obj_type.name == "error":
             obj_text = self.emit_expr(obj, _PREC["primary"])
@@ -1563,7 +1563,7 @@ class _JavaEmitter:
             return f"{obj_text}.{self._mangle(node.name)}", \
                 _PREC["primary"]
         # §16 (hole 2): a method used as a value is a lambda, not a
-        # Java attribute — a Long has no `is_some`, an ArrayList has
+        # Java attribute - a Long has no `is_some`, an ArrayList has
         # no `len`. A real struct field stays a plain attribute.
         if t.name == "fn" and not self._is_plain_field(obj_type,
                                                        node.name):
@@ -1574,7 +1574,7 @@ class _JavaEmitter:
         obj_text = self.emit_expr(obj, _PREC["primary"])
         # Discord entity fields (SPEC §7.3) -> JDA getters. The
         # checker types these fields (ENTITY_FIELDS in
-        # discord_limits); Java has no `.id` field on a User — the
+        # discord_limits); Java has no `.id` field on a User - the
         # snowflake is getIdLong() (newr `id` is int, so the String
         # getId() would be the wrong type). `interaction.channel`
         # needs a cast: Interaction.getChannel() returns Channel,
@@ -1583,7 +1583,7 @@ class _JavaEmitter:
         if entity is not None:
             return entity, _PREC["primary"]
         # An enum field whose variants disagree on the type reads
-        # through the Object union field — cast to the declared type.
+        # through the Object union field - cast to the declared type.
         if self._find_enum_decl(obj_type.name) is not None:
             return (self._enum_field_access(obj_text, obj_type.name,
                                            node.name, t),
@@ -1640,7 +1640,7 @@ class _JavaEmitter:
         type arguments substituted. A nullable method's "T" is the
         receiver's inner type; a method found only in the nullable
         table on a NON-nullable receiver is a rebased `?.` method
-        inside an `optChain` lambda (D38) — the receiver is proven
+        inside an `optChain` lambda (D38) - the receiver is proven
         non-none there, so "T" is the receiver itself."""
         table = None
         mapping: dict = {}
@@ -1666,7 +1666,7 @@ class _JavaEmitter:
 
     def _is_plain_field(self, recv_type: Type, name: str) -> bool:
         """True when `name` is a real field of `recv_type` (a struct
-        field) — a plain attribute access, never a method value.
+        field) - a plain attribute access, never a method value.
         Provider/entity types have no tables here, so they report
         False and the method-signature lookup decides."""
         decl = self.structs.get(recv_type.name)
@@ -1784,7 +1784,7 @@ class _JavaEmitter:
                 return f"NewrRt.splitStr({obj_text}, {args[0]})", \
                     _PREC["primary"]
             if name == "join":
-                # newr `"sep".join(parts)` — Java joins the LIST
+                # newr `"sep".join(parts)` - Java joins the LIST
                 # with the separator.
                 return f"String.join({obj_text}, {args[0]})", \
                     _PREC["primary"]
@@ -1809,7 +1809,7 @@ class _JavaEmitter:
             if name == "get":
                 self._need_rt("listGet")
                 # listGet returns Object (the runtime is untyped
-                # for lists) — cast to the element type, which is
+                # for lists) - cast to the element type, which is
                 # the call's own type (modules.py: list.get
                 # returns T). The checker guarantees two
                 # arguments (index, default); a one-argument
@@ -1846,7 +1846,7 @@ class _JavaEmitter:
         elif tname == "Result":
             if name in ("is_ok", "is_err"):
                 # The Java Result exposes isOk/isErr as METHODS
-                # (newr_rt.java) — a bare access would be the
+                # (newr_rt.java) - a bare access would be the
                 # method itself, not the bool.
                 method = "isOk" if name == "is_ok" else "isErr"
                 return f"{obj_text}.{method}()", _PREC["primary"]
@@ -1885,8 +1885,8 @@ class _JavaEmitter:
             # Indexing is the checked form: a negative or out-of
             # range index raises IndexError (rt listIndex), exactly
             # like newr's `xs[i]`. (`list.get` is the defaulting
-            # form — see _emit_method_call.) listIndex returns
-            # Object, so cast to the element's boxed type — a bare
+            # form - see _emit_method_call.) listIndex returns
+            # Object, so cast to the element's boxed type - a bare
             # result cannot be assigned to a `long` or compared
             # with `!=` (conformance list_index_error, list_ops,
             # nullable_propagate).
@@ -1925,7 +1925,7 @@ class _JavaEmitter:
         return False
 
     def _emit_chain(self, node: A.Expr) -> tuple[str, int]:
-        """`?.` lowering (D9, corrected — the Java twin of the JS
+        """`?.` lowering (D9, corrected - the Java twin of the JS
         emitter's `_emit_chain`): one `optChain` call per optional
         link, nested; non-optional links after an optional one fold
         into the nearest lambda body. `a?.b.c` is one call;
@@ -1958,13 +1958,13 @@ class _JavaEmitter:
             recv_type = self._type_of(inner_recv)
             # Inside the lambda the receiver is proven non-none
             # (optChain only calls it then), so the parameter and
-            # the rebased base carry the STRIPPED (inner) type —
+            # the rebased base carry the STRIPPED (inner) type -
             # otherwise a method call on it would dispatch as if the
             # value were still nullable.
             inner_type = Type(recv_type.name, params=recv_type.params,
                               nullable=False)
             # §16 (hole 1): a segment must also end before any link
-            # whose receiver can be `none` INSIDE the lambda — a
+            # whose receiver can be `none` INSIDE the lambda - a
             # nullable field (`o?.inner.name`) or a nullable method
             # result (`r?.unwrap().upper()` on `Result[str?, _]?`).
             # The checker's `expr_type` conflates the `?.`
@@ -1974,7 +1974,7 @@ class _JavaEmitter:
             # in-lambda result type, so `_rebase` types the clones
             # exactly: a Member link's nullability inside the lambda
             # is its FIELD's nullability, not the checker's chain
-            # type — without this, a method after a nullable field
+            # type - without this, a method after a nullable field
             # dispatches against `T?` and fails with E4001.
             in_lambda: dict[int, Type | None] = {}
             cur_type = self._in_lambda_link_type(links[i], inner_type)
@@ -1992,7 +1992,7 @@ class _JavaEmitter:
             self._push_scope()
             binding = self._bind_fresh("_v", type=inner_type,
                                        kind="param")
-            # The rebased base is a Name for the NEWR name `_v` —
+            # The rebased base is a Name for the NEWR name `_v` -
             # the lookup returns the binding's Java name (which may
             # be `_v_1` in a nested chain).
             new_base = A.Name(span=links[i].span, name="_v",
@@ -2039,8 +2039,8 @@ class _JavaEmitter:
         `old_base` (by identity) with `new_base`, and clearing the
         `optional` flags (the optionality is handled by the
         `optChain` wrapper, not inside the lambda body). Types are
-        copied onto the clones — the checker already typed the
-        original nodes — except when `in_lambda_types` maps a link
+        copied onto the clones - the checker already typed the
+        original nodes - except when `in_lambda_types` maps a link
         to its in-lambda type (§16, hole 1): the checker's chain
         type conflates the `?.` short-circuit with a field's own
         nullability, and inside the lambda only the latter survives,
@@ -2076,7 +2076,7 @@ class _JavaEmitter:
                 name=node.func.name, optional=False,
                 expr_type=node.func.expr_type)
             # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
-            # is nullable only because the `?.` short-circuits —
+            # is nullable only because the `?.` short-circuits -
             # inside the lambda the receiver is proven non-none, so
             # the result is the plain (stripped) type. Without this,
             # a later link (`.upper()` in `s?.unwrap().upper()`)
@@ -2085,7 +2085,7 @@ class _JavaEmitter:
             # (`a?.b`) may be nullable because the FIELD itself is
             # nullable, which survives inside the lambda. When the
             # caller supplies the exact in-lambda type (§16), that
-            # wins over this heuristic — it is exact where D38
+            # wins over this heuristic - it is exact where D38
             # over-strips (a method whose own return type is
             # nullable, e.g. `unwrap()` on `Result[str?, _]`).
             expr_type = node.expr_type
@@ -2105,7 +2105,7 @@ class _JavaEmitter:
 
         Inside an `optChain` lambda the receiver is proven
         non-none, so this is the link's result type with the `?.`
-        short-circuit removed — but a nullable FIELD type or a
+        short-circuit removed - but a nullable FIELD type or a
         nullable method return survives. Returns None when the type
         cannot be determined (provider/entity types); the caller
         treats None as nullable and splits the segment, which is
@@ -2122,7 +2122,7 @@ class _JavaEmitter:
                 params, ret = sig
                 return fn_of(params, ret)
             # A field on a provider/entity type (e.g. a Discord
-            # member's `name`): the type is unknown — treat as
+            # member's `name`): the type is unknown - treat as
             # nullable (split the segment).
             return None
         if isinstance(link, A.Index):
@@ -2147,7 +2147,7 @@ class _JavaEmitter:
                      fn_target: Type | None = None) -> tuple[str, int]:
         """Closures capture by value (D10, J8): free variables are
         snapshotted into hoisted `final` locals before the enclosing
-        statement — a Java lambda may only capture effectively-final
+        statement - a Java lambda may only capture effectively-final
         locals, so a snapshot local (never reassigned) is exactly
         the captured value. A block body cannot be an inline lambda
         body with statements, so it is hoisted to a `final`
@@ -2229,7 +2229,7 @@ class _JavaEmitter:
             b = self._lookup(name)
             # "global-let" is included: a top-level `let` is mutable,
             # so a lambda reading it at call time would see a LATER
-            # value — capture by value (D10) requires a snapshot.
+            # value - capture by value (D10) requires a snapshot.
             # (A top-level `const` is registered the same way; it
             # never changes, so snapshotting it is harmless.) Module
             # functions / structs / enums / modules / stores are
@@ -2422,7 +2422,7 @@ class _JavaEmitter:
         that answer's line to carry the components.
 
         `top_level` marks the direct top-level statement list of a
-        file (main() / the module static block) — see
+        file (main() / the module static block) - see
         `_in_top_level`; nested blocks always pass False."""
         if new_scope:
             self._push_scope()
@@ -2442,7 +2442,7 @@ class _JavaEmitter:
                     self._last_answer = (len(lines) - 1, kind)
                 elif isinstance(st, (A.ButtonDecl, A.SelectDecl)):
                     # The component's instantiation lines must come
-                    # BEFORE the answer they attach to — the answer
+                    # BEFORE the answer they attach to - the answer
                     # references the components variable, so defining
                     # it after the answer would be a compile error.
                     if self._last_answer is not None:
@@ -2489,7 +2489,7 @@ class _JavaEmitter:
                 # A top-level `let`/`const` is a static field of the
                 # class (so top-level functions can read it), and
                 # its initializer runs here, in file order, inside
-                # main() (or the module's static block) — a field
+                # main() (or the module's static block) - a field
                 # initializer at declaration time would run before
                 # main() and break file order for side-effecting
                 # initializers (K2). Emitting a local declaration
@@ -2580,7 +2580,7 @@ class _JavaEmitter:
                     f"{value});"]
         # float / str / %= : bare augmented assignment (no overflow
         # check applies; `+=` on a str is concatenation; `%` on an
-        # int cannot overflow — Long.MIN_VALUE % -1 is 0 in Java).
+        # int cannot overflow - Long.MIN_VALUE % -1 is 0 in Java).
         return [f"{p}{binding.java} {stmt.op} {value};"]
 
     def _emit_if(self, stmt: A.If, indent: int) -> list[str]:
@@ -2610,7 +2610,7 @@ class _JavaEmitter:
         else:
             self._fail(f"cannot iterate over a `{it_type}` value")
         # The iterable is emitted BEFORE the loop variable is bound
-        # (it cannot see the loop variable — `for x in x` reads the
+        # (it cannot see the loop variable - `for x in x` reads the
         # enclosing `x`).
         iterable = self.emit_expr(stmt.iterable, 0)
         self._push_scope()
@@ -2682,7 +2682,7 @@ class _JavaEmitter:
             if stmt.value is None:
                 return [f"{p}System.exit(0);"]
             self._fail("a top-level `return` with a value is not "
-                       "supported — a top-level `return` exits the "
+                       "supported - a top-level `return` exits the "
                        "program")
         ensures = ctx["ensures"]
         ret_type = ctx["return_type"]
@@ -2775,7 +2775,7 @@ class _JavaEmitter:
                                                      scrut_type)
             if arm.guard is not None:
                 # The guard may reference the pattern's bindings
-                # (e.g. `x if x > 100:`) — bind each name to its
+                # (e.g. `x if x > 100:`) - bind each name to its
                 # pattern expression text while emitting it.
                 self._push_scope()
                 for name, expr_text, typ in bindings:
@@ -2786,7 +2786,7 @@ class _JavaEmitter:
                 cond = f"{cond} && {guard}" if cond else guard
             arms.append((cond, bindings, arm))
         # The last unconditional arm becomes `else:`; otherwise the
-        # final `else` throws (defense — the checker proves
+        # final `else` throws (defense - the checker proves
         # exhaustiveness, so it is unreachable in a checked program).
         last_uncond = (arms and arms[-1][0] is None)
         for i, (cond, bindings, arm) in enumerate(arms):
@@ -2847,7 +2847,7 @@ class _JavaEmitter:
         if isinstance(pattern, A.EnumPattern):
             # The enum is ONE class; the variant is its discriminant
             # field `_newr_variant` (a null scrutinee matches no
-            # variant — the `none` pattern handles it).
+            # variant - the `none` pattern handles it).
             cond = (f"({expr_text} != null && {expr_text}._newr_variant"
                     f".equals({_java_str(pattern.variant)}))")
             bindings: list = []
@@ -2942,7 +2942,7 @@ class _JavaEmitter:
         Result-returning function; a nullable operand returns `null`
         from a nullable-returning function. The mismatched kinds
         (D30) and a nullable `Result` (G-M2-6) are clean
-        `EmitterError`s — the checker should have rejected them, and
+        `EmitterError`s - the checker should have rejected them, and
         there is no defined early-return value to invent."""
         operand = prop.expr
         t = self._type_of(operand)
@@ -2956,7 +2956,7 @@ class _JavaEmitter:
         temp_type = self._java_type(t)
         if ctx.get("in_handler"):
             # A handler returns nothing, so `?` just exits the
-            # handler (a bare `return`) — there is no value to
+            # handler (a bare `return`) - there is no value to
             # propagate. (A handler that may exit early without
             # answering is the discord checker's E2010, not the
             # emitter's problem.)
@@ -2964,7 +2964,7 @@ class _JavaEmitter:
                 self._hoists_add([
                     f"final {temp_type} {temp} = {text};",
                     # §18 fix 1 (JS twin): isErr is a METHOD on the
-                    # Result — a bare access is the method itself
+                    # Result - a bare access is the method itself
                     # (always truthy), so `?` early-returned on
                     # every value. The unwrapped value lives in
                     # `._value` (there is no `.value` field).
@@ -2983,17 +2983,17 @@ class _JavaEmitter:
                 return temp
             if t.name == "Result" and t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             self._fail("`?` needs a `Result[T, E]` or a `T?` value")
         if t.name == "Result" and t.params:
             if t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             if ret is None or ret.name != "Result":
                 self._fail("`?` on a `Result` value inside a function "
-                           "that does not return a `Result` (D30 — the "
+                           "that does not return a `Result` (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"final {temp_type} {temp} = {text};",
@@ -3005,7 +3005,7 @@ class _JavaEmitter:
         if t.nullable:
             if ret is None or not ret.nullable:
                 self._fail("`?` on a nullable value inside a function "
-                           "that does not return a nullable (D30 — the "
+                           "that does not return a nullable (D30 - the "
                            "checker should have rejected this)")
             self._hoists_add([
                 f"final {temp_type} {temp} = {text};",
@@ -3022,7 +3022,7 @@ class _JavaEmitter:
                           binding: _Binding) -> tuple[str, int]:
         if binding.kind == "file-module":
             # A function in an imported .newr file: a plain call on
-            # the imported module — and the import itself (K1: one
+            # the imported module - and the import itself (K1: one
             # `.java` per imported `.newr`, named by its module
             # name). Struct construction through a file module needs
             # `new` (a Java class is not callable without it).
@@ -3136,7 +3136,7 @@ class _JavaEmitter:
         """A named-module member used as a value: a constant, or a
         function (which becomes a lambda, D29). `binding.module` is
         the real module name (for dispatch); `binding.java` is the
-        Java reference (the alias, when the import is aliased) —
+        Java reference (the alias, when the import is aliased) -
         except for a file module, whose class name is the file stem
         (`_file_module_class`)."""
         real = binding.module or binding.java
@@ -3154,7 +3154,7 @@ class _JavaEmitter:
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
                 self._fail(f"`file.{node.name}` cannot be used as a "
-                           "value (it needs a statement — the `with` "
+                           "value (it needs a statement - the `with` "
                            "block cannot live inside a lambda)")
             params = t.params[:-1]  # the last param is the return type
             names = [f"_a{i}" for i in range(len(params))]
@@ -3193,16 +3193,16 @@ class _JavaEmitter:
         """`economy.balance(user)` etc. -> `bot.<store>_<op>(...)`
         (D17/P11, J9's Java twin). Every mutation takes its
         idempotency `key:`; the checker enforces that it is present.
-        JDBC is synchronous, so there is no `await` — but the §19
+        JDBC is synchronous, so there is no `await` - but the §19
         guard still applies: the `bot` instance only exists inside
         a handler, so a store call at the top level, inside a
         (sync) top-level fn, or inside a lambda is a clean E4001
         instead of uncompilable code."""
         # The Bot method is `bot.<store>_<op>` with the RAW store
-        # name (the JS/Python spelling — and the name the Bot
+        # name (the JS/Python spelling - and the name the Bot
         # class's methods use). binding.java is the MANGLED name
         # ("economy" is emitter-reserved, so it would be
-        # "economy_") — using it here would call a method that
+        # "economy_") - using it here would call a method that
         # does not exist.
         store_name = (node.func.obj.name
                       if isinstance(node.func, A.Member)
@@ -3213,7 +3213,7 @@ class _JavaEmitter:
         if ctx is None or not ctx.get("in_handler"):
             self._fail(
                 f"a store call (`{store_name}.{method}`) is only "
-                "possible inside a command, event, or task handler — "
+                "possible inside a command, event, or task handler - "
                 "top-level functions and statements run outside the "
                 "bot's handler context",
                 span=node.span)
@@ -3246,7 +3246,7 @@ class _JavaEmitter:
                            "naming a declared table")
             # The Bot method returns Object (one method serves all
             # tables); the checker knows the row type, so cast to
-            # the row class — registered in the module scope by
+            # the row class - registered in the module scope by
             # _emit_bot_file (the row class IS the table name).
             binding = self._lookup(table.value)
             if binding is None or binding.kind != "struct":
@@ -3296,7 +3296,7 @@ class _JavaEmitter:
         (D16, J10's Java twin). Template placeholders that are
         handler bindings (user, guild, ...) are auto-passed in their
         interpolation form; the rest must be explicit arguments (the
-        checker enforces it — E2009). The kwargs map is built with
+        checker enforces it - E2009). The kwargs map is built with
         `dictOf` (Map.of would reject null values)."""
         index, _default = self._strings_index()
         entry = None
@@ -3415,7 +3415,7 @@ class _JavaEmitter:
         body_lines: list[str] = []
         if ensures:
             # `_newrResult` is declared ONCE, at the top of the
-            # function — every `return` assigns it (a `final` per
+            # function - every `return` assigns it (a `final` per
             # return would be a redeclaration). A void function
             # still gets one (of type Void) so its `ensures`
             # clauses can read `result`.
@@ -3433,7 +3433,7 @@ class _JavaEmitter:
                                            new_scope=False))
         if ensures and not (rest and isinstance(rest[-1], A.Return)):
             # The implicit return (falling off the end) is also a
-            # return — check the `ensures` against `null`.
+            # return - check the `ensures` against `null`.
             body_lines.append(f"{bp}_newrResult = null;")
             body_lines.extend(self._ensures_check_lines(ensures, indent + 1))
             if ret is None or _is_none(ret):
@@ -3465,7 +3465,7 @@ class _JavaEmitter:
     def _enum_union_fields(self, decl: A.EnumDecl) -> dict[str, Type]:
         """The union of all variants' fields: name -> type. When
         two variants share a field name with DIFFERENT types, the
-        union type is Object (name "object" — the emitter casts on
+        union type is Object (name "object" - the emitter casts on
         access; the field's declared type still wins in the
         variant's factory method and in match bindings)."""
         union: dict[str, Type | None] = {}
@@ -3636,7 +3636,7 @@ class _JavaEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"// Generated by newr from {main_path} — do not edit by hand.",
+            f"// Generated by newr from {main_path}. Do not edit by hand.",
             f"// Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:
@@ -3687,22 +3687,22 @@ class _JavaEmitter:
                 self.fns_by_java[b.java] = decl
         # The top level's used-name set starts with every module-level
         # Java name, so a `let` in a top-level block cannot reuse one
-        # (at module level Java has no block scope for the top level —
+        # (at module level Java has no block scope for the top level -
         # the name would clobber the module binding).
         self._fn_used = set(self._module_used)
 
     def _emit_general_file(self, program: A.Program, main_path: str):
         """A general (non-bot) program: header, imports, then the
-        public class — static fields for the top-level lets/consts
+        public class - static fields for the top-level lets/consts
         (K2: initialized in main(), in file order, so top-level
         functions can read them and side-effecting initializers run
         in order), nested structs/enums, static functions, then
         main() with the top-level STATEMENTS in file order (SPEC
         §8). A file module gets a `static { }` block instead of
         main() (its top-level statements run at class-load time).
-        Definitions are hoisted — a function body reads module
+        Definitions are hoisted - a function body reads module
         globals at call time, so emitting the `function` before the
-        statements is safe — but the statements themselves (lets,
+        statements is safe - but the statements themselves (lets,
         assignments, prints, ...) must run in the order written.
         (M2 evaluation #1.)"""
         self.program = program
@@ -3716,7 +3716,7 @@ class _JavaEmitter:
         is_main = self._is_main_file
         body: list[str] = []
         # Static fields for the top-level lets/consts (no
-        # initializers — main() / the static block assigns them in
+        # initializers - main() / the static block assigns them in
         # file order).
         for st in program.stmts:
             if isinstance(st, (A.Let, A.Const)):
@@ -3767,7 +3767,7 @@ class _JavaEmitter:
     def _emit_file_set(self, program: A.Program, main_path: str,
                        is_main: bool = True):
         """Emit one program and every file module it imports (recursively).
-        Returns (files, uses_rt). `is_main` marks the top file — the
+        Returns (files, uses_rt). `is_main` marks the top file - the
         only role difference left is that the top file is the entry
         point (a bot's `main()` guard, a general file's top-level
         statements); a file module gets a `static { }` block."""
@@ -3785,7 +3785,7 @@ class _JavaEmitter:
             sub_path = imp.resolved_path or imp.path
             # The header names the file as the user would see it:
             # relative to the working directory when it is under it
-            # (D2 — so building `examples/shop.newr` and building
+            # (D2 - so building `examples/shop.newr` and building
             # `examples/shop_items.newr` directly give the same
             # shop_items.java header).
             import os
@@ -3812,12 +3812,12 @@ class _JavaEmitter:
     # ------------------------------------------------------------ bot emitter
     # JDA 6.7.0 bot emission (M4 bot phase). The Java twin of the
     # JS emitter's bot section: the same programs, the same
-    # semantics — slash commands via Commands.slash, a Bot class
+    # semantics - slash commands via Commands.slash, a Bot class
     # with JDBC store methods (P11), component handlers routed by
     # customId, a standalone deploy program, and a pom.xml.
     #
     # JDA differences from discord.js (verified live against the
-    # 6.7.0 jar with javap — the versions are pinned in
+    # 6.7.0 jar with javap - the versions are pinned in
     # tests/test_emitter_java_bot.py):
     # - RestActions are async; the emitted code uses `.complete()`
     #   (blocking) so a reply/edit/followup keeps the JS `await`
@@ -3832,12 +3832,12 @@ class _JavaEmitter:
     # - Modals use Label components (JDA 6): TextInput has no
     #   label of its own.
     # - Modal timeouts have no JDA equivalent and are ignored
-    #   (a documented divergence — the modal still works; it
+    #   (a documented divergence - the modal still works; it
     #   just never times out).
 
     # Handler bindings: name -> (value form, interpolation form,
     # newr type name). The Java twin of the JS emitter's
-    # _BOT_BINDINGS — JDA spellings. The event parameter is always
+    # _BOT_BINDINGS - JDA spellings. The event parameter is always
     # named `event` (member/message/ready) or `interaction`
     # (command/component); bindings read through it, so no handler
     # local can shadow a top-level name.
@@ -3928,7 +3928,7 @@ class _JavaEmitter:
         """The GatewayIntent constants to enable, sorted. The
         declared intents, plus the ones the events need (member
         events need members, message events need message_content)
-        — the JS emitter's _bot_intents, JDA spellings."""
+        - the JS emitter's _bot_intents, JDA spellings."""
         intents = set(program.bot.intents or [])
         kinds = {ev.kind for ev in program.events}
         if "member_join" in kinds or "member_remove" in kinds:
@@ -4081,7 +4081,7 @@ class _JavaEmitter:
     def _emit_component_maps(self) -> list[str]:
         """The static component handler maps and the author map,
         plus the static block that registers each handler by
-        customId (method references — the dispatch overrides
+        customId (method references - the dispatch overrides
         below look them up). Only the maps that are used."""
         if not self._bot_component_registrations:
             return []
@@ -4208,14 +4208,14 @@ class _JavaEmitter:
     # One long-lived JDBC connection per store (created in
     # setup(), before login), a commit per mutation, the ledger
     # and the balance in one transaction, and a duplicate
-    # idempotency key replays instead of double-applying — the
+    # idempotency key replays instead of double-applying - the
     # Java twin of the JS emitter's _emit_store_methods. All
     # store methods are synchronized: JDA calls listeners on
     # event threads, so a lock is what makes a read-modify-write
     # atomic (the Python emitter's threading.Lock, the JS
     # emitter's single thread). Balances are stored as TEXT and
     # parsed with Long.parseLong; arithmetic goes through
-    # NewrRt.add/sub, never raw +/- on longs (checked — a
+    # NewrRt.add/sub, never raw +/- on longs (checked - a
     # silently wrapped balance is a money bug).
 
     _SQL_TYPES = {"int": "TEXT", "str": "TEXT", "float": "REAL",
@@ -4334,7 +4334,7 @@ class _JavaEmitter:
 
     def _jdbc_ledger_has_key(self, db: str, key_expr: str, p: str) \
             -> list[str]:
-        """Lines declaring `boolean dup` — whether the ledger
+        """Lines declaring `boolean dup` - whether the ledger
         already holds `key_expr`."""
         return [
             f"{p}boolean dup = false;",
@@ -4656,7 +4656,7 @@ class _JavaEmitter:
         stem = Path(bot_filename).stem
         cls = _java_class_name(stem + "_deploy")
         lines = self._header(self.main_path,
-                             "Command registration — run once, "
+                             "Command registration - run once, "
                              "then run the bot.")
         lines.append("")
         lines.append("import net.dv8tion.jda.api.JDA;")
@@ -4714,7 +4714,7 @@ class _JavaEmitter:
                         "role": "ROLE"}
 
     def _command_method_name(self, name: str) -> str:
-        """`executePing` for `/ping` — unique per file."""
+        """`executePing` for `/ping` - unique per file."""
         words = "".join(ch if ch.isalnum() else " " for ch in name).split()
         base = "".join(w.capitalize() for w in words) or "Command"
         method = "execute" + base
@@ -4752,7 +4752,7 @@ class _JavaEmitter:
         """An option's min/max bound. setMinValue/setMaxValue are
         overloaded (long vs double), so an int bound must be a
         long literal (`1L`) and a number bound a double literal
-        (`1.0`) — a bare `1` would be an ambiguous call."""
+        (`1.0`) - a bare `1` would be an ambiguous call."""
         if isinstance(expr, A.Lit):
             if tname == "int":
                 return f"{expr.value}L"
@@ -4871,7 +4871,7 @@ class _JavaEmitter:
     def _emit_event_registration(self, ev: A.EventDecl):
         """A ListenerAdapter override for one event. The system
         channel is a local named `_newrSystemChannel` (not
-        `channel` — a Java local with that name would shadow the
+        `channel` - a Java local with that name would shadow the
         binding in nested blocks); member_remove guards the null
         member first; the message handler ignores the bot's own
         messages."""
@@ -4951,9 +4951,9 @@ class _JavaEmitter:
         self._fail(f"unknown event kind `{ev.kind}`")
 
     def _task_fn_name(self, task: A.TaskDecl) -> str:
-        """`_every_1h` for a 1h task — the JS emitter's naming
+        """`_every_1h` for a 1h task - the JS emitter's naming
         (a numeric suffix when the same period repeats). The
-        name is computed once per task and cached — main() and
+        name is computed once per task and cached - main() and
         the definition must agree."""
         key = id(task)
         if key in self._task_fn_names:
@@ -5067,7 +5067,7 @@ class _JavaEmitter:
         """main(): the top-level statements first (they run before
         login, like the general emitter), then the token check,
         the store setup, the JDA login, and the task schedules.
-        The locals are `_newrToken` / `_newrBuilder` — a top-level
+        The locals are `_newrToken` / `_newrBuilder` - a top-level
         `let token` is a static field, and a local named `token`
         would shadow it inside main()."""
         lines = ["  public static void main(String[] args) {"]
@@ -5124,7 +5124,7 @@ class _JavaEmitter:
     def _answer_call(self, kind: str, arg: str, is_embed: bool,
                      ephemeral: bool = False) -> str:
         """The JDA call that answers on `kind`, ending in
-        `.complete()` — the blocking equivalent of the JS
+        `.complete()` - the blocking equivalent of the JS
         emitter's `await` (the reply happens before the next
         statement, so an edit/followup after a reply is safe).
         `reply` here is the interaction reply; `edit` and
@@ -5228,7 +5228,7 @@ class _JavaEmitter:
     # ------------------------------------------------------------ components
 
     def _component_method_name(self, label: str, suffix: str) -> str:
-        """`buyAgainHandler` for a \"Buy again\" component — unique
+        """`buyAgainHandler` for a \"Buy again\" component - unique
         per file (a numeric suffix when the same label repeats)."""
         words = "".join(ch if ch.isalnum() else " " for ch in label).split()
         base = "".join(w.capitalize() for w in words) or "Component"
@@ -5252,7 +5252,7 @@ class _JavaEmitter:
 
     def _author_id_expr(self, ctx: dict) -> str | None:
         """The invoking user's id in this handler, for the
-        `only: author` gate — or None when the handler has no
+        `only: author` gate - or None when the handler has no
         user in scope (a ready/task handler)."""
         kind = ctx.get("kind")
         if kind in ("command", "component"):
@@ -5488,7 +5488,7 @@ class _JavaEmitter:
         call when a second component attaches to the same answer.
         Then capture the message (for the author gate and the
         timeout), record the author for `only: author`
-        components, and schedule the timeout — disabling the
+        components, and schedule the timeout - disabling the
         rows and running each on_timeout body."""
         if not self._pending_components:
             return
@@ -5593,7 +5593,7 @@ class _JavaEmitter:
     def _push_handler(self, kind: str, names: list[str],
                       reply: str | None, locale: str | None):
         """Push a handler context and bind its names into a fresh
-        scope. The Java twin of the JS emitter's _BOT_BINDINGS —
+        scope. The Java twin of the JS emitter's _BOT_BINDINGS -
         the same names, JDA spellings. The value form is what a
         bare name means; the interpolation form is what `{name}`
         renders as. The event parameter is always named `event`
@@ -5650,12 +5650,12 @@ def emit_program_java(program: A.Program, *, main_path: str,
                       sources: dict[str, str],
                       line_comments: bool = False,
                       output_stem: str | None = None) -> EmitResult:
-    """Emit a CHECKED program to Java — one `.java` per `.newr` file.
+    """Emit a CHECKED program to Java - one `.java` per `.newr` file.
 
     `main_path` is the input file as passed (D2: the header names
     it); `sources` maps file paths to their text (for diagnostics
     and `--line-comments`). `output_stem` is the `-o` stem (the
-    public class name — sanitized to a valid Java identifier). The
+    public class name - sanitized to a valid Java identifier). The
     result's `files` maps an output basename (`hello.java`) to its
     text; `main_file` is the main output's basename; `uses_rt` says
     whether any file needs `NewrRt` (the caller copies
@@ -5665,7 +5665,7 @@ def emit_program_java(program: A.Program, *, main_path: str,
     em = _JavaEmitter(program, main_path=main_path, sources=sources,
                       line_comments=line_comments, output_stem=stem)
     files, uses_rt = em._emit_file_set(program, main_path)
-    # `env.args` needs main()'s `args` in the runtime — but only
+    # `env.args` needs main()'s `args` in the runtime - but only
     # when some file actually uses it (D4: the runtime is copied
     # only when used, so hello stays runtime-free). A module file
     # may use env.args while the main file does not, and the main
@@ -5683,7 +5683,7 @@ def emit_program_java(program: A.Program, *, main_path: str,
     if program.bot is not None:
         # The standalone registration script (J10's Java twin) rides
         # along as a second output file, and the Maven build file
-        # (JDA always, sqlite-jdbc only when a store is used — the
+        # (JDA always, sqlite-jdbc only when a store is used - the
         # CLI writes every file in result.files, so the pom lands
         # next to the sources automatically).
         deploy = em._emit_deploy_file(program, stem + ".java")
@@ -5697,13 +5697,13 @@ def emit_program_java(program: A.Program, *, main_path: str,
 def _java_bot_pom(stem: str, *, uses_sqlite: bool) -> str:
     """The Maven build file for a bot program: JDA 6.7.0, plus
     sqlite-jdbc 3.54.1.0 when a store is used (both versions
-    verified live on Maven Central — see
+    verified live on Maven Central - see
     tests/test_emitter_java_bot.py). Java 17, UTF-8."""
     artifact = "".join(ch.lower() if ch.isalnum() else "-"
                        for ch in stem).strip("-") or "bot"
     lines = [
         '<?xml version="1.0" encoding="UTF-8"?>',
-        "<!-- Generated by newr — do not edit by hand. -->",
+        "<!-- Generated by newr. Do not edit by hand. -->",
         '<project xmlns="http://maven.apache.org/POM/4.0.0"',
         '         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
         '         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 '
