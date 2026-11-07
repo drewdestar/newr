@@ -1164,6 +1164,26 @@ object NewrRt {
         return out
     }
 
+    /** newr string ordering: lexicographic by Unicode code point
+     * (SPEC 7.6). The JVM's String.compareTo compares UTF-16 code
+     * units, which orders an astral character below BMP characters
+     * at U+E000 and above (a high surrogate is below U+FFFD, while
+     * by code points U+1F600 is above U+FFFD). Compare code point
+     * by code point; a strict prefix is smaller. Mirrors Java's
+     * strCmp (L10, type_model.newr, 7 Nov). */
+    fun strCmp(a: String, b: String): Int {
+        val ac = a.codePoints().toArray()
+        val bc = b.codePoints().toArray()
+        val n = minOf(ac.size, bc.size)
+        for (i in 0 until n) {
+            val d = ac[i] - bc[i]
+            if (d != 0) {
+                return d
+            }
+        }
+        return ac.size - bc.size
+    }
+
     /** `s.split(sep)` with a LITERAL separator (the JVM's
      * String.split takes a regex) and Python's trailing-empty-
      * strings behaviour (`split(regex, -1)` keeps them). */

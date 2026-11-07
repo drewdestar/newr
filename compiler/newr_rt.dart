@@ -933,6 +933,24 @@ class NewrRt {
   static List<String> chars(String s) =>
       s.runes.map((cp) => String.fromCharCode(cp)).toList();
 
+  /// newr string ordering: lexicographic by Unicode code point
+  /// (SPEC 7.6). Dart's String.compareTo compares UTF-16 code
+  /// units, which orders an astral character below BMP characters
+  /// at U+E000 and above (a high surrogate is below U+FFFD, while
+  /// by code points U+1F600 is above U+FFFD). Compare code point
+  /// by code point; a strict prefix is smaller. Mirrors Java's
+  /// strCmp (L11, type_model.newr, 7 Nov).
+  static int strCmp(String a, String b) {
+    final ac = a.runes.toList();
+    final bc = b.runes.toList();
+    final n = ac.length < bc.length ? ac.length : bc.length;
+    for (var i = 0; i < n; i++) {
+      final d = ac[i] - bc[i];
+      if (d != 0) return d;
+    }
+    return ac.length - bc.length;
+  }
+
   /// `s.split(sep)` with a LITERAL separator (Dart's
   /// String.split with a String pattern is already literal) and
   /// Python's trailing-empty-strings behaviour (Dart keeps them).

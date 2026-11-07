@@ -58,7 +58,7 @@ _RT_HELPERS = frozenset({
     "tryResult", "timeFormat", "fileRead", "fileWrite", "fileAppend",
     "fileExists", "randomInt", "randomChoice", "randomShuffle",
     "eq", "range", "print", "input", "ok", "err", "chars", "splitStr",
-    "strIndex", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
+    "strIndex", "strCmp", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
     "hashOf", "structHash",
 })
 _RT_CLASSES = frozenset({
@@ -607,6 +607,14 @@ class _KtEmitter:
         elif t.name == "object":
             # The union type of conflicting enum variant fields.
             return "Any?"
+        elif t.name == "__unknown__":
+            # The checker leaves `__unknown__` params on a bare
+            # builtin used as a value (`let f = len`); it is not a
+            # real type. In a declaration position it must become
+            # the generic Any?, matching the generic fallback in
+            # _emit_builtin_value (type_model.newr, kt 74/75,
+            # 7 Nov). Mirrors the java/cs Object/object fix.
+            return "Any?"
         elif t.name == "error":
             base = "NewrRt.NewrError"
         elif t.name == "list":
@@ -872,7 +880,15 @@ class _KtEmitter:
         # the call inside resolves the overload by argument type.
         def _param(i: int, fallback: str) -> str:
             if _is_fn(fn_target) and i < len(fn_target.params) - 1:
-                return self._kt_boxed_type(fn_target.params[i])
+                p = fn_target.params[i]
+                if p.name == "__unknown__":
+                    # A bare builtin's type carries `__unknown__`
+                    # params (the checker never resolves them
+                    # without a call); fall back to the generic
+                    # form instead of emitting `__unknown__`
+                    # (type_model.newr, kt 74/75, 7 Nov).
+                    return fallback
+                return self._kt_boxed_type(p)
             return fallback
 
         if name == "len":
@@ -883,7 +899,8 @@ class _KtEmitter:
         if name == "min":
             pt = _param(0, "Long")
             if pt == "String":
-                body = "(if (a.compareTo(b) < 0) a else b)"
+                self._need_rt("strCmp")
+                body = "(if (NewrRt.strCmp(a, b) < 0) a else b)"
             else:
                 body = "(if (a < b) a else b)"
             return (f"{{ a: {pt}, b: {pt} -> {body} }}",
@@ -891,7 +908,8 @@ class _KtEmitter:
         if name == "max":
             pt = _param(0, "Long")
             if pt == "String":
-                body = "(if (a.compareTo(b) < 0) b else a)"
+                self._need_rt("strCmp")
+                body = "(if (NewrRt.strCmp(a, b) < 0) b else a)"
             else:
                 body = "(if (a < b) b else a)"
             return (f"{{ a: {pt}, b: {pt} -> {body} }}",
@@ -1065,14 +1083,18 @@ class _KtEmitter:
                     return expr, _PREC["primary"]
                 jsop = "==" if op == "==" else "!="
                 return f"{left} {jsop} {right}", prec
-            # Ordering: strings compare lexicographically
-            # (compareTo); numbers compare bare (autounboxing a
+            # Ordering: strings compare by Unicode code point
+            # (NewrRt.strCmp); numbers compare bare (autounboxing a
             # boxed operand would NPE on null, but the checker only
-            # allows ordering on non-nullable values).
+            # allows ordering on non-nullable values). The JVM's
+            # String.compareTo compares UTF-16 code units, which
+            # orders an astral character below BMP characters at
+            # U+E000 and above (L10, type_model.newr, 7 Nov).
             if _is_str(lt) or _is_str(rt):
+                self._need_rt("strCmp")
                 cmp = {"<": "< 0", "<=": "<= 0", ">": "> 0",
                        ">=": ">= 0"}[op]
-                return f"({left}.compareTo({right}) {cmp})", prec
+                return f"(NewrRt.strCmp({left}, {right}) {cmp})", prec
             jsop = {"<": "<", "<=": "<=", ">": ">", ">=": ">="}[op]
             return f"{left} {jsop} {right}", prec
         # Arithmetic: the result type decides checked vs bare.
@@ -1342,7 +1364,8 @@ class _KtEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"(if ({a}.compareTo({b}) < 0) {a} else {b})",
+                self._need_rt("strCmp")
+                return (f"(if (NewrRt.strCmp({a}, {b}) < 0) {a} else {b})",
                         _PREC["primary"])
             return f"(if ({a} < {b}) {a} else {b})", _PREC["primary"]
         if name == "max":
@@ -1350,7 +1373,8 @@ class _KtEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"(if ({a}.compareTo({b}) < 0) {b} else {a})",
+                self._need_rt("strCmp")
+                return (f"(if (NewrRt.strCmp({a}, {b}) < 0) {b} else {a})",
                         _PREC["primary"])
             return f"(if ({a} < {b}) {b} else {a})", _PREC["primary"]
         if name == "abs":

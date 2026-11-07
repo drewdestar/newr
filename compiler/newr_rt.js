@@ -734,14 +734,90 @@ function listContains(lst, x) {
   return false;
 }
 
+function setAdd(s, x) {
+  // newr `set.add(x)`: a set holds no duplicates (SPEC 7.6/7.8).
+  // A native JS Set uses identity for objects, so adding two
+  // equal-but-distinct struct values would store both. Check
+  // structurally first and skip when an equal element is present.
+  for (const e of s) {
+    if (eq(e, x)) {
+      return;
+    }
+  }
+  s.add(x);
+}
+
+function setContains(s, x) {
+  // newr `x in s` / `s.contains(x)`: structural equality, like
+  // listContains. Native Set.has is identity for objects, so it
+  // would miss an equal-but-distinct struct value.
+  for (const e of s) {
+    if (eq(e, x)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function setRemove(s, x) {
   // newr `set.remove(x)`: removing a missing element is an error
   // (Python's `set.remove` raises KeyError; JS `Set.delete`
-  // silently returns false).
-  if (!s.has(x)) {
-    throw codedError("KeyError", toStr(x));
+  // silently returns false). The match is structural: find the
+  // stored element equal to x and delete THAT one, because native
+  // Set.has/delete are identity for objects.
+  for (const e of s) {
+    if (eq(e, x)) {
+      s.delete(e);
+      return;
+    }
   }
-  s.delete(x);
+  throw codedError("KeyError", toStr(x));
+}
+
+function toSet(xs) {
+  // newr `set(xs)`: build a set from a list, deduplicating by
+  // structural equality (SPEC 7.6/7.8). A bare `new Set(xs)` would
+  // keep two equal-but-distinct struct values as two elements.
+  const s = new Set();
+  for (const x of xs) {
+    setAdd(s, x);
+  }
+  return s;
+}
+
+function strCmp(a, b) {
+  // newr string ordering: lexicographic by Unicode code point
+  // (SPEC 7.6). JS `<` compares UTF-16 code units, which orders an
+  // astral character below BMP characters at U+E000 and above
+  // (high surrogate D83D < FFFD, while by code points
+  // U+1F600 > U+FFFD). Compare code point by code point; a strict
+  // prefix is smaller.
+  const ac = [...a];
+  const bc = [...b];
+  const n = Math.min(ac.length, bc.length);
+  for (let i = 0; i < n; i++) {
+    const d = ac[i].codePointAt(0) - bc[i].codePointAt(0);
+    if (d !== 0) {
+      return d;
+    }
+  }
+  return ac.length - bc.length;
+}
+
+function lenOf(x) {
+  // newr `len` as a first-class value: the same answer as the
+  // `len(x)` call. A str counts code points (SPEC 7.6), not UTF-16
+  // units; a list counts elements; a dict/set counts entries.
+  if (typeof x === "string") {
+    return BigInt([...x].length);
+  }
+  if (Array.isArray(x)) {
+    return BigInt(x.length);
+  }
+  if (x instanceof Map || x instanceof Set) {
+    return BigInt(x.size);
+  }
+  throw new NewrError("len() of unsupported value: " + toStr(x));
 }
 
 function unwrapOpt(v) {
@@ -966,7 +1042,12 @@ module.exports = {
   listIndex,
   listGet,
   listContains,
+  setAdd,
+  setContains,
   setRemove,
+  toSet,
+  strCmp,
+  lenOf,
   unwrapOpt,
   eq,
   range,

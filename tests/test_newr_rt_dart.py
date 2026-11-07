@@ -42,7 +42,7 @@ class TestNewrRtDart(unittest.TestCase):
             r = subprocess.run([DART, "RtChecks.dart"],
                                capture_output=True, text=True, cwd=d)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("71 checks passed", r.stdout)
+            self.assertIn("72 checks passed", r.stdout)
             self.assertNotIn("FAIL", r.stdout)
 
 

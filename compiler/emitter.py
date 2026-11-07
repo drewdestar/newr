@@ -642,12 +642,19 @@ class _Emitter:
             right = self.emit_expr(node.right, prec + 1)
             return f"{left} {op} {right}", prec
         if op == "in":
-            left = self.emit_expr(node.left, _BINOP_PREC["in"])
+            # Python chains same-level comparisons, so `x in s != y`
+            # would parse as `(x in s) and (s != y)`, not as
+            # `(x in s) != y`. A comparison operand must be
+            # parenthesised, so emit both sides at prec + 1.
+            left = self.emit_expr(node.left, _BINOP_PREC["in"] + 1)
             right = self.emit_expr(node.right, _BINOP_PREC["in"] + 1)
             return f"{left} in {right}", _BINOP_PREC["in"]
         if op in ("==", "!=", "<", "<=", ">", ">="):
             prec = _BINOP_PREC[op]
-            left = self.emit_expr(node.left, prec)
+            # Same chaining trap as `in` above: the left operand
+            # of a comparison is emitted at prec + 1 so a nested
+            # comparison gets parens (the right side already was).
+            left = self.emit_expr(node.left, prec + 1)
             right = self.emit_expr(node.right, prec + 1)
             return f"{left} {op} {right}", prec
         # Arithmetic: the result type decides checked vs bare.

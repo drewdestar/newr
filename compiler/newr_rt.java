@@ -1244,6 +1244,25 @@ public class NewrRt {
         return out;
     }
 
+    /** newr string ordering: lexicographic by Unicode code point
+     * (SPEC 7.6). Java's String.compareTo compares UTF-16 code
+     * units, which orders an astral character below BMP characters
+     * at U+E000 and above (a high surrogate is below U+FFFD, while
+     * by code points U+1F600 is above U+FFFD). Compare code point
+     * by code point; a strict prefix is smaller. */
+    public static int strCmp(String a, String b) {
+        int[] ac = a.codePoints().toArray();
+        int[] bc = b.codePoints().toArray();
+        int n = Math.min(ac.length, bc.length);
+        for (int i = 0; i < n; i++) {
+            int d = ac[i] - bc[i];
+            if (d != 0) {
+                return d;
+            }
+        }
+        return ac.length - bc.length;
+    }
+
     /** `s.split(sep)` with a LITERAL separator (Java's String.split
      * takes a regex) and Python's trailing-empty-strings behaviour
      * (`split(regex, -1)` keeps them). */

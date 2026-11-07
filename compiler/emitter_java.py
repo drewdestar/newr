@@ -59,7 +59,7 @@ _RT_HELPERS = frozenset({
     "tryResult", "timeFormat", "fileRead", "fileWrite", "fileAppend",
     "fileExists", "randomInt", "randomChoice", "randomShuffle",
     "eq", "range", "print", "input", "ok", "err", "chars", "splitStr",
-    "strIndex", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
+    "strIndex", "strCmp", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
     "hashOf", "structHash",
 })
 _RT_CLASSES = frozenset({
@@ -593,6 +593,16 @@ class _JavaEmitter:
         if t.name == "object":
             # The union type of conflicting enum variant fields.
             return "Object"
+        if t.name == "__unknown__":
+            # The checker leaves `__unknown__` params on a bare
+            # builtin used as a value (`let f = len`); it is not a
+            # real type. In a declaration position it must become
+            # the generic Object, matching the generic fallback in
+            # _emit_builtin_value (type_model.newr, java 74/75,
+            # 7 Nov). The first fix only patched the value
+            # expression; the field type is rendered here, so the
+            # build still failed until this was added.
+            return "Object"
         if t.name == "error":
             return "NewrRt.NewrError"
         if t.name == "list":
@@ -854,8 +864,14 @@ class _JavaEmitter:
         # First-class builtin values: `len`/`min`/`max` as a value
         # are small lambdas. The cast type comes from the context
         # (fn_target) when known; the fallback forms are the
-        # generic ones (Object in, Long out).
-        cast = self._java_fn_type(fn_target) if _is_fn(fn_target) else None
+        # generic ones (Object in, Long out). A bare builtin's type
+        # carries `__unknown__` params (the checker never resolves
+        # them without a call), and that is not a real type: fall
+        # back to the generic form instead of emitting `__unknown__`
+        # into the output (type_model.newr, java 74/75, 7 Nov).
+        known = _is_fn(fn_target) and not any(
+            p.name == "__unknown__" for p in fn_target.params)
+        cast = self._java_fn_type(fn_target) if known else None
         if name == "len":
             self._need_rt("lenOf")
             form = cast or "NewrRt.Fn1<Object, Long>"
@@ -1038,14 +1054,16 @@ class _JavaEmitter:
                     return expr, _PREC["primary"]
                 jsop = "==" if op == "==" else "!="
                 return f"{left} {jsop} {right}", prec
-            # Ordering: strings compare lexicographically
-            # (compareTo); numbers compare bare (autounboxing a
-            # boxed operand would NPE on null, but the checker only
-            # allows ordering on non-nullable values).
+            # Ordering: strings compare lexicographically by code
+            # point (NewrRt.strCmp); numbers compare bare
+            # (autounboxing a boxed operand would NPE on null, but
+            # the checker only allows ordering on non-nullable
+            # values).
             if _is_str(lt) or _is_str(rt):
+                self._need_rt("strCmp")
                 cmp = {"<": "< 0", "<=": "<= 0", ">": "> 0",
                        ">=": ">= 0"}[op]
-                return f"({left}.compareTo({right}) {cmp})", prec
+                return f"(NewrRt.strCmp({left}, {right}) {cmp})", prec
             jsop = {"<": "<", "<=": "<=", ">": ">", ">=": ">="}[op]
             return f"{left} {jsop} {right}", prec
         # Arithmetic: the result type decides checked vs bare.
@@ -1317,7 +1335,8 @@ class _JavaEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.compareTo({b}) < 0 ? {a} : {b})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.strCmp({a}, {b}) < 0 ? {a} : {b})",
                         _PREC["primary"])
             return f"({a} < {b} ? {a} : {b})", _PREC["primary"]
         if name == "max":
@@ -1325,7 +1344,8 @@ class _JavaEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.compareTo({b}) < 0 ? {b} : {a})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.strCmp({a}, {b}) < 0 ? {b} : {a})",
                         _PREC["primary"])
             return f"({a} < {b} ? {b} : {a})", _PREC["primary"]
         if name == "abs":

@@ -570,6 +570,14 @@ void main() {
     eq(NewrRt.lenOf({'a': 1}), 1, 'len dict');
     eq(NewrRt.lenOf({1, 2, 3}), 3, 'len set');
   });
+  check('strCmp', () {
+    eq(NewrRt.strCmp('😀', '�') > 0, true, 'strCmp astral gt');
+    eq(NewrRt.strCmp('�', '😀') < 0, true, 'strCmp astral lt');
+    eq(NewrRt.strCmp('a', 'a'), 0, 'strCmp equal');
+    eq(NewrRt.strCmp('ab', 'a') > 0, true, 'strCmp prefix longer');
+    eq(NewrRt.strCmp('a', 'ab') < 0, true, 'strCmp prefix shorter');
+    eq(NewrRt.strCmp('', ''), 0, 'strCmp empty');
+  });
   check('dictOf', () {
     final d = NewrRt.dictOf<int>(['a', 1, 'b', 2]);
     eq(d['a'], 1, 'dictOf a');

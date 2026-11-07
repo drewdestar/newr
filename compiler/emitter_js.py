@@ -49,7 +49,8 @@ _RT_HELPERS = frozenset({
     "add", "sub", "mul", "neg", "powInt", "powFloat", "tdiv", "tmod",
     "fmod", "roundHalfAway", "toInt", "toFloat", "toBool", "toStr",
     "floatStr", "checkInt", "asError", "optChain", "coalesce",
-    "listGet", "listIndex", "listContains", "setRemove", "unwrapOpt",
+    "listGet", "listIndex", "listContains", "setAdd", "setContains",
+    "setRemove", "toSet", "strCmp", "lenOf", "unwrapOpt",
     "tryResult", "timeFormat", "fileRead", "fileWrite", "fileAppend",
     "fileExists", "randomInt", "randomChoice", "randomShuffle",
     "eq", "range", "print", "input", "ok", "err",
@@ -620,12 +621,23 @@ class _JSEmitter:
     def _emit_builtin_value(self, name: str) -> tuple[str, int]:
         # First-class builtin values: `len`/`min`/`max` as a value
         # are small lambdas (a JS `Math.min` does not take BigInts).
+        # `len` is the runtime `lenOf`: a bare `x.length` would count
+        # UTF-16 units for a str, not code points (SPEC 7.6).
         if name == "len":
-            return "((x) => x.length ?? x.size)", _PREC["primary"]
+            self._need_rt("lenOf")
+            return "lenOf", _PREC["primary"]
         if name == "min":
-            return "((a, b) => a < b ? a : b)", _PREC["primary"]
+            # Strings order by code point (SPEC 7.6), not by JS `<`
+            # (UTF-16 units). Numbers and BigInts compare bare.
+            self._need_rt("strCmp")
+            return ("((a, b) => (typeof a === 'string' "
+                    "? strCmp(a, b) < 0 : a < b) ? a : b)",
+                    _PREC["primary"])
         if name == "max":
-            return "((a, b) => a > b ? a : b)", _PREC["primary"]
+            self._need_rt("strCmp")
+            return ("((a, b) => (typeof a === 'string' "
+                    "? strCmp(a, b) > 0 : a > b) ? a : b)",
+                    _PREC["primary"])
         if name == "abs":
             self._need_rt("checkInt")
             return ("((x) => typeof x === 'bigint' ? "
@@ -638,7 +650,12 @@ class _JSEmitter:
             self._need_rt("range")
             return "range", _PREC["primary"]
         if name == "set":
-            return "((xs) => new Set(xs))", _PREC["primary"]
+            # A bare `new Set(xs)` would keep two equal-but-distinct
+            # struct values as two elements (JS Set is identity for
+            # objects). Route through `toSet`, which deduplicates
+            # structurally (SPEC 7.6/7.8).
+            self._need_rt("toSet")
+            return "toSet", _PREC["primary"]
         if name == "ok":
             self._need_rt("ok")
             return "ok", _PREC["primary"]
@@ -731,6 +748,13 @@ class _JSEmitter:
                 return f"listContains({right}, {left})", _PREC["primary"]
             if rt.name in ("set", "dict"):
                 right = self.emit_expr(node.right, _BINOP_PREC["<"] + 1)
+                if rt.name == "set":
+                    # Structural membership: native Set.has is
+                    # identity for objects (SPEC 7.8). Dict keys are
+                    # str, so `.has` on a Map is value-based there.
+                    self._need_rt("setContains")
+                    return (f"setContains({right}, {left})",
+                            _PREC["primary"])
                 return f"{right}.has({left})", _PREC["primary"]
             self._fail(
                 f"cannot emit `in` for a {rt.name} (the checker should "
@@ -757,6 +781,16 @@ class _JSEmitter:
                 if op == "!=":
                     expr = f"!{expr}"
                 return expr, _PREC["primary"]
+            if op in ("<", "<=", ">", ">=") and \
+                    (_is_str(lt) or _is_str(rt)):
+                # String ordering is lexicographic by code point
+                # (SPEC 7.6). Plain JS `<` compares UTF-16 code
+                # units, which mis-orders astral characters against
+                # BMP characters at U+E000 and above.
+                self._need_rt("strCmp")
+                cmp = {"<": "< 0", "<=": "<= 0", ">": "> 0",
+                       ">=": ">= 0"}[op]
+                return f"(strCmp({left}, {right}) {cmp})", prec
             return f"{left} {jsop} {right}", prec
         # Arithmetic: the result type decides checked vs bare.
         result = self._type_of(node)
@@ -891,8 +925,9 @@ class _JSEmitter:
             args = [self.emit_expr(a, 0) for a in node.args]
             return f"range({', '.join(args)})", _PREC["primary"]
         if name == "set":
+            self._need_rt("toSet")
             arg = self.emit_expr(node.args[0], 0)
-            return f"new Set({arg})", _PREC["primary"]
+            return f"toSet({arg})", _PREC["primary"]
         if name == "ok":
             self._need_rt("ok")
             return f"ok({self.emit_expr(node.args[0], 0)})", \
@@ -999,10 +1034,21 @@ class _JSEmitter:
         if name == "min":
             a = self.emit_expr(args[0], 0)
             b = self.emit_expr(args[1], 0)
+            t = self._type_of(args[0])
+            if _is_str(t):
+                # Code-point order (SPEC 7.6), not JS `<` (UTF-16).
+                self._need_rt("strCmp")
+                return f"(strCmp({a}, {b}) < 0 ? {a} : {b})", \
+                    _PREC["primary"]
             return f"({a} < {b} ? {a} : {b})", _PREC["primary"]
         if name == "max":
             a = self.emit_expr(args[0], 0)
             b = self.emit_expr(args[1], 0)
+            t = self._type_of(args[0])
+            if _is_str(t):
+                self._need_rt("strCmp")
+                return f"(strCmp({a}, {b}) > 0 ? {a} : {b})", \
+                    _PREC["primary"]
             return f"({a} > {b} ? {a} : {b})", _PREC["primary"]
         if name == "abs":
             t = self._type_of(args[0])
@@ -1393,12 +1439,19 @@ class _JSEmitter:
                 return f"{obj_text}.has({args[0]})", _PREC["primary"]
         elif tname == "set":
             if name == "add":
-                return f"{obj_text}.add({args[0]})", _PREC["primary"]
+                # Structural dedup: native `.add` is identity for
+                # objects (SPEC 7.6/7.8).
+                self._need_rt("setAdd")
+                return f"setAdd({obj_text}, {args[0]})", \
+                    _PREC["primary"]
             if name == "remove":
                 self._need_rt("setRemove")
                 return f"setRemove({obj_text}, {args[0]})", _PREC["primary"]
             if name == "contains":
-                return f"{obj_text}.has({args[0]})", _PREC["primary"]
+                # Structural membership, not native `.has` (identity).
+                self._need_rt("setContains")
+                return f"setContains({obj_text}, {args[0]})", \
+                    _PREC["primary"]
         elif tname == "Result":
             if name in ("is_ok", "is_err"):
                 # The JS Result exposes isOk/isErr as METHODS

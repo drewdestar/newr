@@ -59,7 +59,7 @@ _RT_HELPERS = frozenset({
     "tryResult", "timeFormat", "fileRead", "fileWrite", "fileAppend",
     "fileExists", "randomInt", "randomChoice", "randomShuffle",
     "eq", "range", "print", "input", "ok", "err", "chars", "splitStr",
-    "strIndex", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
+    "strIndex", "strCmp", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
     "hashOf", "structHash", "roundHalfAwayN", "printErr",
 })
 _RT_CLASSES = frozenset({
@@ -606,6 +606,14 @@ class _DartEmitter:
         if t.name == "object":
             # The union type of conflicting enum variant fields.
             return "Object?"
+        if t.name == "__unknown__":
+            # The checker leaves `__unknown__` params on a bare
+            # builtin used as a value (`let f = len`); it is not a
+            # real type. In a declaration position it must become
+            # the generic Object?, matching the generic fallback in
+            # _emit_builtin_value (type_model.newr, dart 74/75,
+            # 7 Nov). Mirrors the java/cs Object/object fix.
+            return "Object?"
         if t.name == "error":
             return "NewrError" + q
         if t.name == "list":
@@ -854,6 +862,14 @@ class _DartEmitter:
         # ones.
         def _param_types(n, fallback):
             if _is_fn(fn_target) and len(fn_target.params) - 1 == n:
+                if any(p.name == "__unknown__"
+                       for p in fn_target.params):
+                    # A bare builtin's type carries `__unknown__`
+                    # params (the checker never resolves them
+                    # without a call); fall back to the generic
+                    # form instead of emitting `__unknown__`
+                    # (type_model.newr, dart 74/75, 7 Nov).
+                    return fallback
                 return [self._dart_type(p)
                         for p in fn_target.params[:-1]]
             return fallback
@@ -864,10 +880,20 @@ class _DartEmitter:
                     _PREC["primary"])
         if name == "min":
             a, b = _param_types(2, ["int", "int"])
+            if a == "String":
+                self._need_rt("strCmp")
+                return (("((String x, String y) => "
+                         "NewrRt.strCmp(x, y) < 0 ? x : y)"),
+                        _PREC["primary"])
             return (f"(({a} x, {b} y) => x < y ? x : y)",
                     _PREC["primary"])
         if name == "max":
             a, b = _param_types(2, ["int", "int"])
+            if a == "String":
+                self._need_rt("strCmp")
+                return (("((String x, String y) => "
+                         "NewrRt.strCmp(x, y) < 0 ? y : x)"),
+                        _PREC["primary"])
             return (f"(({a} x, {b} y) => x < y ? y : x)",
                     _PREC["primary"])
         if name == "abs":
@@ -1045,14 +1071,16 @@ class _DartEmitter:
                     return expr, _PREC["primary"]
                 jsop = "==" if op == "==" else "!="
                 return f"{left} {jsop} {right}", prec
-            # Ordering: strings compare lexicographically
-            # (compareTo); numbers compare bare (autounboxing a
-            # boxed operand would NPE on null, but the checker only
-            # allows ordering on non-nullable values).
+            # Ordering: strings compare by Unicode code point
+            # (NewrRt.strCmp); numbers compare bare. Dart's
+            # String.compareTo compares UTF-16 code units, which
+            # orders an astral character below BMP characters at
+            # U+E000 and above (L11, type_model.newr, 7 Nov).
             if _is_str(lt) or _is_str(rt):
+                self._need_rt("strCmp")
                 cmp = {"<": "< 0", "<=": "<= 0", ">": "> 0",
                        ">=": ">= 0"}[op]
-                return f"({left}.compareTo({right}) {cmp})", prec
+                return f"(NewrRt.strCmp({left}, {right}) {cmp})", prec
             jsop = {"<": "<", "<=": "<=", ">": ">", ">=": ">="}[op]
             return f"{left} {jsop} {right}", prec
         # Arithmetic: the result type decides checked vs bare.
@@ -1326,7 +1354,8 @@ class _DartEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.compareTo({b}) < 0 ? {a} : {b})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.strCmp({a}, {b}) < 0 ? {a} : {b})",
                         _PREC["primary"])
             return f"({a} < {b} ? {a} : {b})", _PREC["primary"]
         if name == "max":
@@ -1334,7 +1363,8 @@ class _DartEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.compareTo({b}) < 0 ? {b} : {a})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.strCmp({a}, {b}) < 0 ? {b} : {a})",
                         _PREC["primary"])
             return f"({a} < {b} ? {b} : {a})", _PREC["primary"]
         if name == "abs":

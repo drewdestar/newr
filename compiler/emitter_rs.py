@@ -1711,7 +1711,7 @@ class _RsEmitter:
                 "function type (pass it where its type is known)")
         params = fn_target.params[:-1]
         ret = fn_target.params[-1]
-        if any(p.name == "__unknown__" for p in params + [ret]):
+        if any(p.name == "__unknown__" for p in params + (ret,)):
             self._fail(
                 f"builtin `{name}` used as a value needs a known "
                 "function type (pass it where its type is known)")
@@ -3070,7 +3070,8 @@ class _RsEmitter:
             self._hoists_add([f"let {snap}: {snap_type} = {snap_value};"])
             self._scopes[-1][name] = _Binding(rs=snap, type=b.type,
                                               kind="param")
-        params_text = ", ".join(b.rs for b in param_bindings)
+        params_text = ", ".join(
+            f"{b.rs}: {self._rs_type(b.type)}" for b in param_bindings)
         fn_type = self._type_of(node)
         cast = fn_target if _is_fn(fn_target) else fn_type
         cast_text = self._rs_fn_type(cast)

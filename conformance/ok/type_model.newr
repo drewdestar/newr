@@ -1,0 +1,38 @@
+# newr's own type model (SPEC section 7), pinned on every target:
+# sets compare struct values structurally, len counts code points,
+# strings order by code point, never by host semantics.
+struct Point:
+  x: int
+  y: int
+
+let passed = true
+let s = set([Point(x: 1, y: 2)])
+s.add(Point(x: 1, y: 2))
+if len(s) != 1:
+  passed = false
+if s.contains(Point(x: 1, y: 2)) != true:
+  passed = false
+if (Point(x: 1, y: 2) in s) != true:
+  passed = false
+s.remove(Point(x: 1, y: 2))
+if len(s) != 0:
+  passed = false
+if s.contains(Point(x: 1, y: 2)) != false:
+  passed = false
+let f = len
+if f("😀") != 1:
+  passed = false
+if f("ab") != 2:
+  passed = false
+if ("😀" > "�") != true:
+  passed = false
+if ("😀" < "�") != false:
+  passed = false
+if min("😀", "�") != "�":
+  passed = false
+if max("😀", "�") != "😀":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -515,6 +515,14 @@ fun main() {
         eq(NewrRt.lenOf(d), 1L, "len dict")
         eq(NewrRt.lenOf(setOf(1L, 2L, 3L)), 3L, "len set")
     }
+    check("strCmp") {
+        eq(NewrRt.strCmp("😀", "�") > 0, true, "strCmp astral gt")
+        eq(NewrRt.strCmp("�", "😀") < 0, true, "strCmp astral lt")
+        eq(NewrRt.strCmp("a", "a"), 0, "strCmp equal")
+        eq(NewrRt.strCmp("ab", "a") > 0, true, "strCmp prefix longer")
+        eq(NewrRt.strCmp("a", "ab") < 0, true, "strCmp prefix shorter")
+        eq(NewrRt.strCmp("", ""), 0, "strCmp empty")
+    }
     check("dictOf") {
         val d: LinkedHashMap<String, Long> = NewrRt.dictOf("a", 1L, "b", 2L)
         eq(d["a"], 1L, "dictOf a")

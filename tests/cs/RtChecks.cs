@@ -525,6 +525,15 @@ Check("chars code points", () =>
     Eq(NewrRt.Chars(""), new List<string>(), "chars empty");
     Eq(NewrRt.Chars("abc"), new List<string> { "a", "b", "c" }, "chars ascii");
 });
+Check("strCmp code points", () =>
+{
+    Eq(NewrRt.StrCmp("😀", "�") > 0, true, "strCmp astral gt");
+    Eq(NewrRt.StrCmp("�", "😀") < 0, true, "strCmp astral lt");
+    Eq(NewrRt.StrCmp("a", "a"), 0, "strCmp equal");
+    Eq(NewrRt.StrCmp("ab", "a") > 0, true, "strCmp prefix longer");
+    Eq(NewrRt.StrCmp("a", "ab") < 0, true, "strCmp prefix shorter");
+    Eq(NewrRt.StrCmp("", ""), 0, "strCmp empty");
+});
 Check("splitStr literal separator", () =>
 {
     Eq(NewrRt.SplitStr("a,b,c", ","), new List<string> { "a", "b", "c" }, "split basic");
