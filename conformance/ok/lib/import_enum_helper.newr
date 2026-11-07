@@ -1,0 +1,13 @@
+# Helper for import_enum.newr: a pub enum + a pub fn over it, and a
+# fielded pub enum. Lives in ok/lib/ so the harness (which globs
+# ok/*.newr non-recursively) never runs it standalone.
+pub enum Shade:
+  Red
+  Blue
+
+pub fn is_red(s: Shade) -> bool:
+  return s == Shade.Red
+
+pub enum Shape:
+  Circle(radius: float)
+  Square(side: float)

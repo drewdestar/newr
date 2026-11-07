@@ -1097,11 +1097,50 @@ class Checker:
                 obj.name in self._ctx.enums:
             return self._member_field_type(Type(obj.name), expr.name,
                                            expr.span, expr.optional, obj)
+        # §20: qualified imported enum member — `m_helper.Shade.Red`.
+        # The enum name itself is not a value (like a local bare enum
+        # name, which the emitter also refuses), so only the full
+        # chain is typed, from the imported module's enum
+        # declaration. The intermediate `m_helper.Shade` node gets no
+        # type of its own — the local `Color.Red` path does not type
+        # its `Color` either — and the emitters resolve the whole
+        # chain at emit time without typing the intermediate node.
+        if isinstance(obj, A.Member) and isinstance(obj.obj, A.Name):
+            binding = self._lookup(obj.obj.name)
+            if binding is not None and binding.kind == "module":
+                target = self._ctx.imports.get(obj.obj.name) \
+                    if self._ctx else None
+                if isinstance(target, _ModuleCtx) and \
+                        obj.name in target.enums:
+                    return self._imported_enum_member_type(
+                        target.enums[obj.name], obj.name, expr)
         obj_type = self.synth(obj)
         if _is_unknown(obj_type):
             return UNKNOWN
         return self._member_field_type(obj_type, expr.name, expr.span,
                                        expr.optional, obj)
+
+    def _imported_enum_member_type(self, decl: A.EnumDecl, enum_name: str,
+                                   expr: A.Member) -> Type:
+        """Type of `module.Enum.Variant` as a value, mirroring the
+        local enum branch of `_member_field_type` (same codes, same
+        wording): a bare variant is the enum type, a fielded variant
+        used bare is E2001, an unknown variant is E3001."""
+        for v in decl.variants:
+            if v.name == expr.name:
+                if v.fields:
+                    self._error(expr.span, "E2001",
+                                f"variant `{expr.name}` needs its fields, "
+                                f"like `{enum_name}.{expr.name}(...)`",
+                                help="give the associated values")
+                    return UNKNOWN
+                return Type(enum_name)
+        help = self._similar_help(expr.name,
+                                  [v.name for v in decl.variants])
+        self._error(expr.span, "E3001",
+                    f"enum `{enum_name}` has no variant `{expr.name}`",
+                    help=help)
+        return UNKNOWN
 
     def _module_member_type(self, bound: str, name: str, span: Span,
                             as_value: bool) -> Type:
@@ -1423,6 +1462,20 @@ class Checker:
                 return NONE_TYPE
             if self._ctx is not None and obj.name in self._ctx.enums:
                 return self._call_enum_variant(obj.name, func.name, expr)
+        # §20: qualified imported fielded-variant construction —
+        # `m_helper.Shape.Circle(radius: 1.5)`. Mirrors the local
+        # enum branch above, but takes the declaration from the
+        # imported module's context instead of this file's.
+        if isinstance(obj, A.Member) and isinstance(obj.obj, A.Name):
+            binding = self._lookup(obj.obj.name)
+            if binding is not None and binding.kind == "module":
+                target = self._ctx.imports.get(obj.obj.name) \
+                    if self._ctx else None
+                if isinstance(target, _ModuleCtx) and \
+                        obj.name in target.enums:
+                    return self._call_enum_variant(
+                        obj.name, func.name, expr,
+                        decl=target.enums[obj.name])
         # Method call on a value.
         obj_type = self.synth(obj)
         if _is_unknown(obj_type):
@@ -1743,8 +1796,8 @@ class Checker:
         return self._call_sig(spec, expr, name)
 
     def _call_enum_variant(self, enum_name: str, variant: str,
-                           expr: A.Call) -> Type:
-        decl = self._ctx.enums[enum_name]
+                           expr: A.Call, decl=None) -> Type:
+        decl = decl if decl is not None else self._ctx.enums[enum_name]
         found = None
         for v in decl.variants:
             if v.name == variant:

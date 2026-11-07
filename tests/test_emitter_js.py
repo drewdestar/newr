@@ -21,7 +21,7 @@ from pathlib import Path
 
 from compiler.checker import check_program
 from compiler.discord_check import check_discord, discord_providers
-from compiler.resolver import resolve_source
+from compiler.resolver import resolve_file, resolve_source
 
 ROOT = Path(__file__).resolve().parent.parent
 RT_JS_SRC = ROOT / "compiler" / "newr_rt.js"
@@ -856,6 +856,106 @@ class TestEmitterRefusal(unittest.TestCase):
                 span=None, value=A.Name(span=None, name="x"))])
         with self.assertRaises(EmitterError):
             emit_js2(prog, main_path="<test>.newr", sources={})
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+@unittest.skipUnless(HAS_JS_EMITTER, "compiler/emitter_js.py is missing")
+class TestImportedEnumMember(unittest.TestCase):
+    """§20: the JS twin of the Python imported-enum tests — the
+    qualified member runs live under Node, and a file with a `pub`
+    enum exports only names that exist (the bare enum name has no
+    JS binding, so exporting it broke `require` of the file)."""
+
+    HELPER = ('pub enum Shade:\n'
+              '  Red\n'
+              '  Blue\n'
+              '\n'
+              'pub fn is_red(s: Shade) -> bool:\n'
+              '  return s == Shade.Red\n')
+
+    HELPER_SHAPE = ('pub enum Shape:\n'
+                    '  Circle(radius: float)\n'
+                    '  Square(side: float)\n')
+
+    def _run_pair(self, helper_src, main_src):
+        """Build helper + main in a temp dir, emit to JS, run main.js
+        under Node. Returns (stdout, stderr, returncode, main_text,
+        helper_text)."""
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "helper.newr").write_text(helper_src,
+                                                 encoding="utf-8")
+            main = Path(d) / "main.newr"
+            main.write_text(main_src, encoding="utf-8")
+            resolved = resolve_file(main)
+            diags = list(resolved.diagnostics)
+            diags += check_program(
+                resolved.program,
+                providers=discord_providers(resolved.program)).diagnostics
+            diags += check_discord(resolved.program)
+            errs = [x for x in diags if x.is_error()]
+            assert not errs, errs
+            sources = {
+                str(main): main.read_text(encoding="utf-8"),
+                str(Path(d) / "helper.newr"):
+                    (Path(d) / "helper.newr").read_text(encoding="utf-8"),
+            }
+            result = emit_js(resolved.program, main_path=str(main),
+                             sources=sources)
+            for name, text in result.files.items():
+                (Path(d) / name).write_text(text, encoding="utf-8")
+            if result.uses_rt:
+                (Path(d) / "newr_rt.js").write_text(
+                    RT_JS_SRC.read_text(encoding="utf-8"), encoding="utf-8")
+            proc = subprocess.run(
+                [NODE, str(Path(d) / "main.js")],
+                capture_output=True, text=True, cwd=d)
+            return (proc.stdout, proc.stderr, proc.returncode,
+                    result.files[result.main_file],
+                    result.files.get("helper.js", ""))
+
+    def test_bare_variant_prints_repr(self):
+        out, err, code, text, _ = self._run_pair(
+            self.HELPER, 'import "helper.newr"\nprint helper.Shade.Red\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "Shade.Red\n")
+        self.assertIn("new helper.Shade_Red()", text)
+
+    def test_variant_as_argument_calls_through(self):
+        out, err, code, _, _ = self._run_pair(
+            self.HELPER,
+            'import "helper.newr"\n'
+            'print helper.is_red(helper.Shade.Red)\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "true\n")
+
+    def test_aliased_import_variant_prints_repr(self):
+        out, err, code, text, _ = self._run_pair(
+            self.HELPER,
+            'import "helper.newr" as h\nprint h.Shade.Red\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "Shade.Red\n")
+        self.assertIn("new h.Shade_Red()", text)
+
+    def test_fielded_variant_call_constructs(self):
+        out, err, code, text, _ = self._run_pair(
+            self.HELPER_SHAPE,
+            'import "helper.newr"\n'
+            'print helper.Shape.Circle(radius: 1.5)\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "Shape.Circle(radius: 1.5)\n")
+        self.assertIn("new helper.Shape_Circle(1.5)", text)
+
+    def test_pub_enum_helper_exports_only_existing_names(self):
+        _, err, code, _, helper_text = self._run_pair(
+            self.HELPER, 'import "helper.newr"\nprint helper.Shade.Red\n')
+        self.assertEqual(code, 0, err)
+        # The bare enum name has no JS binding (`Shade` is never
+        # defined), so it must not appear as an export entry — only
+        # the variant classes are exported.
+        export_lines = [ln.strip() for ln in helper_text.splitlines()
+                        if ln.strip() in ("Shade,", "Shade")]
+        self.assertEqual(export_lines, [])
+        self.assertIn("Shade_Red,", helper_text)
 
 
 if __name__ == "__main__":

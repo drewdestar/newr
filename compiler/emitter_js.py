@@ -326,20 +326,24 @@ class _JSEmitter:
 
     # ------------------------------------------------------------ errors
 
-    def _fail(self, msg: str):
-        raise EmitterError(msg)
+    def _fail(self, msg: str, span=None):
+        raise EmitterError(msg, span=span)
 
     def _type_of(self, expr: A.Expr) -> Type:
         """The checker's type for an expression, or a clean refusal.
 
         A `None` type only happens on an unchecked program (the CLI
-        never emits one); the error says to run `newr check` first.
+        never emits one) or a checker gap. The message names the
+        failure and does NOT send the user back to `newr check`:
+        check passes on the programs that reach this path, so that
+        advice would be a circle. The span is the expression itself.
         """
         t = getattr(expr, "expr_type", None)
         if t is None:
             self._fail(
-                "cannot emit this program: an expression has no type — "
-                "run `newr check` first (the program may have errors)")
+                "an expression has no type: the emitter cannot handle "
+                "it here",
+                span=expr.span)
         return t
 
     def _type_or_none(self, expr: A.Expr) -> Type | None:
@@ -588,15 +592,15 @@ class _JSEmitter:
         if binding is not None:
             if binding.kind == "store":
                 self._fail(f"a store (`{node.name}`) cannot be used "
-                           "as a value")
+                           "as a value", span=node.span)
             if binding.kind in ("module", "file-module"):
                 self._fail(
                     f"module `{node.name}` has no value member "
-                    f"`{node.name}`")
+                    f"`{node.name}`", span=node.span)
             if binding.kind in ("struct", "enum"):
                 self._fail(
                     f"`{node.name}` is not a value — use a variant "
-                    "or construct it")
+                    "or construct it", span=node.span)
             # A user fn as a value is the function itself (first-
             # class functions, SPEC §9.5); a local/param/handler
             # binding is its JS name.
@@ -605,10 +609,13 @@ class _JSEmitter:
             return self._emit_builtin_value(node.name)
         if node.name in ("math", "time", "random", "file", "env"):
             self._fail(
-                f"module `{node.name}` has no value member `{node.name}`")
+                f"module `{node.name}` has no value member `{node.name}`",
+                span=node.span)
         if node.name == "discord":
-            self._fail("module `discord` has no value member `discord`")
-        self._fail(f"cannot emit undefined name `{node.name}`")
+            self._fail("module `discord` has no value member `discord`",
+                       span=node.span)
+        self._fail(f"cannot emit undefined name `{node.name}`",
+                   span=node.span)
 
     def _emit_builtin_value(self, name: str) -> tuple[str, int]:
         # First-class builtin values: `len`/`min`/`max` as a value
@@ -839,6 +846,14 @@ class _JSEmitter:
                     return self._emit_log_call(func.name, node)
                 if binding is not None and binding.kind == "enum":
                     return self._emit_enum_call(obj.name, func.name, node)
+            # §20: qualified imported fielded-variant construction,
+            # `m_helper.Shape.Circle(radius: 1.5)` — the declaration
+            # comes from the imported module, for field reordering.
+            imported = self._imported_enum(func)
+            if imported is not None:
+                ref, enum_name, variant, decl = imported
+                return self._emit_enum_call(enum_name, variant, node,
+                                            decl=decl, ref=ref)
             return self._emit_method_call(node, func)
         # A call on an arbitrary expression (a lambda, a call result).
         f = self.emit_expr(func, _PREC["primary"])
@@ -1037,13 +1052,19 @@ class _JSEmitter:
         return f"Boolean({text})", _PREC["primary"]  # int -> 0 is false (P7)
 
     def _emit_enum_call(self, enum_name: str, variant: str,
-                        node: A.Call) -> tuple[str, int]:
+                        node: A.Call, decl=None,
+                        ref: str | None = None) -> tuple[str, int]:
         """`Shape.Circle(radius: 1.5)` -> the variant class. JS has
         no kwargs, so keyword arguments are reordered into declared
-        field order (the checker already validated them)."""
-        js_variant = (f"{self._mangle(enum_name)}_"
+        field order (the checker already validated them). `decl` /
+        `ref` serve the §20 qualified imported form
+        (`m_helper.Shape.Circle(...)`): the declaration comes from
+        the imported module and the class lives under the module
+        reference; the local form takes both from this file."""
+        js_variant = (f"{ref + '.' if ref else ''}"
+                      f"{self._mangle(enum_name)}_"
                       f"{self._mangle(variant)}")
-        decl = self.enums.get(enum_name)
+        decl = decl if decl is not None else self.enums.get(enum_name)
         if decl is not None:
             fields = []
             for var in decl.variants:
@@ -1071,6 +1092,34 @@ class _JSEmitter:
         msg = self.emit_expr(node.args[0], 0)
         return f"console.{level}({msg})", _PREC["primary"]
 
+    def _imported_enum(self, node: A.Member):
+        """A qualified imported enum member, `module.Enum.Variant`.
+
+        Returns (ref, enum_name, variant, decl) when the chain is
+        exactly that shape, the inner name is an enum declared in
+        the imported module, else None. The decl check matters: a
+        struct-typed top-level let accessed the same way
+        (`m_helper.SomeLet.field`) is NOT an enum member and must
+        fall through to the ordinary typed-member path. The decl is
+        returned too, so a fielded-variant call can reorder its
+        keyword arguments into declared field order (JS has no
+        kwargs). The Python twin returns the same triple without
+        the decl.
+        """
+        obj = node.obj
+        if not isinstance(obj, A.Member) or not isinstance(obj.obj, A.Name):
+            return None
+        binding = self._lookup(obj.obj.name)
+        if binding is None or binding.kind != "file-module":
+            return None
+        sub = self.program.modules.get(binding.js)
+        if sub is None:
+            return None
+        decl = next((e for e in sub.enums if e.name == obj.name), None)
+        if decl is None:
+            return None
+        return (binding.js, obj.name, node.name, decl)
+
     def _emit_member(self, node: A.Member) -> tuple[str, int]:
         obj = node.obj
         if isinstance(obj, A.Name):
@@ -1082,20 +1131,32 @@ class _JSEmitter:
                     return self._emit_enum_variant(node, binding)
                 if binding.kind == "struct":
                     self._fail(
-                        f"struct `{obj.name}` is not a value — construct it")
+                        f"struct `{obj.name}` is not a value — construct it",
+                        span=node.span)
                 if binding.kind == "store":
                     self._fail(
                         f"store `{obj.name}` is not a value — use its "
-                        "economy functions")
+                        "economy functions", span=node.span)
                 if binding.kind == "fn":
                     self._fail(
-                        f"function `{obj.name}` is not a value — call it")
+                        f"function `{obj.name}` is not a value — call it",
+                        span=node.span)
             if obj.name in MODULES:
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(js=obj.name, kind="module",
                                 module=obj.name)
                 return self._emit_module_member(node, fake)
+        # §20: qualified imported enum member, `m_helper.Shade.Red`.
+        # The inner `m_helper.Shade` has no type of its own (the
+        # checker types only the full chain), so resolve the whole
+        # chain here from the imported module's enum declaration.
+        imported = self._imported_enum(node)
+        if imported is not None:
+            ref, enum_name, variant, _decl = imported
+            js_variant = (f"{ref}.{self._mangle(enum_name)}_"
+                          f"{self._mangle(variant)}")
+            return f"new {js_variant}()", _PREC["primary"]
         obj_type = self._type_of(obj)
         t = self._type_of(node)
         # §16 (hole 2): a method used as a value is a lambda, not a
@@ -2343,7 +2404,8 @@ class _JSEmitter:
                 f"a store call (`{store_name}.{method}`) is only "
                 "possible inside a command, event, or task handler — "
                 "top-level functions and statements run outside the "
-                "bot's async context")
+                "bot's async context",
+                span=node.span)
         key_arg = {name: value for name, value, _span in node.kwargs}.get("key")
         key = (self.emit_expr(key_arg, 0) if key_arg is not None else None)
         if method == "balance":
@@ -3231,7 +3293,13 @@ class _JSEmitter:
                 entries.append(self._mangle(decl.name))
         for decl in program.enums:
             if decl.pub:
-                entries.append(self._mangle(decl.name))
+                # §20: only the variant classes are exported. The
+                # bare enum name has no JS binding (`_emit_enum`
+                # defines `Shade_Red` / `Shade_Blue`, never `Shade`),
+                # so exporting it made `require` of any file with a
+                # `pub enum` throw `ReferenceError: Shade is not
+                # defined` at the `module.exports` line. (Python
+                # emits the union alias, so its export is real.)
                 for variant in decl.variants:
                     entries.append(f"{self._mangle(decl.name)}_"
                                    f"{self._mangle(variant.name)}")

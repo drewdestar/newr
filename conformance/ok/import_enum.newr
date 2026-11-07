@@ -1,0 +1,19 @@
+# Qualified imported enum members (SPEC.md SS11): `module.Enum.Variant`
+# as a value, as a fn argument, and fielded-variant construction.
+import "lib/import_enum_helper.newr"
+
+let passed = true
+let c = import_enum_helper.Shade.Red
+if str(c) != "Shade.Red":
+  passed = false
+if not import_enum_helper.is_red(import_enum_helper.Shade.Red):
+  passed = false
+if import_enum_helper.is_red(import_enum_helper.Shade.Blue):
+  passed = false
+let s = import_enum_helper.Shape.Circle(radius: 1.5)
+if str(s) != "Shape.Circle(radius: 1.5)":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

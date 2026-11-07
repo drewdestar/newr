@@ -794,5 +794,111 @@ class TestNestedImports(unittest.TestCase):
             self.assertEqual([e.code for e in r.errors], ["E2001"])
 
 
+class TestImportedEnumMember(unittest.TestCase):
+    """§20: a qualified imported enum member (`m.Shade.Red`) is a
+    value — the checker must type it from the imported module's enum
+    declaration, not leave it untyped (which made the emitter fail
+    with E4001 on a program `check` had accepted)."""
+
+    HELPER = ('pub enum Shade:\n'
+              '  Red\n'
+              '  Blue\n'
+              '\n'
+              'pub fn is_red(s: Shade) -> bool:\n'
+              '  return s == Shade.Red\n')
+
+    HELPER_SHAPE = ('pub enum Shape:\n'
+                    '  Circle(radius: float)\n'
+                    '  Square(side: float)\n')
+
+    def _check_pair(self, helper_src, main_src):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "helper.newr").write_text(helper_src,
+                                                 encoding="utf-8")
+            main = Path(d) / "main.newr"
+            main.write_text(main_src, encoding="utf-8")
+            return check_file(main)
+
+    def _outer_member_type(self, result):
+        """Type of the outermost Member in the main program (the
+        qualified enum member itself). None means the checker left
+        it untyped — the exact gap this round closes."""
+        import dataclasses
+        from compiler import ast_nodes as A
+        found = []
+
+        def walk(node):
+            if isinstance(node, A.Member):
+                found.append(node)
+            if dataclasses.is_dataclass(node):
+                for f in dataclasses.fields(node):
+                    v = getattr(node, f.name)
+                    if isinstance(v, list):
+                        for item in v:
+                            if dataclasses.is_dataclass(item):
+                                walk(item)
+                    elif dataclasses.is_dataclass(v):
+                        walk(v)
+
+        walk(result.program)
+        self.assertTrue(found, "no Member node in the program")
+        # The qualified enum member is the Member whose object is
+        # itself a Member (`module.Enum.Variant`); a plain
+        # `module.fn` callee Member is never typed and must not be
+        # mistaken for it.
+        target = next((m for m in found if isinstance(m.obj, A.Member)),
+                      found[0])
+        t = target.expr_type
+        return None if t is None else t.name
+
+    def test_bare_variant_types_clean(self):
+        r = self._check_pair(
+            self.HELPER, 'import "helper.newr"\nprint helper.Shade.Red\n')
+        self.assertEqual([e.code for e in r.errors], [])
+        self.assertEqual(self._outer_member_type(r), "Shade")
+
+    def test_variant_as_argument_types_clean(self):
+        r = self._check_pair(
+            self.HELPER,
+            'import "helper.newr"\n'
+            'print helper.is_red(helper.Shade.Red)\n')
+        self.assertEqual([e.code for e in r.errors], [])
+        self.assertEqual(self._outer_member_type(r), "Shade")
+
+    def test_aliased_import_variant_types_clean(self):
+        r = self._check_pair(
+            self.HELPER,
+            'import "helper.newr" as h\nprint h.Shade.Red\n')
+        self.assertEqual([e.code for e in r.errors], [])
+        self.assertEqual(self._outer_member_type(r), "Shade")
+
+    def test_unknown_variant_is_E3001(self):
+        r = self._check_pair(
+            self.HELPER, 'import "helper.newr"\nprint helper.Shade.Green\n')
+        self.assertEqual([e.code for e in r.errors], ["E3001"])
+
+    def test_fielded_variant_bare_is_E2001(self):
+        r = self._check_pair(
+            self.HELPER_SHAPE,
+            'import "helper.newr"\nprint helper.Shape.Circle\n')
+        self.assertEqual([e.code for e in r.errors], ["E2001"])
+
+    def test_fielded_variant_call_types_clean(self):
+        r = self._check_pair(
+            self.HELPER_SHAPE,
+            'import "helper.newr"\n'
+            'print helper.Shape.Circle(radius: 1.5)\n')
+        self.assertEqual([e.code for e in r.errors], [])
+
+    def test_fielded_variant_call_wrong_field_is_E3001(self):
+        # Same code as the local-enum path: _check_args reports an
+        # unknown named argument as E3001 ("has no parameter").
+        r = self._check_pair(
+            self.HELPER_SHAPE,
+            'import "helper.newr"\n'
+            'print helper.Shape.Circle(width: 1.5)\n')
+        self.assertIn("E3001", [e.code for e in r.errors])
+
+
 if __name__ == "__main__":
     unittest.main()

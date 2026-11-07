@@ -936,6 +936,128 @@ class TestFileImport(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(proc.stdout, "118\n")
 
+    def test_aliased_module_call_imports_real_module(self):
+        # §20: an aliased file import renders `import <real> as
+        # <alias>` — the bare alias names no emitted file, so the
+        # old `import <alias>` died with ModuleNotFoundError at run
+        # time. Same shared helper as the imported-enum branches.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "items.newr").write_text(
+                'pub fn price(item: str) -> int:\n'
+                '  if item == "brick":\n'
+                '    return 118\n'
+                '  return 0\n', encoding="utf-8")
+            main = Path(d) / "main.newr"
+            main.write_text('import "items.newr" as it\n'
+                            'print it.price("brick")\n',
+                            encoding="utf-8")
+            resolved = resolve_file(main)
+            diags = list(resolved.diagnostics)
+            diags += check_program(
+                resolved.program,
+                providers=discord_providers(resolved.program)).diagnostics
+            diags += check_discord(resolved.program)
+            errs = [x for x in diags if x.is_error()]
+            assert not errs, errs
+            sources = {
+                str(main): main.read_text(encoding="utf-8"),
+                str(Path(d) / "items.newr"):
+                    (Path(d) / "items.newr").read_text(encoding="utf-8"),
+            }
+            result = emit_program(resolved.program, main_path=str(main),
+                                  sources=sources)
+            self.assertIn("import items as it", result.files["main.py"])
+            for name, text in result.files.items():
+                (Path(d) / name).write_text(text, encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(Path(d) / "main.py")],
+                capture_output=True, text=True, cwd=d)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertEqual(proc.stdout, "118\n")
+
+
+class TestImportedEnumMember(unittest.TestCase):
+    """§20: a qualified imported enum member runs live — the bare
+    variant prints its repr, the arg form calls through, a fielded
+    variant constructs, and an aliased import resolves."""
+
+    HELPER = ('pub enum Shade:\n'
+              '  Red\n'
+              '  Blue\n'
+              '\n'
+              'pub fn is_red(s: Shade) -> bool:\n'
+              '  return s == Shade.Red\n')
+
+    HELPER_SHAPE = ('pub enum Shape:\n'
+                    '  Circle(radius: float)\n'
+                    '  Square(side: float)\n')
+
+    def _run_pair(self, helper_src, main_src):
+        """Build helper + main in a temp dir, emit, run main.py.
+        Returns (stdout, stderr, returncode, main_text)."""
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "helper.newr").write_text(helper_src,
+                                                 encoding="utf-8")
+            main = Path(d) / "main.newr"
+            main.write_text(main_src, encoding="utf-8")
+            resolved = resolve_file(main)
+            diags = list(resolved.diagnostics)
+            diags += check_program(
+                resolved.program,
+                providers=discord_providers(resolved.program)).diagnostics
+            diags += check_discord(resolved.program)
+            errs = [x for x in diags if x.is_error()]
+            assert not errs, errs
+            sources = {
+                str(main): main.read_text(encoding="utf-8"),
+                str(Path(d) / "helper.newr"):
+                    (Path(d) / "helper.newr").read_text(encoding="utf-8"),
+            }
+            result = emit_program(resolved.program, main_path=str(main),
+                                  sources=sources)
+            for name, text in result.files.items():
+                (Path(d) / name).write_text(text, encoding="utf-8")
+            if result.uses_rt:
+                (Path(d) / "newr_rt.py").write_text(
+                    RT_SRC.read_text(encoding="utf-8"), encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(Path(d) / "main.py")],
+                capture_output=True, text=True, cwd=d)
+            return (proc.stdout, proc.stderr, proc.returncode,
+                    result.files[result.main_file])
+
+    def test_bare_variant_prints_repr(self):
+        out, err, code, text = self._run_pair(
+            self.HELPER, 'import "helper.newr"\nprint helper.Shade.Red\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "Shade.Red\n")
+        self.assertIn("helper.Shade_Red()", text)
+
+    def test_variant_as_argument_calls_through(self):
+        out, err, code, _ = self._run_pair(
+            self.HELPER,
+            'import "helper.newr"\n'
+            'print helper.is_red(helper.Shade.Red)\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "true\n")
+
+    def test_aliased_import_variant_prints_repr(self):
+        out, err, code, text = self._run_pair(
+            self.HELPER,
+            'import "helper.newr" as h\nprint h.Shade.Red\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "Shade.Red\n")
+        self.assertIn("h.Shade_Red()", text)
+
+    def test_fielded_variant_call_constructs(self):
+        out, err, code, text = self._run_pair(
+            self.HELPER_SHAPE,
+            'import "helper.newr"\n'
+            'print helper.Shape.Circle(radius: 1.5)\n')
+        self.assertEqual(code, 0, err)
+        self.assertEqual(out, "Shape.Circle(radius: 1.5)\n")
+        self.assertIn("helper.Shape_Circle(radius=1.5)", text)
+
 
 if __name__ == "__main__":
     unittest.main()

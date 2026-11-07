@@ -2804,3 +2804,331 @@ generic error reply instead of `'half is 50'`; restored, hash
   top-level fn "may read `store`", which needs async fn lowering
   (transitive `await` at call sites) in a later milestone; until
   then the emitter fails cleanly with E4001.
+
+## 20. M3 fix round 3 — qualified imported enum members (7 Nov 2026)
+
+Third cold re-evaluation (of `9afc8d7`) verdict: **NEEDS FIXES — 1
+blocking item**. Both §19 fixes verified genuinely fixed with the
+evaluator's own repros (bot round trip on both targets, §18 chain and
+float-div probes, suite 829/829 in both envs, conformance 72+72, rt
+tests 61, goldens byte-identical, benchmarks recomputed matching,
+red-checks done, store guard holding). The new item is the same defect
+class this loop has blocked on twice before: the checker accepts a
+SPEC-promised program the emitter cannot handle.
+
+### 20.1 The blocking item — imported enum member builds fail on both targets
+
+Repro (evaluator's files, chie confirmed live herself):
+
+```newr
+# m_helper3.newr
+pub enum Shade: Red, Blue
+pub fn is_red(s: Shade) -> bool: return s == Shade.Red
+# p_enum_print.newr
+import "m_helper3.newr"
+print m_helper3.Shade.Red
+```
+
+`newr check` says ok, exit 0. `newr build --target py` and
+`--target js` both fail, exit 4:
+
+```
+error[E4001]: cannot emit this program: cannot emit this program: an expression has no type — run `newr check` first (the program may have errors)
+```
+
+span 1:1 (the import line). Identical for the argument form
+`print m_helper3.is_red(m_helper3.Shade.Red)`. Pre-existing at
+`fe63ff8` and `a4a9308`, not introduced by fix round 2. SPEC §11
+promises imported files contribute enums, and qualified access
+`module.Name` is the documented form.
+
+### 20.2 Root cause — where the type was missing, where it is now attached
+
+`compiler/checker.py::_module_member_type` returned `UNKNOWN` for an
+imported enum (`if name in target.enums: return UNKNOWN`, ~line 1145).
+`synth` (~line 457) sets `expr.expr_type = None` for UNKNOWN types, so
+the emitter's `_type_of` refused the expression. The intermediate node
+`m_helper3.Shade` (the enum name) is not a value in newr, only variants
+are, so there was no type to attach to it at all: the full three-level
+chain `module.Enum.Variant` had to be typed as one shape, from the
+imported module's enum declaration.
+
+The type is now attached in the checker, in two places:
+
+- `_synth_Member` gained a qualified-imported-enum-member branch
+  (before the generic path): when the shape is
+  `Member(Member(Name(module), Enum), Variant)` and the inner name is
+  an enum in the imported module's `_ModuleCtx`, the new
+  `_imported_enum_member_type` validates the variant against that
+  module's enum declaration and returns `Type(enum_name)`. Unknown
+  variant is E3001 with did-you-mean help, fielded variant used bare
+  is E2001, mirroring the local-enum branch of `_member_field_type`
+  (same codes, same wording). The intermediate `m_helper3.Shade`
+  node gets no type of its own, consistent with the local `Color.Red`
+  path, which also leaves the bare enum name untyped. The emitters
+  resolve the whole chain at emit time without typing the
+  intermediate node.
+- `_call_member` gained the matching branch for fielded-variant
+  construction `m_helper.Shape.Circle(radius: 1.5)`, by generalising
+  `_call_enum_variant` to take an optional `decl` (the imported
+  module's enum declaration instead of this file's).
+
+The emitters then emit the chain directly, looking the declaration up
+through `program.modules` (bound name to `Program`, the same lookup
+`_emit_file_set` uses):
+
+- Python (`compiler/emitter.py`): `_imported_enum` helper returns
+  `(ref, enum_name, variant)` only when the inner name is really an
+  enum in the imported module, so a struct-typed top-level let
+  accessed the same way (`m_helper.SomeLet.field`) does NOT misfire
+  and falls through to the ordinary typed-member path. `_emit_member`
+  emits `ref.Enum_Variant()` (or the class itself when the type is
+  `fn`, mirroring local `_emit_enum_variant`); `_emit_call` emits the
+  fielded construction, mirroring `_emit_enum_call`. Python kwargs are
+  order-free, so the call args emit as written.
+- JS (`compiler/emitter_js.py`): the same helper (returning the decl
+  as well, so a fielded-variant call can reorder its keyword
+  arguments into declared field order, since JS has no kwargs).
+  `_emit_member` emits `new ref.Enum_Variant()`; `_emit_enum_call`
+  gained optional `decl` / `ref` parameters for the imported form and
+  the `_emit_call` branch passes them.
+
+### 20.3 The diagnostic fix (part of the blocking item)
+
+Three defects, one shared path:
+
+1. The `cannot emit this program:` prefix was doubled.
+   `emitter.py::_type_of` and `emitter_js.py::_type_of` already
+   included the prefix in their message, and `compiler/cli.py:638`
+   wrapped every `EmitterError` with another
+   `f"cannot emit this program: {exc}"`. The prefix was stripped
+   from both `_type_of` messages. The CLI wrap now supplies it
+   exactly once. No other emitter message carries the prefix
+   (checked by grep).
+2. The help text sent the user in a circle: `newr check` passes on
+   the programs that reach this path, yet the error told the user to
+   run it first. The message is now `an expression has no type: the
+   emitter cannot handle it here`, with the span pointing at the
+   expression. It names no construct it cannot name honestly; the
+   span does the pointing.
+3. The span was always 1:1. The CLI always used
+   `Span(str(path), 0, 1)` for emitter errors. `EmitterError` gained
+   an optional `span` (both emitters share the class: JS imports it
+   from `.emitter`), `_fail` gained a `span` parameter, and the CLI
+   prefers `exc.span` when present, falling back to 1:1 for spanless
+   refusals. Rendering already handles cross-file spans
+   (`_source_cache` reads the span's file from disk).
+
+Spans were also attached on the same path where the node was already
+in hand: both `_type_of` calls, both store-guard `_fail` calls (this
+fixes the evaluator's cosmetic note 2 from the `9afc8d7`
+re-evaluation as a side effect: the store-guard span now points at
+the call site, verified live at 5:14 on both targets, not at the
+`store` declaration), the JS `_emit_name` / `_emit_member` "not a
+value" failures, and the Python `_emit_name` enum refusal below.
+
+Bare enum name as a value: the Python emitter used to return
+`binding.value` for ANY binding kind, so `let c = Color` silently
+emitted `c = Color` (a runtime `NameError`) and the failure only
+surfaced later at the first use of `c`, at the wrong span. Python
+`_emit_name` now refuses kind `enum` with the JS twin's message,
+`` `Color` is not a value — use a variant or construct it``,
+with the name's span. Struct names are NOT refused: the checker types
+a bare struct name as its constructor `fn`, so emitting the class is
+consistent with the checker (calling a let-bound struct constructor
+is a separate, still-open gap, see §20.8).
+
+Diagnostic before / after (same program, `let c = Color` on line 4):
+
+```
+# before, both targets:
+error[E4001]: cannot emit this program: cannot emit this program: an expression has no type — run `newr check` first (the program may have errors)
+  --> bad.newr:1:1
+# after, both targets, byte-identical:
+error[E4001]: cannot emit this program: `Color` is not a value — use a variant or construct it
+  --> bad.newr:4:9
+  |
+4 | let c = Color
+  |         ^^^^^
+```
+
+### 20.4 Two more live defects found while fixing this one
+
+Both are in the same import machinery the enum fix touches, both
+were verified live before fixing, both are pinned by tests.
+
+**Aliased file-module imports were broken at runtime.** `import
+"h_fn.newr" as h` emitted `import h`, but the emitted file is
+`h_fn.py`, so every aliased file-module use died with
+`ModuleNotFoundError` at run time (proven live with a fn call,
+`h.double(21)`). The alias machinery already existed
+(`_need_import(module, alias)` renders `import helper as h`), the
+call sites just passed the alias as the module name. A shared
+`_need_file_module(bound)` helper now renders
+`import <real> as <alias>` from the import's resolved path stem; it
+is used by `_emit_module_call` (fn calls), the `_emit_member` enum
+branch, and the `_emit_call` enum branch. Live after the fix:
+`import h_fn as h`, prints `42`. The JS emitter was already correct
+here: it registers `const h = require("./h_fn.js")` for every import
+up front, alias included.
+
+**A `pub enum` file could not be loaded under Node at all.**
+`emitter_js.py::_emit_file_exports` exported the bare enum name
+(`Shade`), but `_emit_enum` defines only the variant classes
+(`Shade_Red`, `Shade_Blue`): no `Shade` binding exists in JS, so
+`require` of any file with a `pub enum` threw
+`ReferenceError: Shade is not defined` at the `module.exports` line
+(verified live). Python emits the union alias
+`Shade = Shade_Red | Shade_Blue`, so its export is real. The JS
+export now lists only the variant classes. No `pub enum` exists in
+`examples/`, `goldens/`, or `conformance/`, so no golden changes.
+
+### 20.5 Tests (19 new, all written RED first)
+
+- `tests/test_checker.py::TestImportedEnumMember` (7): bare variant
+  types clean AND the member node carries type `Shade` (the test
+  walks the typed AST for the outermost `Member` whose object is
+  itself a `Member`, so a plain `module.fn` callee, which is
+  correctly untyped, is never mistaken for it); variant as argument;
+  aliased import; unknown variant E3001; fielded variant bare
+  E2001; fielded-variant call clean; wrong field E3001 (same code as
+  the local path: `_check_args` reports an unknown named argument as
+  E3001, "has no parameter").
+- `tests/test_emitter.py::TestImportedEnumMember` (4): live runs,
+  print form `Shade.Red`, arg form `true`, aliased import
+  `Shade.Red`, fielded call `Shape.Circle(radius: 1.5)`, each
+  asserting the emitted text too (`helper.Shade_Red()`,
+  `h.Shade_Red()`, `helper.Shape_Circle(radius=1.5)`).
+  Plus `TestFileImport::test_aliased_module_call_imports_real_module`
+  (1): the aliased fn-call regression, asserting
+  `import items as it` in the emitted text and a live `118` run.
+- `tests/test_emitter_js.py::TestImportedEnumMember` (5): JS mirrors
+  under Node (`Shade.Red`, `true`, `Shade.Red`,
+  `Shape.Circle(radius: 1.5)`, emitted text `new helper.Shade_Red()`
+  / `new helper.Shape_Circle(1.5)`), plus the export test: the
+  emitted helper's `module.exports` contains no bare enum entry and
+  the file loads under Node.
+- `tests/test_cli.py` (2): the diagnostic test on each target (bare
+  enum name build): exactly one `cannot emit this program` prefix,
+  no `run `newr check` first` circle, span `:4:` on the `Color`
+  name, no `1 | enum Color:` line.
+- Conformance: `conformance/ok/import_enum.newr` plus helper
+  `conformance/ok/lib/import_enum_helper.newr`. The helper lives in
+  `ok/lib/` because the harness globs only `ok/*.newr`
+  non-recursively (a helper in `ok/` itself would be run standalone
+  and fail the PASS check); `_build_to_temp` collects all built
+  outputs via rglob and `run_conformance` runs them together, so the
+  multi-file program fits the harness unchanged. The program prints
+  `PASS` as its last line on both targets.
+
+RED runs (all before the fix, all shown): checker 6 of 7 failing
+(the wrong-field test already passed, for the wrong reason: the old
+code errored E3001 from a different path); Python emitter 4 of 4
+erroring with the exact blocking E4001; JS emitter 5 of 5 erroring;
+both CLI diagnostic tests failing (doubled prefix, circle help,
+span 1:1).
+
+### 20.6 Red-checks (sha256-verified)
+
+Four, one per changed compiler file. Each: save the diff, revert
+only that file, confirm the new tests + the live repro fail, restore,
+confirm the sha256 matches exactly and the tests are green again.
+
+- Shared front-end (`compiler/checker.py`): revert
+  `fdc0309a870060e78bedb86a005a5c9f05ff0f5ab3717e8322863f069818fe87`
+  -> `861fd139022f18d2797863454d8f48896838099ca3bcb4fbfa625115ba28b43b`.
+  Checker 6 failures + Python emitter 4 errors; live repro fails
+  exit 4 (with the new single-prefix message and span 3:7, from the
+  emitter fix still in place). Restore: hash `fdc0309a...` again,
+  11 tests OK.
+- Python emitter (`compiler/emitter.py`): revert
+  `c64a48881e833b243dd8458a9efdd9c08233807a9cb17bb6c6583842b58e550d`
+  -> `fcea82ede1739187532fa5d0689db83c9ec656eceb6f510490311ee0e1f79608`
+  (the `9afc8d7` committed hash). Python emitter 4 errors + 2
+  failures (CLI diagnostic + aliased fn-call test); live repro fails
+  with the ORIGINAL doubled-prefix error at 1:1. Restore: hash
+  `c64a4888...` again, 7 tests OK.
+- JS emitter (`compiler/emitter_js.py`): revert
+  `6a2858000dfa16e714ff0c40179b6c1cab820bb1791623bf9784aeb3fcbec7b2`
+  -> `e9c9e936cf36457a553e3cea04fa30a2f2c43d03c744ce8b2e6fdf01c3032e44`
+  (the `9afc8d7` committed hash). JS emitter 5 errors + 1 CLI
+  failure; live repro fails with the original doubled error at 1:1.
+  Restore: hash `6a285800...` again, 6 tests OK.
+- CLI (`compiler/cli.py`): revert
+  `9576b0881c36e431f13aa1a4082c54065393d1452b642998f02e27ec16a0c7e7`.
+  Both diagnostic tests fail (span falls back to 1:1; the message
+  stays single-prefixed). Restore: hash `9576b088...` again, 2
+  tests OK.
+
+### 20.7 Verification
+
+- Full suite, system Python: **848 tests in 71.9 s, OK
+  (skipped=15)** (was 829; +19 new).
+- Full suite, fresh venv (`/tmp/fix3-venv`, discord.py 2.7.1 +
+  aiosqlite): **848 tests in 72.1 s, OK (skipped=2)**.
+- Conformance: **73 ok py, exit 0; 73 ok js, exit 0** (was 72;
+  +`import_enum`), no failures, in both envs.
+- `node tests/js/rt_tests.js`: **61 checks passed**.
+- Goldens: `git diff --stat -- goldens/` empty. No golden
+  legitimately changes: no `pub enum` exists in the golden sources,
+  and the no-declaration case is byte-identical by construction.
+- Live repro, evaluator's files, both forms, both targets
+  (`/tmp/enum-live`): `check` ok exit 0; `build --target py` and
+  `--target js` ok exit 0; runs print `Shade.Red` (print form) and
+  `true` (arg form) on both targets. Emitted main.py:
+  `import m_helper3` + `print(to_str(m_helper3.Shade_Red()))`.
+  Emitted main.js:
+  `const m_helper3 = require("./m_helper3.js")` +
+  `print(new m_helper3.Shade_Red())`. Helper.js exports only
+  `Shade_Red, Shade_Blue, is_red`; `require` of the helper directly
+  works and `is_red(new Shade_Red())` is `true`.
+- §18 still holds (live probe, both targets): float `/` by zero
+  caught with `e.code == "ZeroDivisionError"`, program prints `PASS`;
+  the `result_propagate_chain` conformance program passes in the 73.
+  The diff touches no `isErr` / `._value` / `fdiv` lines.
+- §19 still holds (live probe, both targets): a bot file with a
+  top-level `fn halve`, `struct Pair`, `enum Shade`, `let tag`, and
+  two commands builds exit 0 on both targets with all four
+  definitions emitted (py: `class Pair`, `class Shade_Red`,
+  `def halve`, `tag = "v19"`; js: `class Pair`, `class Shade_Red`,
+  `function halve`); the 3 warnings are the pre-existing W1009
+  reply-length notes. The full bot test files pass in the 848.
+- Changed files: `compiler/checker.py` (+55/-2),
+  `compiler/emitter.py` (+102/-9), `compiler/emitter_js.py`
+  (+88/-20), `compiler/cli.py` (+9/-1),
+  `tests/test_checker.py` (+106), `tests/test_emitter.py` (+122),
+  `tests/test_emitter_js.py` (+101/-1), `tests/test_cli.py` (+44),
+  `conformance/ok/import_enum.newr`,
+  `conformance/ok/lib/import_enum_helper.newr`, `BUILD_REPORT.md`
+  (§20, +327). **Not pushed** — chie reviews and pushes.
+- `git diff --stat`: 9 files changed (compiler + tests + report),
+  954 insertions, 33 deletions, plus the 2 new conformance files.
+
+### 20.8 Still open
+
+- Imported structs (evaluator non-blocking note 1, still true after
+  this change, verified live): `h_struct.Point(x: 1, y: 2)` is
+  rejected consistently at check (E3001, both targets, check and
+  build agree), a clean missing feature. SPEC §11's struct promise
+  still does not hold in practice; unchanged by this round, on
+  purpose. Control: a struct returned by an imported fn works live
+  (`Point(x: 0, y: 0)`). Side note, pre-existing and out of scope:
+  the rejection's help text suggests the very name it rejects
+  ("there is a similar name: `Point`").
+- 4-level chains / re-exported enums (`m1.m2.Shade.Red`, verified
+  live): rejected consistently at check on both targets (E3005
+  "`m2` is not exported by module `m1`" + E3001), a clean missing
+  feature (newr has no re-export), not a checker/emitter
+  disagreement. Out of scope for this round.
+- File-module function as a value (`let f = items.price`): the
+  `_emit_module_member` fn branch routes through
+  `_emit_module_call_text` with the file stem as the "real" module,
+  which fails for any file module, aliased or not. Pre-existing,
+  no test covers it, out of scope.
+- A let-bound struct constructor (`let f = Point`, then
+  `f(x: 1, y: 2)`): the checker types the bare struct name as its
+  constructor `fn`, but the emitter's name-call path refuses kwargs
+  for a name that is not a struct. Pre-existing, out of scope.
+- Unchanged from before: §16.4 amount-based debit/credit heal;
+  §19.5 async functions for SPEC §9.5 store reads from fns; CI
+  matrix never run (Windows/macOS); P-42 live Discord.

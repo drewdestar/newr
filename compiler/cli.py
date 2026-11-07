@@ -634,7 +634,15 @@ def _build_emit(args: list[str], *, output: str | None,
                               sources=sources,
                               line_comments=line_comments)
     except EmitterError as exc:
-        diag = Diagnostic(span=Span(str(path), 0, 1), code="E4001",
+        # §20: the emitter attaches the span of the expression it
+        # could not emit when it knows it (its `_fail` calls pass
+        # one); the CLI renders that span instead of the file start,
+        # so the diagnostic points at the use site. A spanless
+        # refusal keeps the old 1:1 fallback. The "cannot emit this
+        # program:" prefix is added here, and only here — the
+        # emitter messages no longer carry it, so it cannot double.
+        span = getattr(exc, "span", None) or Span(str(path), 0, 1)
+        diag = Diagnostic(span=span, code="E4001",
                           message=f"cannot emit this program: {exc}",
                           help="the emitter does not support this "
                                "construct yet — see BUILD_REPORT.md §14")

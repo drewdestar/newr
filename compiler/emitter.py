@@ -39,7 +39,13 @@ from .modules import METHODS, MODULES
 class EmitterError(Exception):
     """The program cannot be emitted (unchecked input, an unsupported
     construct, or a checker gap the emitter refuses to paper over).
-    The CLI reports this cleanly; it is never a traceback."""
+    The CLI reports this cleanly; it is never a traceback. ``span``
+    points at the expression that could not be emitted, when known —
+    the CLI renders it instead of the file start."""
+
+    def __init__(self, msg: str, span=None):
+        super().__init__(msg)
+        self.span = span
 
 
 @dataclass
@@ -299,20 +305,24 @@ class _Emitter:
 
     # ------------------------------------------------------------ errors
 
-    def _fail(self, msg: str):
-        raise EmitterError(msg)
+    def _fail(self, msg: str, span=None):
+        raise EmitterError(msg, span=span)
 
     def _type_of(self, expr: A.Expr) -> Type:
         """The checker's type for an expression, or a clean refusal.
 
         A `None` type only happens on an unchecked program (the CLI
-        never emits one); the error says to run `newr check` first.
+        never emits one) or a checker gap. The message names the
+        construct and does NOT send the user back to `newr check`:
+        check passes on the programs that reach this path, so that
+        advice would be a circle. The span is the expression itself.
         """
         t = getattr(expr, "expr_type", None)
         if t is None:
             self._fail(
-                "cannot emit this program: an expression has no type — "
-                "run `newr check` first (the program may have errors)")
+                "an expression has no type: the emitter cannot handle "
+                "it here",
+                span=expr.span)
         return t
 
     def _type_or_none(self, expr: A.Expr) -> Type | None:
@@ -581,7 +591,16 @@ class _Emitter:
         if binding is not None:
             if binding.kind == "store":
                 self._fail(f"a store (`{node.name}`) cannot be used "
-                           "as a value")
+                           "as a value", span=node.span)
+            if binding.kind == "enum":
+                # A bare enum name is not a value (the checker types
+                # it UNKNOWN without erroring, §20) — the JS twin
+                # already refused it with this message; refusing here
+                # too means the failure points at the name itself
+                # instead of surfacing later at its first use.
+                self._fail(
+                    f"`{node.name}` is not a value — use a variant "
+                    "or construct it", span=node.span)
             return binding.value
         # A builtin used as a first-class value: only the ones Python
         # already implements identically are emittable as names.
@@ -853,6 +872,20 @@ class _Emitter:
                 fake = _Binding(py=obj.name, kind="named-module",
                                 module=obj.name)
                 return self._emit_module_member(node, fake)
+        # §20: qualified imported enum member, `m_helper.Shade.Red`.
+        # The inner `m_helper.Shade` has no type of its own (the
+        # checker types only the full chain), so resolve the whole
+        # chain here from the imported module's enum declaration.
+        imported = self._imported_enum(node)
+        if imported is not None:
+            ref, enum_name, variant = imported
+            self._need_file_module(ref)
+            t = self._type_of(node)
+            py_variant = (f"{ref}.{self._mangle(enum_name)}_"
+                          f"{self._mangle(variant)}")
+            if t.name == "fn":
+                return py_variant
+            return f"{py_variant}()"
         obj_type = self._type_of(obj)
         t = self._type_of(node)
         # §16 (hole 2): a method used as a value is a lambda, not a
@@ -894,6 +927,53 @@ class _Emitter:
             self._need_import("math", alias=ref)
             return f"{ref}.{node.name}"
         self._fail(f"module `{real}` has no value member `{node.name}`")
+
+    def _need_file_module(self, bound: str):
+        """Register the import for a file module bound under `bound`
+        (the Python reference, i.e. the alias when the import is
+        aliased).
+
+        The emitted file is named after the real file (`helper.py`),
+        so an aliased import must render as `import helper as h`,
+        not `import h` — the alias alone names no file. Passing the
+        bound name straight to `_need_import` broke every aliased
+        file-module use at runtime; the fn-call branch and the §20
+        enum branches share this helper.
+        """
+        real = None
+        for imp in self.program.imports:
+            if imp.path is not None and \
+                    self._mangle(imp.bound_name) == bound:
+                real = Path(imp.resolved_path or imp.path).stem
+                break
+        if real is None:
+            self._need_import(bound)
+            return
+        alias = bound if bound != real else None
+        self._need_import(real, alias=alias)
+
+    def _imported_enum(self, node: A.Member):
+        """A qualified imported enum member, `module.Enum.Variant`.
+
+        Returns (ref, enum_name, variant) when the chain is exactly
+        that shape, the inner name is an enum declared in the
+        imported module, else None. The decl check matters: a
+        struct-typed top-level let accessed the same way
+        (`m_helper.SomeLet.field`) is NOT an enum member and must
+        fall through to the ordinary typed-member path.
+        """
+        obj = node.obj
+        if not isinstance(obj, A.Member) or not isinstance(obj.obj, A.Name):
+            return None
+        binding = self._lookup(obj.obj.name)
+        if binding is None or binding.kind != "file-module":
+            return None
+        sub = self.program.modules.get(obj.obj.name)
+        if sub is None:
+            return None
+        if not any(e.name == obj.name for e in sub.enums):
+            return None
+        return (binding.py, obj.name, node.name)
 
     def _emit_enum_variant(self, enum_name: str, node: A.Member) -> str:
         """`Color.Red` — a bare variant value is an instance of its
@@ -954,6 +1034,16 @@ class _Emitter:
                     return self._emit_log_call(func.name, node)
                 if binding is not None and binding.kind == "enum":
                     return self._emit_enum_call(obj.name, func.name, node)
+            # §20: qualified imported fielded-variant construction,
+            # `m_helper.Shape.Circle(radius: 1.5)`. Python kwargs are
+            # order-free, so the call args emit as written.
+            imported = self._imported_enum(func)
+            if imported is not None:
+                ref, enum_name, variant = imported
+                self._need_file_module(ref)
+                py_variant = (f"{ref}.{self._mangle(enum_name)}_"
+                              f"{self._mangle(variant)}")
+                return f"{py_variant}({self._emit_call_args(node)})"
             return self._emit_method_call(func, node)
         # A call on an arbitrary expression (a lambda, a call result).
         f = self.emit_expr(func, _PREC["primary"])
@@ -1126,7 +1216,9 @@ class _Emitter:
             # A function in an imported .newr file: a plain call on
             # the imported module — and the import itself (D13: one
             # `.py` per imported `.newr`, imported by its module name).
-            self._need_import(binding.py)
+            # `_need_file_module` renders an aliased import as
+            # `import <real> as <alias>`; the bare alias names no file.
+            self._need_file_module(binding.py)
             return (f"{binding.py}.{self._mangle(name)}"
                     f"({self._emit_call_args(node)})")
         real = binding.module or binding.py
@@ -3119,7 +3211,8 @@ class _Emitter:
                 f"a store call (`{store_name}.{method}`) is only "
                 "possible inside a command, event, or task handler — "
                 "top-level functions and statements run outside the "
-                "bot's async context")
+                "bot's async context",
+                span=node.span)
         key_arg = {name: value for name, value, _span in node.kwargs}.get("key")
         key = (self.emit_expr(key_arg, 0) if key_arg is not None else None)
         if method == "balance":

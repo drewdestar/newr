@@ -161,6 +161,30 @@ class TestBuild(unittest.TestCase):
             self.assertEqual(r.returncode, 4)
             self.assertFalse((Path(d) / "bad.py").exists())
 
+    def test_build_untyped_expression_error_is_single_and_pointed(self):
+        # §20: an emitter refusal must name the failing construct
+        # once, point at the expression itself, and never send the
+        # user back to `newr check` (which passes on this program).
+        # A bare enum name has no type: `check` accepts it, the
+        # emitter refuses it.
+        src = ("enum Color:\n"
+               "  Red\n"
+               "\n"
+               "let c = Color\n"
+               "print c\n")
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "bad.newr", src)
+            r = run_cli("build", str(f))
+            self.assertEqual(r.returncode, 4)
+            self.assertFalse((Path(d) / "bad.py").exists())
+            self.assertEqual(
+                r.stdout.count("cannot emit this program"), 1,
+                r.stdout)
+            self.assertNotIn("run `newr check` first", r.stdout)
+            # The span is the `Color` on line 4, not the file start.
+            self.assertIn(":4:", r.stdout, r.stdout)
+            self.assertNotIn("1 | enum Color:", r.stdout)
+
     def test_build_copies_runtime_when_used(self):
         with tempfile.TemporaryDirectory() as d:
             # int arithmetic needs the checked helpers (uses_rt).
@@ -280,6 +304,26 @@ class TestBuildJs(unittest.TestCase):
             r = run_cli("build", "--target", "js", str(f))
             self.assertEqual(r.returncode, 4)
             self.assertFalse((Path(d) / "bad.js").exists())
+
+    def test_build_js_untyped_expression_error_is_single_and_pointed(self):
+        # §20 twin of the Python diagnostic test: one prefix, no
+        # "run check first" circle, span on the failing expression.
+        src = ("enum Color:\n"
+               "  Red\n"
+               "\n"
+               "let c = Color\n"
+               "print c\n")
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "bad.newr", src)
+            r = run_cli("build", "--target", "js", str(f))
+            self.assertEqual(r.returncode, 4)
+            self.assertFalse((Path(d) / "bad.js").exists())
+            self.assertEqual(
+                r.stdout.count("cannot emit this program"), 1,
+                r.stdout)
+            self.assertNotIn("run `newr check` first", r.stdout)
+            self.assertIn(":4:", r.stdout, r.stdout)
+            self.assertNotIn("1 | enum Color:", r.stdout)
 
     def test_build_js_fast_emit_is_exit_1(self):
         with tempfile.TemporaryDirectory() as d:
