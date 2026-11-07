@@ -24,9 +24,9 @@ class Type:
     ``name`` is the base name (``int``, ``list``, ``Point``, ...);
     ``params`` holds generic arguments (``list[int]`` -> name ``list``,
     params ``(int,)``). ``nullable`` is the ``T?`` spelling (SPEC.md §7.2
-    — exactly one absent value; there is no ``option[T]``). A function
+    - exactly one absent value; there is no ``option[T]``). A function
     type has name ``"fn"`` and params ``(T1, ..., R)`` (return type last).
-    ``span`` is where the type was written (not part of equality — two
+    ``span`` is where the type was written (not part of equality - two
     ``int`` types are equal wherever they were written).
     """
 
@@ -62,7 +62,7 @@ BUILTIN_TYPE_NAMES = {
 
 # Discord entity types (SPEC.md §7.1). Their *fields* are owned by the
 # discord module (discord_limits.py) and injected into the checker as a
-# type provider — the core never imports the discord tables (§2.1).
+# type provider - the core never imports the discord tables (§2.1).
 ENTITY_TYPE_NAMES = {
     "user", "member", "guild", "channel", "role", "interaction",
     "embed", "message",
@@ -80,7 +80,7 @@ def dict_of(value: Type) -> Type:
 
 
 def nullable_of(inner: Type) -> Type:
-    """``T?`` — the one nullability spelling (SPEC.md §7.2, G19)."""
+    """``T?`` - the one nullability spelling (SPEC.md §7.2, G19)."""
     return Type(inner.name, inner.params, span=inner.span, nullable=True)
 
 
@@ -168,7 +168,7 @@ class Lambda(Expr):
 
 @dataclass
 class TryExpr(Expr):
-    """``try <expr>`` — returns ``Result[T, error]`` (SPEC.md §10)."""
+    """``try <expr>`` - returns ``Result[T, error]`` (SPEC.md §10)."""
 
     expr: Expr | None = None
 
@@ -180,7 +180,7 @@ class Propagate(Expr):
     Wraps the RHS expression of a statement. On ``Err``/``none`` the
     enclosing function returns early; on ``Ok``/``Some`` it unwraps to
     ``T``. The parser only ever creates this node as the outermost
-    postfix of a statement RHS — a nested ``?`` is a parse error.
+    postfix of a statement RHS - a nested ``?`` is a parse error.
     """
 
     expr: Expr | None = None
@@ -196,7 +196,7 @@ class Call(Expr):
 
 @dataclass
 class TCall(Expr):
-    """The i18n lookup ``t("key", name: expr, ...)`` (SPEC.md §15 — discord module).
+    """The i18n lookup ``t("key", name: expr, ...)`` (SPEC.md §15 - discord module).
 
     The parser produces this node for calls to the builtin name ``t``;
     the checker validates the key and the argument names against the
@@ -374,7 +374,7 @@ class MatchArm:
 
 @dataclass
 class Match(Stmt):
-    """``match expr:`` — statement in v1 (SPEC.md §9.6, G12)."""
+    """``match expr:`` - statement in v1 (SPEC.md §9.6, G12)."""
 
     scrutinee: Expr | None = None
     arms: list[MatchArm] = field(default_factory=list)
@@ -382,14 +382,14 @@ class Match(Stmt):
 
 @dataclass
 class Require(Stmt):
-    """``requires <expr>`` — first statement(s) of a fn body (§9.7)."""
+    """``requires <expr>`` - first statement(s) of a fn body (§9.7)."""
 
     cond: Expr | None = None
 
 
 @dataclass
 class Ensure(Stmt):
-    """``ensures <expr>`` — ``result`` is bound to the return value (§9.7)."""
+    """``ensures <expr>`` - ``result`` is bound to the return value (§9.7)."""
 
     cond: Expr | None = None
 

@@ -1,7 +1,7 @@
 # Checked-int tight loop (B6): 100,000 iterations of integer
 # arithmetic, printing a checksum so the loop cannot be optimized
 # away. The same loop as benchmarks/handwritten/loop_plain.py and
-# loop_checked.py — the three must print the same checksum.
+# loop_checked.py - the three must print the same checksum.
 let total = 0
 let i = 0
 while i < 100000:

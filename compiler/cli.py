@@ -1,6 +1,6 @@
 """The `newr` command-line tool (SPEC.md §19).
 
-M1: front end only — ``check`` and ``build --check`` run the pipeline
+M1: front end only - ``check`` and ``build --check`` run the pipeline
 parse -> resolve -> check (core + discord) and report diagnostics. There
 are no emitters yet, so ``build`` without ``--check`` is an error that
 tells the user to use ``--check`` (emitters land in M2).
@@ -17,7 +17,7 @@ Output modes:
   envelope ``{ok, command, newr, data, warnings, error}``.
 
 ``--fast`` (build only in spirit, accepted on check too): parse + name
-resolution only — the full type check AND all Discord validation are
+resolution only - the full type check AND all Discord validation are
 skipped. The run prints a warning that the result is not verified.
 
 No POSIX-only code: paths go through pathlib; reads use
@@ -73,7 +73,7 @@ the program has no errors (warnings are fine), 4 when it has errors,
 2 when the file cannot be read.
 
   --fast   parse + name resolution only; skips the full type check AND
-           all Discord validation. The result is not verified — say so
+           all Discord validation. The result is not verified - say so
            in the output.
 """,
     "build": """Usage: newr build <file> [--target py|js|java|cs] [-o <out>] [--line-comments] [--check] [--fast]
@@ -81,15 +81,15 @@ the program has no errors (warnings are fine), 4 when it has errors,
 Build a .newr program into runnable code for one target (Python and
 TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2).
 
-M2: `--target py` (the default) emits Python — one `.py` per `.newr`
+M2: `--target py` (the default) emits Python - one `.py` per `.newr`
 file, written next to the input (or to `-o` for the main file), plus a
 copy of the runtime module `newr_rt.py` when the program uses a
 runtime helper. M3: `--target js` emits JavaScript (CommonJS, one
-`.js` per `.newr` file) the same way, plus `newr_rt.js` when used —
+`.js` per `.newr` file) the same way, plus `newr_rt.js` when used -
 and a standalone `<stem>_deploy.js` for bot programs (run it once to
 register the slash commands, then `node <stem>.js`). M4: `--target
 java` emits Java (one `.java` per `.newr` file, one public class per
-file named after the file stem, plus `NewrRt.java` when used — the
+file named after the file stem, plus `NewrRt.java` when used - the
 runtime source is `newr_rt.java`, renamed on copy because javac
 requires the file name to match the public class; run with
 `javac *.java && java <Stem>`) and `--target cs` emits C# (one `.cs`
@@ -99,7 +99,7 @@ standalone `<stem>_deploy.java` / `<stem>_deploy.cs`. `--check` runs
 the same pipeline as `newr check` and writes nothing.
 `--line-comments` adds `# newr:<file>:<line>` comments to the emitted
 code. `--fast` parses + resolves only, skipping the full type check
-AND all Discord validation — it cannot be combined with emission
+AND all Discord validation - it cannot be combined with emission
 (use `--fast --check` to verify only).
 """,
     "version": """Usage: newr version
@@ -137,7 +137,7 @@ pieces.""",
 
 Only these escapes are allowed in a string: \\" \\\\ \\n \\t \\r and
 \\u{XXXX} (a Unicode code point in braces). Check the escape after
-the backslash — for \\u{...} the braces and the hex digits are both
+the backslash - for \\u{...} the braces and the hex digits are both
 required.""",
     "E_BAD_INDENT": """E_BAD_INDENT: wrong indentation.
 
@@ -170,7 +170,7 @@ A `}` inside a string starts an interpolation only as `${...}`; a
 lone `}` is an error. Write `}}` for a literal `}`.""",
     "E_TAB_INDENT": """E_TAB_INDENT: tab indentation.
 
-Tabs are not allowed for indentation in newr — indent by exactly 2
+Tabs are not allowed for indentation in newr - indent by exactly 2
 spaces per level.""",
     "E_UNEXPECTED_CHAR": """E_UNEXPECTED_CHAR: unexpected character.
 
@@ -186,12 +186,12 @@ inside a string must be written as \\n).""",
 
 The value here has a different type from the one that was expected.
 newr has no implicit numeric coercion: an int is never silently a
-float — write float(5) or 5.0 to convert explicitly. The diagnostic
+float - write float(5) or 5.0 to convert explicitly. The diagnostic
 carries expected/found, so the mismatch is named, not guessed.""",
     "E2002": """E2002: type annotation needed.
 
 An empty list, dict, or set has no element type for the checker to
-infer — there is nothing in it to infer from. Write the type
+infer - there is nothing in it to infer from. Write the type
 explicitly, e.g. `let xs: list[int] = []`.""",
     "E2003": """E2003: heterogeneous list/dict.
 
@@ -209,7 +209,7 @@ explicitly (e.g. `if x != 0:` instead of `if x:`).""",
 A local variable was used before its `let` in the same block. Move
 the `let` above the use. Module-level names (functions, structs,
 top-level lets) may be forward-referenced, so this only fires for
-locals — and for a let's own right-hand side referring to itself
+locals - and for a let's own right-hand side referring to itself
 (`let x = x + 1`).""",
     "E2006": """E2006: non-exhaustive match.
 
@@ -229,7 +229,7 @@ A rule of the discord module was broken: a bad or uppercase command
 name, a duplicate command, a description or reply over the length
 limit, a missing component timeout, a duplicate custom_id, an unknown
 intent, a store schema problem, and so on. The message names the
-rule. Only discord-module rules live here — core language errors use
+rule. Only discord-module rules live here - core language errors use
 other codes, so a Discord API change can never move a core error.""",
     "E2009": """E2009: i18n violation.
 
@@ -245,7 +245,7 @@ throw). An `if` counts only with an `else` whose branches all answer;
 `for`/`while` never count, because they may run zero times.""",
     "E3001": """E3001: undefined name.
 
-There is no binding with this name in scope. Check the spelling — the
+There is no binding with this name in scope. Check the spelling - the
 help names a similar name when one exists (difflib ratio >= 0.7) and
 the diagnostic carries a machine-applicable fix for it. A module name
 used as a value, and an unknown type in an annotation, are reported
@@ -274,31 +274,31 @@ exported name.""",
 
 Imported files contribute functions, structs, enums, strings, and
 store tables only. Bot blocks, commands, events, tasks, and top-level
-statements must live in the main file — the file passed to
+statements must live in the main file - the file passed to
 `newr build`.""",
     "E3007": """E3007: reserved name shadowed.
 
 Builtin names (print, len, t, err, log, ...) and handler bindings
 (user, guild, channel, bot, interaction, message, values) cannot be
-redefined. One exception: catch variables may shadow builtins —
+redefined. One exception: catch variables may shadow builtins -
 `catch err:` is the spec's own idiom.""",
     "E3008": """E3008: unknown module / missing file.
 
 The import cannot be resolved. Named modules in v1: math, time,
 random, file, env, discord. `json` arrives in v1.1. File imports
-resolve relative to the importing file — check the path and the
+resolve relative to the importing file - check the path and the
 spelling.""",
     "W1001": """W1001: unused variable / parameter / option.
 
 A `let`/`const`, parameter, or command option is never read. An
-unused binding is almost always a bug — a leftover, or a use that was
+unused binding is almost always a bug - a leftover, or a use that was
 typo'd (see also E3001's similar-name help). Parameters of `pub`
 functions do not warn: they are public API. Warnings never fail the
 build.""",
     "W1002": """W1002: unused import.
 
 A module was imported but never referenced. Remove the import.
-`import discord` does not warn when the program has bot blocks —
+`import discord` does not warn when the program has bot blocks -
 they implicitly import the discord module.""",
     "W1003": """W1003: unreachable code.
 
@@ -307,7 +307,7 @@ same block never run. Move them, or remove them.""",
     "W1004": """W1004: shadowing.
 
 A declaration hides a name from an outer scope. It is legal, but
-easy to misread — rename it if the shadowing is not intentional.""",
+easy to misread - rename it if the shadowing is not intentional.""",
     "W1005": """W1005: always-true/false literal condition.
 
 An if/elif/while condition is a constant literal (`true`/`false`),
@@ -317,7 +317,7 @@ it with the real condition; if the branch is dead, remove it.""",
 
 A handler that loops forever (or until a condition that may never
 arrive) will outlive the interaction token, which expires after 15
-minutes. This is a warning, not a ban — the core language allows
+minutes. This is a warning, not a ban - the core language allows
 `while`; the discord checker only warns that a handler is the wrong
 place for an unbounded loop.""",
     "W1007": """W1007: extra t() argument.
@@ -328,7 +328,7 @@ not a template placeholder is an error, E2009, not this warning.)""",
     "W1008": """W1008: (newr-specific warning) integer division in a float
 context.
 
-`1 / 2` is truncating integer division (0), not 0.5 — and it is
+`1 / 2` is truncating integer division (0), not 0.5 - and it is
 flowing into a float context, where 0.5 was almost certainly meant.
 Write `1.0 / 2.0` or `float(1) / 2`. This warning is newr-specific:
 no other language is being quoted as doing it.""",
@@ -336,7 +336,7 @@ no other language is being quoted as doing it.""",
 
 Part of a reply is an unknown-length `str`, so the 2000-character
 reply limit could not be checked statically. The reply may still be
-fine at runtime — but if the value can be long, guard it or shorten
+fine at runtime - but if the value can be long, guard it or shorten
 the fixed part.""",
     "W1010": """W1010: privileged intent declared.
 
@@ -482,12 +482,12 @@ def _check_or_build(args: list[str], *, command: str,
     except RecursionError:
         # M-01 backstop: the depth guards should catch deep nesting
         # first, but if anything still recurses (e.g. a pathological
-        # struct cycle), the failure is still a clean E1001, exit 4 —
+        # struct cycle), the failure is still a clean E1001, exit 4 -
         # never a raw traceback, and --json still gets its envelope.
         diagnostics = [Diagnostic(
             span=Span(str(path), 0, 1), code="E1001",
             message="too deeply nested",
-            help="split the expression or block into smaller pieces — "
+            help="split the expression or block into smaller pieces - "
                  "newr limits nesting to 200 levels so a bad input "
                  "cannot exhaust the stack")]
         try:
@@ -583,10 +583,10 @@ def _cmd_build(args: list[str], *, json_mode: bool,
                                error_format_json=error_format_json,
                                fast=fast)
     if fast:
-        # D27: --fast + emission is refused — emission needs
+        # D27: --fast + emission is refused - emission needs
         # checked types.
         raise _UsageError(
-            "`newr build --fast` cannot emit — emission needs the "
+            "`newr build --fast` cannot emit - emission needs the "
             "full type check. Use `newr build --fast --check` to "
             "verify only, or drop `--fast` to build.")
     return _build_emit(rest, output=output, line_comments=line_comments,
@@ -598,7 +598,7 @@ def _build_emit(args: list[str], *, output: str | None,
                 line_comments: bool, target: str = "py",
                 json_mode: bool,
                 error_format_json: bool) -> int:
-    """`newr build <file>` — verify, then emit Python (M2),
+    """`newr build <file>` - verify, then emit Python (M2),
     JavaScript (M3), Java (M4) or C# (M4)."""
     unknown = [a for a in args if a.startswith("-")]
     if unknown:
@@ -628,7 +628,7 @@ def _build_emit(args: list[str], *, output: str | None,
                        error_format_json=error_format_json)
     # Emit. An emitter error is a clean exit-4 diagnostic, never a
     # traceback (the program checked clean, so this is an emitter
-    # limitation, not a user error — say so).
+    # limitation, not a user error - say so).
     if target == "js":
         from .emitter_js import EmitterError, emit_program
         suffix = ".js"
@@ -671,13 +671,13 @@ def _build_emit(args: list[str], *, output: str | None,
         # one); the CLI renders that span instead of the file start,
         # so the diagnostic points at the use site. A spanless
         # refusal keeps the old 1:1 fallback. The "cannot emit this
-        # program:" prefix is added here, and only here — the
+        # program:" prefix is added here, and only here - the
         # emitter messages no longer carry it, so it cannot double.
         span = getattr(exc, "span", None) or Span(str(path), 0, 1)
         diag = Diagnostic(span=span, code="E4001",
                           message=f"cannot emit this program: {exc}",
                           help="the emitter does not support this "
-                               "construct yet — see BUILD_REPORT.md §14")
+                               "construct yet - see BUILD_REPORT.md §14")
         return _finish("build", path, program, [diag], source,
                        json_mode=json_mode,
                        error_format_json=error_format_json)
@@ -687,7 +687,7 @@ def _build_emit(args: list[str], *, output: str | None,
                 else path.with_suffix(suffix))
     if target == "java" and output:
         # The Java main file MUST be named after its public class
-        # (K1) — the -o path controls the directory, but the file
+        # (K1) - the -o path controls the directory, but the file
         # name comes from the emitter (the sanitized stem).
         main_out = main_out.parent / result.main_file
     for name, text in result.files.items():
@@ -698,7 +698,7 @@ def _build_emit(args: list[str], *, output: str | None,
         dest.write_text(text, encoding="utf-8")
     if result.uses_rt:
         # Copy compiler/newr_rt.py (or newr_rt.js / newr_rt.java /
-        # newr_rt.cs) next to the output (D4) — read via the package
+        # newr_rt.cs) next to the output (D4) - read via the package
         # so the zipapp build keeps working.
         import importlib.resources as _res
         try:
@@ -730,10 +730,10 @@ def _build_emit(args: list[str], *, output: str | None,
         dests.append(str(main_out.parent / rt_copy_name))
     names = ", ".join(dests)
     if warnings:
-        print(f"{path}: ok, {len(warnings)} warning(s) — "
+        print(f"{path}: ok, {len(warnings)} warning(s) - "
               f"wrote {names}")
     else:
-        print(f"{path}: ok — wrote {names}")
+        print(f"{path}: ok, wrote {names}")
     return 0
 
 
@@ -807,11 +807,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except RecursionError:
         # M-01 backstop for any path outside _check_or_build: a clean
-        # E1001 diagnostic, exit 4 — never a raw traceback.
+        # E1001 diagnostic, exit 4 - never a raw traceback.
         diag = Diagnostic(span=Span("newr", 0, 1), code="E1001",
                           message="too deeply nested",
                           help="split the expression or block into "
-                               "smaller pieces — newr limits nesting to "
+                               "smaller pieces - newr limits nesting to "
                                "200 levels so a bad input cannot exhaust "
                                "the stack")
         print(f"newr: {diag.message}", file=sys.stderr)

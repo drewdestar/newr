@@ -1,6 +1,6 @@
 """Lexer for the newr language (SPEC.md §6).
 
-Produces tokens with byte-offset spans (SPEC.md §16 — line/col are
+Produces tokens with byte-offset spans (SPEC.md §16 - line/col are
 derived from the byte offsets at render time). Handles:
 
 - 2-space indentation (INDENT/DEDENT tokens; tabs banned; indent steps
@@ -19,7 +19,7 @@ derived from the byte offsets at render time). Handles:
   floats (``3.14``, ``1e3``). ``int`` is a 64-bit signed integer.
 - Duration literals: ``60s``, ``5m``, ``1h``, ``1d`` (positive integers
   with a unit suffix, no space). Durations are syntax-only literals in
-  v1 — valid only in ``task every ...`` and ``timeout:`` positions (the
+  v1 - valid only in ``task every ...`` and ``timeout:`` positions (the
   parser enforces this).
 - Newlines inside brackets (``(``/``[``/``{``) are skipped (expressions
   may span lines inside brackets only).
@@ -54,7 +54,7 @@ def _is_name_continue(ch: str) -> bool:
     may contain Thai/Devanagari combining marks (SPEC.md §13.2.1, ported
     from the v0 regex), and identifiers in those scripts need them too.
 
-    Round-2 CRASH-1: see _is_name_start — ``""`` at EOF is not a
+    Round-2 CRASH-1: see _is_name_start - ``""`` at EOF is not a
     name-continue character.
     """
     return len(ch) == 1 and (ch == "_" or
@@ -83,12 +83,12 @@ INT64_MAX = 2 ** 63 - 1
 
 _DURATION_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
-#: Whitespace run (spaces/tabs) — C-speed scan for _process_indent and
+#: Whitespace run (spaces/tabs) - C-speed scan for _process_indent and
 #: _handle_newline (round-2 perf fix). The old per-char loops hung at
 #: EOF because "" in " \t" is True in Python.
 _WS_RUN = re.compile(r"[ \t]*")
 
-#: ASCII identifier run — fast path for _lex_name (round-2 perf fix).
+#: ASCII identifier run - fast path for _lex_name (round-2 perf fix).
 #: Only used when the character after the run is not a name-continue
 #: character, so Unicode identifiers still take the per-char path.
 _ASCII_NAME_RUN = re.compile(r"[A-Za-z0-9_]+")
@@ -142,7 +142,7 @@ class _Lexer:
             # every character is 1 byte, so the source is already
             # normalized and byte offset == char index + bom_bytes.
             # _byte_prefix is a range (O(1) memory, O(1) indexing)
-            # instead of a per-character list — a 25 MB file would
+            # instead of a per-character list - a 25 MB file would
             # otherwise build a 25M-entry prefix list.
             self.source = source
             self._byte_prefix = range(bom_bytes,
@@ -417,7 +417,7 @@ class _Lexer:
             return  # inside brackets: indentation is ignored
         nxt = self._peek()
         if nxt in ("", "\n", "#"):
-            # Blank, comment-only, or EOF line: nothing to do here — but
+            # Blank, comment-only, or EOF line: nothing to do here - but
             # leave at_line_start False so _lex_normal runs and consumes
             # the newline / comment. (Setting it True again would loop
             # forever: tokenize only calls _lex_normal when it is False,
@@ -453,7 +453,7 @@ class _Lexer:
         # Fast path (round-2 perf fix): an ASCII name run is matched in
         # C. It is only used when the character after the run is not a
         # name-continue character (a Unicode letter/mark/number would
-        # extend the name) — otherwise the per-char loop below runs.
+        # extend the name) - otherwise the per-char loop below runs.
         m = _ASCII_NAME_RUN.match(self.source, self.pos)
         if m is not None:
             end = m.end()
@@ -474,7 +474,7 @@ class _Lexer:
                            line: int, col: int) -> None:
         """Reject a misplaced underscore in a number literal (round-2).
 
-        SPEC.md SS6: underscores group digits — so one must sit
+        SPEC.md SS6: underscores group digits - so one must sit
         between two digits of the same run (``1_000``, ``0xF_F``). A
         leading, trailing, or doubled underscore groups nothing.
         """
@@ -496,7 +496,7 @@ class _Lexer:
         if self.source[self.pos:self.pos + 2] in ("0x", "0X"):
             self._advance(2)
             digits = ""
-            # Round-2 CRASH-1: the loop needs a pos guard — at EOF
+            # Round-2 CRASH-1: the loop needs a pos guard - at EOF
             # "" in "0123..._" is True, so the loop spun forever.
             while self.pos < len(self.source) and \
                     self._peek() in "0123456789abcdefABCDEF_":
@@ -511,7 +511,7 @@ class _Lexer:
             except ValueError:
                 raise self._err("E_BAD_NUMBER", line, col,
                                 f"invalid hex literal 0x{digits}")
-            # The int64 range check (M-05): 2**63 is allowed here — the
+            # The int64 range check (M-05): 2**63 is allowed here - the
             # checker rejects it unless it is directly negated (M-08,
             # `-9223372036854775808`); anything larger is an error now.
             if value > INT64_MAX + 1:
@@ -554,7 +554,7 @@ class _Lexer:
             while self._peek().isdigit() or self._peek() == "_":
                 self._advance()
         # Round-2 CRASH-1: harden the exponent check with a pos guard.
-        # (It was safe by luck — the inner digit test fails at EOF —
+        # (It was safe by luck - the inner digit test fails at EOF -
         # but "" in "eE" is True, so the trap was live.)
         if self.pos < len(self.source) and self._peek() in "eE":
             nxt = self._peek(1)
@@ -583,7 +583,7 @@ class _Lexer:
             self._emit("FLOAT", float(text), line, col, self.line, self.col)
             return
         value = int(text)
-        # 2**63 is allowed here — the checker rejects it unless it is
+        # 2**63 is allowed here - the checker rejects it unless it is
         # directly negated (M-08, `-9223372036854775808`); anything
         # larger is an error now.
         if value > INT64_MAX + 1:

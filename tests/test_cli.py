@@ -239,7 +239,7 @@ class TestBuild(unittest.TestCase):
 
 class TestBuildJs(unittest.TestCase):
     """`newr build --target js` (M3): same contract as the Python
-    target — emit, -o, --check, --fast refusal, exit-4 on errors."""
+    target - emit, -o, --check, --fast refusal, exit-4 on errors."""
 
     def test_build_js_emits_js_next_to_input_and_runs(self):
         with tempfile.TemporaryDirectory() as d:
@@ -413,7 +413,7 @@ class TestExplain(unittest.TestCase):
 
 class TestZipappDiff(unittest.TestCase):
     """SPEC.md §17.3: the built zipapp must behave identically to the
-    checkout launcher — same `check` verdicts on the same programs.
+    checkout launcher - same `check` verdicts on the same programs.
 
     This is the repo-side half of the CI zipapp-diff job (which runs
     the ubuntu-built .pyz on all three OSes)."""

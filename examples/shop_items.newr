@@ -1,4 +1,4 @@
-# shop_items.newr — price list for the shop bot (examples/shop.newr).
+# shop_items.newr - price list for the shop bot (examples/shop.newr).
 # Imported with `import "shop_items.newr"` and used as
 # `shop_items.price_of(item)`.
 

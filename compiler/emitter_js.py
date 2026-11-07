@@ -1,21 +1,21 @@
 """The JavaScript emitter (M3, SPEC.md §18).
 
 ``newr build --target js`` lowers a *checked* program (the front end
-has already run: parse -> resolve -> check) to readable JavaScript —
+has already run: parse -> resolve -> check) to readable JavaScript -
 one `.newr` file -> one `.js` file, structure preserved, user names
 verbatim, helpers only in `newr_rt.js` (imported when used).
 
 Readability is a requirement, not a nicety: the output is code a
-human would write — the JS goldens (`goldens/js/`) are the style
+human would write - the JS goldens (`goldens/js/`) are the style
 oracle, and the emitter reproduces them byte-for-byte
 (BUILD_REPORT.md §17, J1–J13).
 
 The emitter NEVER runs on an unchecked program: the CLI checks first
 and exits 4 on errors. If it meets a node without a type (which only
-happens on an unchecked program), it raises `EmitterError` — a clean
+happens on an unchecked program), it raises `EmitterError` - a clean
 refusal, never a TypeError traceback.
 
-Module system (J1): CommonJS — `require("./newr_rt.js")` — so an
+Module system (J1): CommonJS - `require("./newr_rt.js")` - so an
 emitted file runs with plain `node file.js` and no package.json.
 Node floor: 24.17.0 (the `node:sqlite` builtin and BigInt are the
 only modern features used; the emitted code itself is plain ES2020).
@@ -171,7 +171,7 @@ def _js_tpl_text(text: str) -> str:
 # JavaScript precedence (higher binds tighter), loosest -> tightest.
 # The emitter's precedence-climbing printer uses this table; newr's
 # own table (SPEC §9.2) maps onto it, with the traps documented
-# where they bite — notably unary `-`: JS forbids `-x ** y`
+# where they bite - notably unary `-`: JS forbids `-x ** y`
 # (SyntaxError), and `!a == b` is `(!a) == b` in JS, not
 # `!(a == b)` as newr's `not` reads it.
 _PREC = {
@@ -213,7 +213,7 @@ def _is_bool(t: Type | None) -> bool:
 def _needs_eq(t: Type | None) -> bool:
     """True when `==` on a value of this type needs structural
     equality (`rt.eq`) instead of `===`: lists, dicts, sets,
-    Results, structs and enums (and nullable forms of them — `eq`
+    Results, structs and enums (and nullable forms of them - `eq`
     handles `null` on either side). Primitives, functions, errors
     and Discord entities compare by identity (`===`)."""
     if t is None:
@@ -263,7 +263,7 @@ class _JSEmitter:
         self.main_path = main_path
         self.sources = sources
         self.line_comments = line_comments
-        # Imports collected while emitting (per output file — reset
+        # Imports collected while emitting (per output file - reset
         # for each module file).
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
@@ -286,7 +286,7 @@ class _JSEmitter:
         # (for rename allocation in _bind_fresh). Reset per function.
         self._fn_used: set[str] = set()
         # Hoists for the statement being emitted: each is a list of
-        # lines (base indent 0) to emit before the statement —
+        # lines (base indent 0) to emit before the statement -
         # hoisted lambda consts.
         self._hoists: list[list[str]] | None = None
         self._hoist_counter = 0
@@ -303,7 +303,7 @@ class _JSEmitter:
         # Whether the program being emitted has a bot block.
         self._is_bot = program.bot is not None
         # Whether a `log <expr>` statement was emitted (no setup
-        # needed in JS — console is ready; the flag is kept for
+        # needed in JS - console is ready; the flag is kept for
         # symmetry with the Python emitter).
         self._used_log = False
         # --- bot-emitter state ---
@@ -314,7 +314,7 @@ class _JSEmitter:
         self._handler_ctx_stack: list[dict] = []
         # Component rows collected while emitting handler bodies
         # (each a list of lines, inserted before the answer they
-        # attach to — the JS twin of the Python emitter's D40).
+        # attach to - the JS twin of the Python emitter's D40).
         self._pending_components: list[dict] = []
         self._component_counter = 0
         # The last "answer" line (a Reply / Followup / Edit) emitted
@@ -376,8 +376,8 @@ class _JSEmitter:
         """Bind `name` in the current scope.
 
         JS has real block scope (`let`/`const` in an `if` block do
-        not clobber the outer name), so — unlike the Python emitter
-        — shadowing an enclosing name needs NO renaming: the inner
+        not clobber the outer name), so - unlike the Python emitter
+        - shadowing an enclosing name needs NO renaming: the inner
         binding is a different variable, exactly as newr reads it.
         Only keyword / emitter-reserved mangling applies (D20).
         """
@@ -389,7 +389,7 @@ class _JSEmitter:
     def _bind_fresh(self, name: str, type: Type | None = None,
                     kind: str = "local") -> _Binding:
         """Bind `name` in the current scope WITHOUT renaming against
-        enclosing scopes — for function/lambda parameters, where
+        enclosing scopes - for function/lambda parameters, where
         shadowing an enclosing name is the correct semantics. Only
         the current function's used-name set is consulted, so two
         parameters mangling to the same JS name still get distinct
@@ -441,10 +441,10 @@ class _JSEmitter:
     def _render_imports(self) -> list[str]:
         """The require block: discord.js first (third-party), then
         node:sqlite (node builtin), then the runtime (first-party,
-        one destructured require — helpers and classes together),
+        one destructured require - helpers and classes together),
         then file modules. Within a group the names are sorted.
         The runtime is imported only when a helper is used
-        (usage-tracked, Gleam-style — D4's JS twin)."""
+        (usage-tracked, Gleam-style - D4's JS twin)."""
         lines: list[str] = []
         if self.uses_discord:
             names = ", ".join(sorted(self.discord_names))
@@ -555,7 +555,7 @@ class _JSEmitter:
             return self._emit_embed(node)
         if isinstance(node, (A.Member, A.Index, A.Call)):
             # Any optional link anywhere in the chain routes the
-            # WHOLE chain through _emit_chain (D9) — including
+            # WHOLE chain through _emit_chain (D9) - including
             # trailing non-optional links (`a?.b.c`), which must
             # short-circuit too.
             if self._chain_has_optional(node):
@@ -580,7 +580,7 @@ class _JSEmitter:
         if isinstance(value, float):
             # Python repr of a float is also a valid JS number
             # literal ("1e+16", "5e-324", "1.5"); the value is
-            # checked int64-safe upstream — a float literal is never
+            # checked int64-safe upstream - a float literal is never
             # the int64-minimum trap (that is an int literal).
             return repr(value), _PREC["primary"]
         if isinstance(value, str):
@@ -599,7 +599,7 @@ class _JSEmitter:
                     f"`{node.name}`", span=node.span)
             if binding.kind in ("struct", "enum"):
                 self._fail(
-                    f"`{node.name}` is not a value — use a variant "
+                    f"`{node.name}` is not a value - use a variant "
                     "or construct it", span=node.span)
             # A user fn as a value is the function itself (first-
             # class functions, SPEC §9.5); a local/param/handler
@@ -653,7 +653,7 @@ class _JSEmitter:
         """A newr interpolation becomes a JS template literal.
         Literal parts are escaped (`\\`` and `${`); each part is a
         `${...}` field. Unlike Python, no hoisting is needed for
-        backslashes — they live inside the field expression, not in
+        backslashes - they live inside the field expression, not in
         the literal text."""
         parts: list[str] = []
         for part in node.parts:
@@ -710,7 +710,7 @@ class _JSEmitter:
                 # `T? or T` (SPEC §7.2): the default when the value
                 # is absent. JS `||` would also take the default
                 # for a present-but-falsy value (0n, ""), so it is
-                # not the same — use coalesce.
+                # not the same - use coalesce.
                 self._need_rt("coalesce")
                 left = self.emit_expr(node.left, 0)
                 right = self.emit_expr(node.right, 0)
@@ -750,7 +750,7 @@ class _JSEmitter:
                      rt.name in self.structs or rt.name in self.enums):
                 # Structural equality (J6): `eq` is deep for
                 # arrays/Maps/Sets/Results/structs, and treats `null`
-                # as equal only to `null` — exactly newr's `==` for
+                # as equal only to `null` - exactly newr's `==` for
                 # nullable collection values too.
                 self._need_rt("eq")
                 expr = f"eq({left}, {right})"
@@ -798,7 +798,7 @@ class _JSEmitter:
         # `-a + b` is `-(a + b)`).
         # D19: the int64 minimum is written `-9223372036854775808`
         # in newr. Its positive magnitude is out of int64 range, so
-        # the checker leaves the literal's own type unset — the
+        # the checker leaves the literal's own type unset - the
         # plain `neg(...)` form would also be wrong (it would check
         # the out-of-range literal first). Emit the minimum directly.
         if isinstance(node.operand, A.Lit) and \
@@ -812,7 +812,7 @@ class _JSEmitter:
         text, _p = self._emit_expr(node.operand)
         operand = self.emit_expr(node.operand, _PREC["pow"])
         # JS traps: `-x ** y` is a SyntaxError, and `--x` is the
-        # decrement operator — parenthesise a `**` operand or a
+        # decrement operator - parenthesise a `**` operand or a
         # unary operand (`-(a ** 2)`, `-(-x)`).
         if (isinstance(node.operand, A.BinOp) and node.operand.op == "**") \
                 or isinstance(node.operand, A.UnaryOp):
@@ -847,7 +847,7 @@ class _JSEmitter:
                 if binding is not None and binding.kind == "enum":
                     return self._emit_enum_call(obj.name, func.name, node)
             # §20: qualified imported fielded-variant construction,
-            # `m_helper.Shape.Circle(radius: 1.5)` — the declaration
+            # `m_helper.Shape.Circle(radius: 1.5)` - the declaration
             # comes from the imported module, for field reordering.
             imported = self._imported_enum(func)
             if imported is not None:
@@ -869,7 +869,7 @@ class _JSEmitter:
         if name == "input":
             if self._is_bot:
                 self.warnings.append(
-                    "input() in a bot program blocks on stdin — bots "
+                    "input() in a bot program blocks on stdin - bots "
                     "have no stdin (D21)")
             self._need_rt("input")
             args = [self.emit_expr(a, 0) for a in node.args]
@@ -951,13 +951,13 @@ class _JSEmitter:
         return values
 
     def _emit_print(self, node: A.Call) -> tuple[str, int]:
-        """`print` renders every argument with `toStr` (P8) — the
+        """`print` renders every argument with `toStr` (P8) - the
         runtime `print` helper does that mapping internally, so the
         emitted call is bare. A `?` argument propagates first (the
         temp + early return are hoisted before the statement, D7);
         the Python emitter's `_emit_print` calls a
         `_propagate_early_return` that does not exist (a latent M2
-        bug — unreachable via the parser, which only creates
+        bug - unreachable via the parser, which only creates
         Propagate as a statement RHS); the JS emitter uses the
         working `_propagate_unwrapped` instead. When every
         argument is already a JS string (or there are no
@@ -1022,7 +1022,7 @@ class _JSEmitter:
                   "bool": "toBool"}[name]
         text = self.emit_expr(arg, 0)
         if name == "str":
-            # A nullable str's runtime value is null when absent —
+            # A nullable str's runtime value is null when absent -
             # bare rendering would print "null", not newr's "none"
             # (P8), so nullable values go through toStr.
             if _is_str(t) and not t.nullable:
@@ -1032,7 +1032,7 @@ class _JSEmitter:
         if name == "int":
             if _is_int(t):
                 return text, _PREC["primary"]
-            # float (truncation), str (parsing), bool (0/1) — all
+            # float (truncation), str (parsing), bool (0/1) - all
             # through toInt, which returns a BigInt in every case.
             self._need_rt("toInt")
             return f"toInt({text})", _PREC["primary"]
@@ -1084,9 +1084,9 @@ class _JSEmitter:
 
     def _emit_log_call(self, level: str, node: A.Call) -> tuple[str, int]:
         """`log.info/warn/error(msg)` (P10). In a bot program the
-        message goes to the console (J12 — the JS twin of the bot's
+        message goes to the console (J12 - the JS twin of the bot's
         named logger); in a general program it is the root console
-        too (console.info/warn/error). `warn` is `console.warn` —
+        too (console.info/warn/error). `warn` is `console.warn` -
         never the deprecated `console.warn` alias confusion: the
         mapping is info -> info, warn -> warn, error -> error."""
         msg = self.emit_expr(node.args[0], 0)
@@ -1131,15 +1131,15 @@ class _JSEmitter:
                     return self._emit_enum_variant(node, binding)
                 if binding.kind == "struct":
                     self._fail(
-                        f"struct `{obj.name}` is not a value — construct it",
+                        f"struct `{obj.name}` is not a value - construct it",
                         span=node.span)
                 if binding.kind == "store":
                     self._fail(
-                        f"store `{obj.name}` is not a value — use its "
+                        f"store `{obj.name}` is not a value - use its "
                         "economy functions", span=node.span)
                 if binding.kind == "fn":
                     self._fail(
-                        f"function `{obj.name}` is not a value — call it",
+                        f"function `{obj.name}` is not a value - call it",
                         span=node.span)
             if obj.name in MODULES:
                 # A named module used without an import: the name is
@@ -1160,7 +1160,7 @@ class _JSEmitter:
         obj_type = self._type_of(obj)
         t = self._type_of(node)
         # §16 (hole 2): a method used as a value is a lambda, not a
-        # JS attribute — a BigInt has no `is_some`, an Array has no
+        # JS attribute - a BigInt has no `is_some`, an Array has no
         # `len`. A real struct field stays a plain attribute.
         if t.name == "fn" and not self._is_plain_field(obj_type,
                                                        node.name):
@@ -1220,7 +1220,7 @@ class _JSEmitter:
         type arguments substituted. A nullable method's "T" is the
         receiver's inner type; a method found only in the nullable
         table on a NON-nullable receiver is a rebased `?.` method
-        inside an `optChain` lambda (D38) — the receiver is proven
+        inside an `optChain` lambda (D38) - the receiver is proven
         non-none there, so "T" is the receiver itself."""
         table = None
         mapping: dict = {}
@@ -1246,7 +1246,7 @@ class _JSEmitter:
 
     def _is_plain_field(self, recv_type: Type, name: str) -> bool:
         """True when `name` is a real field of `recv_type` (a struct
-        field) — a plain attribute access, never a method value.
+        field) - a plain attribute access, never a method value.
         Provider/entity types have no tables here, so they report
         False and the method-signature lookup decides."""
         decl = self.structs.get(recv_type.name)
@@ -1353,7 +1353,7 @@ class _JSEmitter:
             if name == "split":
                 return f"{obj_text}.split({args[0]})", _PREC["primary"]
             if name == "join":
-                # newr `"sep".join(parts)` — JS joins the ARRAY
+                # newr `"sep".join(parts)` - JS joins the ARRAY
                 # with the separator.
                 return f"{args[0]}.join({obj_text})", _PREC["primary"]
             if name == "contains":
@@ -1402,7 +1402,7 @@ class _JSEmitter:
         elif tname == "Result":
             if name in ("is_ok", "is_err"):
                 # The JS Result exposes isOk/isErr as METHODS
-                # (newr_rt.js) — a bare access would be the function
+                # (newr_rt.js) - a bare access would be the function
                 # itself (whose String() is its source), not the bool.
                 method = "isOk" if name == "is_ok" else "isErr"
                 return f"{obj_text}.{method}()", _PREC["primary"]
@@ -1441,7 +1441,7 @@ class _JSEmitter:
             # Indexing is the checked form: a negative or out-of
             # range index raises IndexError (rt listIndex), exactly
             # like newr's `xs[i]`. (`list.get` is the defaulting
-            # form — see _emit_method_call.)
+            # form - see _emit_method_call.)
             return f"listIndex({obj_text}, {idx})", _PREC["primary"]
         if obj_type.name == "str":
             # newr indexes a string by code point (P5); a JS
@@ -1475,7 +1475,7 @@ class _JSEmitter:
         return False
 
     def _emit_chain(self, node: A.Expr) -> tuple[str, int]:
-        """`?.` lowering (D9, corrected — the JS twin of the Python
+        """`?.` lowering (D9, corrected - the JS twin of the Python
         emitter's `_emit_chain`): one `optChain` call per optional
         link, nested; non-optional links after an optional one fold
         into the nearest lambda body. `a?.b.c` is one call;
@@ -1508,13 +1508,13 @@ class _JSEmitter:
             recv_type = self._type_of(inner_recv)
             # Inside the lambda the receiver is proven non-none
             # (optChain only calls it then), so the parameter and
-            # the rebased base carry the STRIPPED (inner) type —
+            # the rebased base carry the STRIPPED (inner) type -
             # otherwise a method call on it would dispatch as if the
             # value were still nullable.
             inner_type = Type(recv_type.name, params=recv_type.params,
                               nullable=False)
             # §16 (hole 1): a segment must also end before any link
-            # whose receiver can be `none` INSIDE the lambda — a
+            # whose receiver can be `none` INSIDE the lambda - a
             # nullable field (`o?.inner.name`) or a nullable method
             # result (`r?.unwrap().upper()` on `Result[str?, _]?`).
             # The checker's `expr_type` conflates the `?.`
@@ -1524,7 +1524,7 @@ class _JSEmitter:
             # in-lambda result type, so `_rebase` types the clones
             # exactly: a Member link's nullability inside the lambda
             # is its FIELD's nullability, not the checker's chain
-            # type — without this, a method after a nullable field
+            # type - without this, a method after a nullable field
             # dispatches against `T?` and fails with E4001.
             in_lambda: dict[int, Type | None] = {}
             cur_type = self._in_lambda_link_type(links[i], inner_type)
@@ -1542,7 +1542,7 @@ class _JSEmitter:
             self._push_scope()
             binding = self._bind_fresh("_v", type=inner_type,
                                        kind="param")
-            # The rebased base is a Name for the NEWR name `_v` —
+            # The rebased base is a Name for the NEWR name `_v` -
             # the lookup returns the binding's JS name (which may be
             # `_v_1` in a nested chain).
             new_base = A.Name(span=links[i].span, name="_v",
@@ -1587,8 +1587,8 @@ class _JSEmitter:
         `old_base` (by identity) with `new_base`, and clearing the
         `optional` flags (the optionality is handled by the
         `optChain` wrapper, not inside the lambda body). Types are
-        copied onto the clones — the checker already typed the
-        original nodes — except when `in_lambda_types` maps a link
+        copied onto the clones - the checker already typed the
+        original nodes - except when `in_lambda_types` maps a link
         to its in-lambda type (§16, hole 1): the checker's chain
         type conflates the `?.` short-circuit with a field's own
         nullability, and inside the lambda only the latter survives,
@@ -1624,7 +1624,7 @@ class _JSEmitter:
                 name=node.func.name, optional=False,
                 expr_type=node.func.expr_type)
             # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
-            # is nullable only because the `?.` short-circuits —
+            # is nullable only because the `?.` short-circuits -
             # inside the lambda the receiver is proven non-none, so
             # the result is the plain (stripped) type. Without this,
             # a later link (`.upper()` in `s?.unwrap().upper()`)
@@ -1633,7 +1633,7 @@ class _JSEmitter:
             # (`a?.b`) may be nullable because the FIELD itself is
             # nullable, which survives inside the lambda. When the
             # caller supplies the exact in-lambda type (§16), that
-            # wins over this heuristic — it is exact where D38
+            # wins over this heuristic - it is exact where D38
             # over-strips (a method whose own return type is
             # nullable, e.g. `unwrap()` on `Result[str?, _]`).
             expr_type = node.expr_type
@@ -1653,7 +1653,7 @@ class _JSEmitter:
 
         Inside an `optChain` lambda the receiver is proven
         non-none, so this is the link's result type with the `?.`
-        short-circuit removed — but a nullable FIELD type or a
+        short-circuit removed - but a nullable FIELD type or a
         nullable method return survives. Returns None when the type
         cannot be determined (provider/entity types); the caller
         treats None as nullable and splits the segment, which is
@@ -1670,7 +1670,7 @@ class _JSEmitter:
                 params, ret = sig
                 return fn_of(params, ret)
             # A field on a provider/entity type (e.g. a Discord
-            # member's `name`): the type is unknown — treat as
+            # member's `name`): the type is unknown - treat as
             # nullable (split the segment).
             return None
         if isinstance(link, A.Index):
@@ -1693,8 +1693,8 @@ class _JSEmitter:
 
     def _emit_lambda(self, node: A.Lambda) -> tuple[str, int]:
         """Closures capture by value (D10, J8): free variables are
-        snapshotted through an IIFE — `((_s0, _s1) => (params) =>
-        body)(v0, v1)` — because a JS default parameter evaluates at
+        snapshotted through an IIFE - `((_s0, _s1) => (params) =>
+        body)(v0, v1)` - because a JS default parameter evaluates at
         CALL time and refers to the parameter itself, so Python's
         default-arg snapshot trick does not work in JS. A block body
         cannot be an arrow function body with statements inline, so
@@ -1715,7 +1715,7 @@ class _JSEmitter:
         snap: list[tuple[str, str, str]] = []  # (newr name, param, rhs)
         for name, b in free:
             # The snapshot parameter is named after the enclosing
-            # binding's JS name — unless that is not a valid
+            # binding's JS name - unless that is not a valid
             # identifier (a handler binding's value form is an
             # expression, e.g. `interaction.user`), in which case
             # the mangled newr name is the parameter and the value
@@ -1748,7 +1748,7 @@ class _JSEmitter:
             # the hoisted const's initializer IS the IIFE, so the
             # snapshot parameters are in scope inside the arrow body
             # at call time. (Wrapping the const NAME in an IIFE
-            # would not work — the arrow is defined at statement
+            # would not work - the arrow is defined at statement
             # level, outside the IIFE.)
             name = self._new_lambda_name()
             if snap:
@@ -1808,7 +1808,7 @@ class _JSEmitter:
             b = self._lookup(name)
             # "global-let" is included: a top-level `let` is mutable,
             # so a lambda reading it at call time would see a LATER
-            # value — capture by value (D10) requires a snapshot.
+            # value - capture by value (D10) requires a snapshot.
             # (A top-level `const` is registered the same way; it
             # never changes, so snapshotting it is harmless.) Module
             # functions / structs / enums / modules / stores are
@@ -2000,7 +2000,7 @@ class _JSEmitter:
                                                      scrut_type)
             if arm.guard is not None:
                 # The guard may reference the pattern's bindings
-                # (e.g. `x if x > 100:`) — bind each name to its
+                # (e.g. `x if x > 100:`) - bind each name to its
                 # pattern expression text while emitting it.
                 self._push_scope()
                 for name, expr_text, typ in bindings:
@@ -2011,7 +2011,7 @@ class _JSEmitter:
                 cond = f"{cond} && {guard}" if cond else guard
             arms.append((cond, bindings, arm))
         # The last unconditional arm becomes `else:`; otherwise the
-        # final `else` throws (defense — the checker proves
+        # final `else` throws (defense - the checker proves
         # exhaustiveness, so it is unreachable in a checked program).
         last_uncond = (arms and arms[-1][0] is None)
         for i, (cond, bindings, arm) in enumerate(arms):
@@ -2155,7 +2155,7 @@ class _JSEmitter:
         Result-returning function; a nullable operand returns `null`
         from a nullable-returning function. The mismatched kinds
         (D30) and a nullable `Result` (G-M2-6) are clean
-        `EmitterError`s — the checker should have rejected them, and
+        `EmitterError`s - the checker should have rejected them, and
         there is no defined early-return value to invent."""
         operand = prop.expr
         t = self._type_of(operand)
@@ -2168,14 +2168,14 @@ class _JSEmitter:
         text = self.emit_expr(operand, 0)
         if ctx.get("in_handler"):
             # A handler returns nothing, so `?` just exits the
-            # handler (a bare `return`) — there is no value to
+            # handler (a bare `return`) - there is no value to
             # propagate. (A handler that may exit early without
             # answering is the discord checker's E2010, not the
             # emitter's problem.)
             if t.name == "Result" and t.params and not t.nullable:
                 self._hoists.append([
                     f"const {temp} = {text};",
-                    # §18 fix 1: isErr is a METHOD on the JS Result —
+                    # §18 fix 1: isErr is a METHOD on the JS Result -
                     # a bare access is the function itself (always
                     # truthy), so `?` early-returned on every value.
                     # The unwrapped value lives in `._value` (there
@@ -2195,21 +2195,21 @@ class _JSEmitter:
                 return temp
             if t.name == "Result" and t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             self._fail("`?` needs a `Result[T, E]` or a `T?` value")
         if t.name == "Result" and t.params:
             if t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             if ret is None or ret.name != "Result":
                 self._fail("`?` on a `Result` value inside a function "
-                           "that does not return a `Result` (D30 — the "
+                           "that does not return a `Result` (D30 - the "
                            "checker should have rejected this)")
             self._hoists.append([
                 f"const {temp} = {text};",
-                # §18 fix 1: isErr is a METHOD on the JS Result — see
+                # §18 fix 1: isErr is a METHOD on the JS Result - see
                 # the handler branch above (bare `.isErr` is always
                 # truthy; the value lives in `._value`).
                 f"if ({temp}.isErr()) {{",
@@ -2220,7 +2220,7 @@ class _JSEmitter:
         if t.nullable:
             if ret is None or not ret.nullable:
                 self._fail("`?` on a nullable value inside a function "
-                           "that does not return a nullable (D30 — the "
+                           "that does not return a nullable (D30 - the "
                            "checker should have rejected this)")
             self._hoists.append([
                 f"const {temp} = {text};",
@@ -2237,7 +2237,7 @@ class _JSEmitter:
                           binding: _Binding) -> tuple[str, int]:
         if binding.kind == "file-module":
             # A function in an imported .newr file: a plain call on
-            # the imported module — and the import itself (J1: one
+            # the imported module - and the import itself (J1: one
             # `.js` per imported `.newr`, required by its module
             # name). Struct construction through a file module needs
             # `new` (a JS class is not callable without it).
@@ -2353,7 +2353,7 @@ class _JSEmitter:
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
                 self._fail(f"`file.{node.name}` cannot be used as a "
-                           "value (it needs a statement — the `with` "
+                           "value (it needs a statement - the `with` "
                            "block cannot live inside a lambda)")
             params = t.params[:-1]  # the last param is the return type
             names = [f"_a{i}" for i in range(len(params))]
@@ -2393,7 +2393,7 @@ class _JSEmitter:
         §19 guard (mirrors the Python emitter): the `await` is only
         valid inside an async handler (command / event / task /
         component). At the top level, inside a (sync) top-level fn,
-        or inside a lambda there is no async context — emitting the
+        or inside a lambda there is no async context - emitting the
         `await` would produce a SyntaxError in the generated file.
         Fail cleanly instead of emitting unparseable code."""
         store_name = binding.js
@@ -2402,7 +2402,7 @@ class _JSEmitter:
         if ctx is None or not ctx.get("in_handler"):
             self._fail(
                 f"a store call (`{store_name}.{method}`) is only "
-                "possible inside a command, event, or task handler — "
+                "possible inside a command, event, or task handler - "
                 "top-level functions and statements run outside the "
                 "bot's async context",
                 span=node.span)
@@ -2477,7 +2477,7 @@ class _JSEmitter:
         (D16, J10). Template placeholders that are handler bindings
         (user, guild, ...) are auto-passed in their interpolation
         form; the rest must be explicit arguments (the checker
-        enforces it — E2009)."""
+        enforces it - E2009)."""
         index, _default = self._strings_index()
         entry = None
         for locale_entries in index.values():
@@ -2550,7 +2550,7 @@ class _JSEmitter:
 
     def _emit_log_stmt(self, stmt: A.Log, indent: int) -> list[str]:
         """`log <expr>` is info level (P10). In JS it is
-        `console.info(...)` in both general and bot programs (J12 —
+        `console.info(...)` in both general and bot programs (J12 -
         the JS twin of the bot's named logger and the general
         program's root logger)."""
         p = "  " * indent
@@ -2589,7 +2589,7 @@ class _JSEmitter:
                     self._last_answer = (len(lines) - 1, kind)
                 elif isinstance(st, (A.ButtonDecl, A.SelectDecl)):
                     # The component's instantiation lines must come
-                    # BEFORE the answer they attach to — the answer
+                    # BEFORE the answer they attach to - the answer
                     # references the components variable, so defining
                     # it after the answer would be a ReferenceError.
                     if self._last_answer is not None:
@@ -2661,7 +2661,7 @@ class _JSEmitter:
             message_var = f"{first_var}_message"
             if kind in ("followup", "edit", "system_channel",
                         "message_channel"):
-                # These calls return the message — capture it
+                # These calls return the message - capture it
                 # directly by rewriting the answer line.
                 stripped = lines[idx]
                 indent_len = len(stripped) - len(stripped.lstrip())
@@ -2669,7 +2669,7 @@ class _JSEmitter:
                               + f"const {message_var} = "
                               + stripped[indent_len:])
             else:
-                # A reply answers the original response — fetchReply
+                # A reply answers the original response - fetchReply
                 # returns it.
                 lines.insert(idx + 1,
                              f"{p}const {message_var} = "
@@ -2681,7 +2681,7 @@ class _JSEmitter:
             inserted += 1
         # The collector (J10): one per answer, routing clicks to the
         # shared componentHandlers map by customId. The `only:` gate
-        # lives here — the shared handler is module-level and cannot
+        # lives here - the shared handler is module-level and cannot
         # see the invoking interaction, but this callback closes
         # over it (the starter's author-gate-in-the-handler shape,
         # with a refusal for strangers instead of silence).
@@ -2884,7 +2884,7 @@ class _JSEmitter:
         else:
             self._fail(f"cannot iterate over a `{it_type}` value")
         # The iterable is emitted BEFORE the loop variable is bound
-        # (it cannot see the loop variable — `for x in x` reads the
+        # (it cannot see the loop variable - `for x in x` reads the
         # enclosing `x`).
         iterable = self.emit_expr(stmt.iterable, 0)
         self._push_scope()
@@ -2895,7 +2895,7 @@ class _JSEmitter:
             header = f"for (const {binding.js} of {iterable}.keys()) {{"
         else:
             # Lists, sets and strings are all iterable in JS; a
-            # string iterates UTF-16 code units — newr iterates code
+            # string iterates UTF-16 code units - newr iterates code
             # points (P5), so a str loop iterates the spread.
             if it_type.name == "str":
                 iterable = f"[...{iterable}]"
@@ -2951,7 +2951,7 @@ class _JSEmitter:
             if stmt.value is None:
                 return [f"{p}process.exit(0);"]
             self._fail("a top-level `return` with a value is not "
-                       "supported — a top-level `return` exits the "
+                       "supported - a top-level `return` exits the "
                        "program")
         ensures = ctx["ensures"]
         if stmt.value is None:
@@ -3032,7 +3032,7 @@ class _JSEmitter:
         body_lines: list[str] = []
         if ensures:
             # `_newrResult` is declared ONCE, at the top of the
-            # function — every `return` assigns it (a `const` per
+            # function - every `return` assigns it (a `const` per
             # return would be a redeclaration SyntaxError).
             body_lines.append(f"{bp}let _newrResult;")
         for req in requires:
@@ -3046,7 +3046,7 @@ class _JSEmitter:
                                            new_scope=False))
         if ensures and not (rest and isinstance(rest[-1], A.Return)):
             # The implicit return (falling off the end) is also a
-            # return — check the `ensures` against `null`.
+            # return - check the `ensures` against `null`.
             body_lines.append(f"{bp}_newrResult = null;")
             body_lines.extend(self._ensures_check_lines(ensures, indent + 1))
             body_lines.append(f"{bp}return _newrResult;")
@@ -3134,7 +3134,7 @@ class _JSEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"// Generated by newr from {main_path} — do not edit by hand.",
+            f"// Generated by newr from {main_path}. Do not edit by hand.",
             f"// Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:
@@ -3185,19 +3185,19 @@ class _JSEmitter:
                 self.fns_by_js[b.js] = decl
         # The top level's used-name set starts with every module-level
         # JS name, so a `let` in a top-level block cannot reuse one
-        # (at module level JS has no block scope for the top level —
+        # (at module level JS has no block scope for the top level -
         # the name would clobber the module binding).
         self._fn_used = set(self._module_used)
 
     def _emit_general_file(self, program: A.Program, main_path: str):
         """A general (non-bot) program: header, imports, structs/enums,
         functions, then the top-level STATEMENTS in file order (SPEC
-        §8). Definitions (structs/enums/functions) are hoisted — a
+        §8). Definitions (structs/enums/functions) are hoisted - a
         function body reads module globals at call time, so emitting
-        the `function` before the statements is safe — but the
+        the `function` before the statements is safe - but the
         statements themselves (lets, assignments, prints, ...) must
         run in the order written. (M2 evaluation #1.) Every file
-        with `pub` names gets a `module.exports` block for them —
+        with `pub` names gets a `module.exports` block for them -
         in BOTH roles (main and import), so a file module's text
         does not depend on how it was built (the golden test builds
         shop_items.newr both ways); the block is a no-op when there
@@ -3242,7 +3242,7 @@ class _JSEmitter:
     def _emit_file_set(self, program: A.Program, main_path: str,
                        is_main: bool = True):
         """Emit one program and every file module it imports (recursively).
-        Returns (files, uses_rt). `is_main` marks the top file — the
+        Returns (files, uses_rt). `is_main` marks the top file - the
         only role difference left is that the top file is the entry
         point (a bot's `main()` guard, a general file's top-level
         statements); `pub` exports are emitted for every file (see
@@ -3260,7 +3260,7 @@ class _JSEmitter:
             sub_path = imp.resolved_path or imp.path
             # The header names the file as the user would see it:
             # relative to the working directory when it is under it
-            # (D2 — so building `examples/shop.newr` and building
+            # (D2 - so building `examples/shop.newr` and building
             # `examples/shop_items.newr` directly give the same
             # shop_items.js header).
             import os
@@ -3327,7 +3327,7 @@ class _JSEmitter:
     # newr type name). The value form is what a bare name means; the
     # interpolation form is what `{name}` renders as (the mention /
     # name form, per the v0 golden). The JS twin of the Python
-    # emitter's _BOT_BINDINGS — discord.js spellings.
+    # emitter's _BOT_BINDINGS - discord.js spellings.
     _BOT_BINDINGS: dict[str, dict[str, tuple[str, str | None, str]]] = {
         "command": {
             "user": ("interaction.user",
@@ -3466,7 +3466,7 @@ class _JSEmitter:
         """The `only:` gate at the top of a component 'collect'
         callback: author / anyone / roles. (Emitted by
         _attach_components, which closes over the invoking
-        interaction — the shared handler itself stays author-free,
+        interaction - the shared handler itself stays author-free,
         so one handler serves every invocation.) `custom_id`
         scopes the gate to one component on a shared collector."""
         p = "  " * indent
@@ -3500,7 +3500,7 @@ class _JSEmitter:
         event registrations, the task loops, the dispatcher, the
         _channelText helper, main(). Command registration is a
         SEPARATE file (`<stem>_deploy.js`, the track's standalone
-        deploy script) — never on ready (J10)."""
+        deploy script) - never on ready (J10)."""
         bot = program.bot
         self.program = program
         self.fns = {f.name: f for f in program.functions}
@@ -3514,7 +3514,7 @@ class _JSEmitter:
         # The body is emitted first (imports are usage-tracked).
         body: list[str] = []
         # §19: the file's top-level declarations are part of a bot
-        # file (SPEC §8, §8.2, §13.7) — structs/enums/functions
+        # file (SPEC §8, §8.2, §13.7) - structs/enums/functions
         # first (hoisted, as in a general file), then the top-level
         # statements in file order. They run at module load time,
         # before `const bot = new Bot()` and main(); handlers read
@@ -3577,7 +3577,7 @@ class _JSEmitter:
             out.append("")
             out.extend(strings_lines)
         # The componentHandlers map is always emitted (possibly
-        # empty) — _emit_bot_exports exports it unconditionally.
+        # empty) - _emit_bot_exports exports it unconditionally.
         out.append("")
         out.append("const componentHandlers = new Map([")
         for comp in self._bot_components:
@@ -3851,7 +3851,7 @@ class _JSEmitter:
         """A task's loop-function name, from its interval (a task
         has no name in newr). Two tasks with the same interval get a
         numeric suffix. The name is computed once per task and
-        cached — main() and the definition must agree."""
+        cached - main() and the definition must agree."""
         if not hasattr(self, "_task_names_by_id"):
             self._task_names_by_id: dict[int, str] = {}
             self._task_name_counts: dict[str, int] = {}
@@ -3873,7 +3873,7 @@ class _JSEmitter:
 
     def _emit_task(self, task: A.TaskDecl) -> list[str]:
         """A task -> a named async function, started from main()
-        with setInterval (J10: the track has no tasks.loop — plain
+        with setInterval (J10: the track has no tasks.loop - plain
         Node setInterval, guarded against overlap by the async
         callback's own error handling). The interval is in
         milliseconds."""
@@ -3996,7 +3996,7 @@ class _JSEmitter:
     def _emit_bot_exports(self) -> list[str]:
         """The bot file exports its handles so tests can drive it
         without a live Discord connection (the file is still a
-        program — `node shop.js` runs main() and ignores these)."""
+        program - `node shop.js` runs main() and ignores these)."""
         return [
             "module.exports = { bot, commands, commandMap, componentHandlers };",
         ]
@@ -4007,7 +4007,7 @@ class _JSEmitter:
         """A reply/edit/followup value -> (pre-lines, call argument,
         is_embed). A text value is the argument itself; an embed is
         built on the lines before and the argument is its variable
-        name (a fresh temp per embed — two `const embed`s in one
+        name (a fresh temp per embed - two `const embed`s in one
         block would be a redeclaration). A `?` value propagates
         first (the temp + early return are hoisted before the
         statement, D7)."""
@@ -4115,7 +4115,7 @@ class _JSEmitter:
         when `strings` blocks exist). Lookup: exact locale -> base
         language -> default locale (the first declared). The JS _t
         is a self-contained lookup over the emitted strings (the
-        same data the Python _t uses) — NOT i18next: the emitted
+        same data the Python _t uses) - NOT i18next: the emitted
         program is a single file with no package.json, and the
         discord.js track has no _t helper to copy (its i18n is M2,
         unported)."""
@@ -4184,7 +4184,7 @@ class _JSEmitter:
         handler_lines.append("  }],")
         self._bot_components.append(handler_lines)
         # The row (built in the handler, before the answer it
-        # attaches to — _emit_block moves these lines before it).
+        # attaches to - _emit_block moves these lines before it).
         timeout = stmt.timeout if stmt.timeout is not None else 180
         on_timeout_lines = None
         if stmt.on_timeout is not None:
@@ -4318,7 +4318,7 @@ class _JSEmitter:
         ops, one transaction each, idempotent on `key`), and
         get / set / delete for general tables. node:sqlite is
         synchronous, so the methods are `async` for shape parity
-        with the Python target but the sqlite calls run inline —
+        with the Python target but the sqlite calls run inline -
         each op is atomic (single-threaded) and wrapped in an
         explicit BEGIN IMMEDIATE...COMMIT for crash atomicity.
         Int columns are stored as TEXT (node:sqlite returns JS
@@ -4344,7 +4344,7 @@ class _JSEmitter:
             lines.append(f"    this.{name}_db.exec(\"CREATE TABLE IF NOT EXISTS ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, amount TEXT NOT NULL, key TEXT UNIQUE, created_at INTEGER NOT NULL)\");")
         lines.append("  }")
         # The economy ops (only when the store has a balances table
-        # of the required shape — the checker verifies it).
+        # of the required shape - the checker verifies it).
         tables = {t.name: t for t in store.tables}
         if "balances" in tables:
             lines.extend(self._emit_economy_methods(name))
@@ -4366,7 +4366,7 @@ class _JSEmitter:
             "    // not an error (P11). One explicit transaction:",
             "    // the balance + ledger land together or not at all.",
             "    // node:sqlite is synchronous and single-threaded,",
-            "    // so no lock is needed — no interleaving is possible.",
+            "    // so no lock is needed - no interleaving is possible.",
             "    if (key !== null && key !== undefined) {",
             f"      const dup = this.{n}_db.prepare(\"SELECT 1 FROM ledger WHERE key = ?\").get(key);",
             "      if (dup) {",
@@ -4395,7 +4395,7 @@ class _JSEmitter:
             "    // The balance check is inside the transaction (no",
             "    // TOCTOU): a concurrent debit cannot slip between",
             "    // the check and the write. A replayed key returns",
-            "    // true — the debit already happened.",
+            "    // true - the debit already happened.",
             "    if (key !== null && key !== undefined) {",
             f"      const dup = this.{n}_db.prepare(\"SELECT 1 FROM ledger WHERE key = ?\").get(key);",
             "      if (dup) {",
@@ -4427,10 +4427,10 @@ class _JSEmitter:
             "    // to its intended total (the out-leg debits `amount`,",
             "    // the in-leg credits `amount`), so no money is",
             "    // created or destroyed however the first attempt",
-            "    // died — a crash between the legs, or a poisoned",
+            "    // died - a crash between the legs, or a poisoned",
             "    // ledger row. The leg amounts are read from the",
             "    // ledger (not just presence) and summed in JS with",
-            "    // BigInt — never SQL SUM, which would lose precision",
+            "    // BigInt - never SQL SUM, which would lose precision",
             "    // on TEXT amounts (J9). The leg upserts are computed",
             "    // in JS for the same reason (SQLite `+` on TEXT",
             "    // would go through REAL arithmetic).",
@@ -4504,7 +4504,7 @@ class _JSEmitter:
     def _emit_table_methods(self, name: str, table: A.TableDecl) -> list[str]:
         """`get` / `set` / `delete` for one declared table. A row is
         a plain object (attribute access works for its fields);
-        `set` takes such a row (or a struct — its fields are own
+        `set` takes such a row (or a struct - its fields are own
         enumerable properties). Int columns are stored as TEXT and
         converted to BigInt on read, back to strings on write (J9);
         bool columns are 0/1."""
@@ -4570,16 +4570,16 @@ class _JSEmitter:
         """`<stem>_deploy.js`: the standalone command-registration
         script (the track's deploy-commands.ts, in plain JS). It
         requires the bot file for its `commands` array (requiring
-        the bot file does NOT run main() — main() is guarded by
+        the bot file does NOT run main() - main() is guarded by
         `require.main === module`). Reads DISCORD_TOKEN /
         DISCORD_CLIENT_ID / DISCORD_GUILD_ID from the environment;
         a guild deploy is instant (dev), a global deploy takes up
         to an hour to propagate. Run once, then `node <stem>.js`."""
         stem = Path(bot_filename).stem
         # The header names the SOURCE (.newr), like every other
-        # emitted file — not the deploy file itself.
+        # emitted file - not the deploy file itself.
         lines = self._header(self.main_path,
-                             "Command registration — run once, then run the bot.")
+                             "Command registration - run once, then run the bot.")
         lines.append('"use strict";')
         lines.append("")
         lines.append("const { REST, Routes } = require(\"discord.js\");")
@@ -4619,7 +4619,7 @@ class _JSEmitter:
 def emit_program_js(program: A.Program, *, main_path: str,
                     sources: dict[str, str],
                     line_comments: bool = False) -> EmitResult:
-    """Emit a CHECKED program to JavaScript — one `.js` per `.newr` file.
+    """Emit a CHECKED program to JavaScript - one `.js` per `.newr` file.
 
     `main_path` is the input file as passed (D2: the header names
     it); `sources` maps file paths to their text (for diagnostics

@@ -2,7 +2,7 @@
 
 This module is owned by the ``discord`` domain module. ONLY
 ``discord_check.py`` (and the CLI, to build the type provider) may import
-it. The core checker (``checker.py``) MUST NEVER import this module — the
+it. The core checker (``checker.py``) MUST NEVER import this module - the
 stability contract (§2.1) says the core language has zero Discord
 dependencies. ``tests/test_boundaries.py`` enforces the boundary.
 
@@ -101,7 +101,7 @@ BOT_NAME_MAX = 32
 
 EVENT_KINDS = {"ready", "member_join", "member_remove", "message"}
 
-# Placeholder contexts (v0 rule, kept — SPEC.md §13.4). The general
+# Placeholder contexts (v0 rule, kept - SPEC.md §13.4). The general
 # language enforces this by scoping (the resolver only injects these
 # bindings in their contexts); this table documents the v0 contract.
 PLACEHOLDER_CONTEXTS = {
@@ -113,7 +113,7 @@ PLACEHOLDER_CONTEXTS = {
 
 # ---------------------------------------------------------------- intents
 # Privileged intents (Discord requires verification/approval for bots in
-# 10,000+ servers — the threshold is a Discord-platform rule, not a
+# 10,000+ servers - the threshold is a Discord-platform rule, not a
 # library rule). Declaring one is a warning (§13.6).
 PRIVILEGED_INTENTS = {"members", "message_content", "presences"}
 

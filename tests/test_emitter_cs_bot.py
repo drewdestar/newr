@@ -2,7 +2,7 @@
 
 The C# twin of tests/test_emitter_js_bot.py: the same bot programs
 (HELLO_BOT, SHOP) must emit Discord.Net 3.20.2 code with the same
-shape and behaviour as the Python/JS targets — a nested `Bot :
+shape and behaviour as the Python/JS targets - a nested `Bot :
 DiscordSocketClient`, slash commands as a `Commands` list of
 (SlashCommandBuilder, handler) tuples, a `ComponentHandlers` /
 `ModalHandlers` map, a standalone `<stem>_deploy.cs` (DiscordRestClient
@@ -14,7 +14,7 @@ Text-assertion tests run in the normal suite (they need no packages).
 Compile tests build the emitted code with dotnet (Discord.Net 3.20.2
 + Microsoft.Data.Sqlite 8.0.0, both verified live on the build VM);
 the store harness drives the emitted Bot class directly against a
-real SQLite file — no live Discord connection anywhere in this file.
+real SQLite file - no live Discord connection anywhere in this file.
 """
 
 import os
@@ -62,10 +62,10 @@ bot "ShopBot":
 
 strings en:
   "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
-  "buy.poor": "Not enough gold — {item} costs {price}, you have {balance}."
+  "buy.poor": "Not enough gold - {item} costs {price}, you have {balance}."
 strings id:
   "buy.ok": "Membeli {item} seharga {price} gold. Saldo: {balance}."
-  "buy.poor": "Gold tidak cukup — {item} harganya {price}, kamu punya {balance}."
+  "buy.poor": "Gold tidak cukup - {item} harganya {price}, kamu punya {balance}."
 
 store economy:
   table balances (user: str, balance: int)
@@ -151,7 +151,7 @@ def emit_shop_text():
 def _dotnet_env():
     env = dict(os.environ)
     env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
-    # /tmp is a 512MB tmpfs — keep dotnet temp dirs on the home disk.
+    # /tmp is a 512MB tmpfs - keep dotnet temp dirs on the home disk.
     env["TMPDIR"] = str(Path.home() / "dotnet-tmp")
     return env
 
@@ -159,7 +159,7 @@ def _dotnet_env():
 def build_files(files, csproj_text, startup=None):
     """Write `files` + a csproj into a temp dir and `dotnet build` it.
 
-    Returns (returncode, stdout, stderr, tempdir-as-Path) — the caller
+    Returns (returncode, stdout, stderr, tempdir-as-Path) - the caller
     owns the temp dir (returned so a second command, e.g. `dotnet
     run`, can reuse it). Use `shutil.rmtree` when done.
     """

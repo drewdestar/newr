@@ -1,7 +1,7 @@
 // Java-side unit tests for compiler/newr_rt.java (M4).
 //
 // Mirrors tests/js/rt_tests.js case for case (same rule, both
-// targets) — same 61 checks, adapted to Java types (long instead of
+// targets) - same 61 checks, adapted to Java types (long instead of
 // BigInt, Long/Double boxing at the helper boundaries). Run with
 // `javac NewrRt.java RtChecks.java && java RtChecks` from a temp
 // dir holding copies of both files, or via
@@ -38,7 +38,7 @@ public class RtChecks {
     // make (Long, long) calls ambiguous in javac (both applicable
     // in the boxing phase, neither more specific). Everything boxes;
     // Long/Double.equals do the right thing (NaN is never eq'd
-    // through here — the checks use isNaN / bit comparison).
+    // through here - the checks use isNaN / bit comparison).
     static void eq(Object got, Object want, String what) {
         if (got == null ? want != null : !got.equals(want)) {
             throw new AssertionError(what + ": expected <" + want

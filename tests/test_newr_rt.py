@@ -2,7 +2,7 @@
 
 TDD RED first: this file was written before the runtime module
 existed. Every test pins a decision from BUILD_REPORT.md §14.1/§14.2
-(P2, P6–P9, D5–D9) or the research §3.5/§3.6 sketches — checked
+(P2, P6–P9, D5–D9) or the research §3.5/§3.6 sketches - checked
 overflow, truncating division, half-away rounding, and the
 conversion/rendering helpers.
 """
@@ -97,7 +97,7 @@ class TestCheckedArithmetic(unittest.TestCase):
 
     def test_overflow_is_overflow_error(self):
         # Research §3.3: raising OverflowError for checked-int
-        # overflow is idiomatic — a bare `except OverflowError`
+        # overflow is idiomatic - a bare `except OverflowError`
         # sees it too.
         self.assertIsInstance(NewrOverflowError("x"), OverflowError)
         self.assertIsInstance(NewrOverflowError("x"), NewrError)
@@ -106,7 +106,7 @@ class TestCheckedArithmetic(unittest.TestCase):
         # BUG-M2-2 (found by the emitter's overflow test): with the
         # bases ordered (OverflowError, NewrError), constructing a
         # NewrOverflowError never ran NewrError.__init__, so `.message`
-        # was never set — and a `catch e:` body reading `e.message`
+        # was never set - and a `catch e:` body reading `e.message`
         # raised AttributeError instead of printing the overflow.
         # The same applies to NewrDivisionByZeroError.
         e = NewrOverflowError("integer overflow: 1 is outside int64 range")
@@ -146,7 +146,7 @@ class TestTdivTmod(unittest.TestCase):
     def test_min_div_minus_one(self):
         with self.assertRaises(NewrOverflowError):
             tdiv(INT64_MIN, -1)
-        # The remainder is mathematically 0 — no overflow.
+        # The remainder is mathematically 0 - no overflow.
         self.assertEqual(tmod(INT64_MIN, -1), 0)
 
     def test_invariant(self):
@@ -170,7 +170,7 @@ class TestPowInt(unittest.TestCase):
             pow_int(10, 19)
 
     def test_pow_negative_exponent(self):
-        # An int result cannot represent 2**-1 — an error, not 0.
+        # An int result cannot represent 2**-1 - an error, not 0.
         with self.assertRaises(NewrError):
             pow_int(2, -1)
 
@@ -210,7 +210,7 @@ class TestListIndex(unittest.TestCase):
 
     def test_negative_is_out_of_range(self):
         # SPEC §9.2: out-of-range indexing is an error. A negative
-        # index is out of range (valid indices are 0..len-1) — Python
+        # index is out of range (valid indices are 0..len-1) - Python
         # would silently wrap xs[-1] to the last element, which is
         # exactly the silent behavior §1.1 forbids.
         with self.assertRaises(IndexError):
@@ -268,7 +268,7 @@ class TestRoundHalfAway(unittest.TestCase):
 
     def test_rounds_the_exact_float_value(self):
         # 2.675 is stored slightly BELOW 2.675, so rounding the
-        # exact float value gives 2.67 — the representation fact
+        # exact float value gives 2.67 - the representation fact
         # every target shares (research §3.4). This is deliberate:
         # rounding the shortest repr instead would break identity
         # for large integral floats (see test_round_overflow).
@@ -286,7 +286,7 @@ class TestRoundHalfAway(unittest.TestCase):
         self.assertEqual(round_half_away(float(2 ** 63 - 1024)),
                          2 ** 63 - 1024)
         # float(INT64_MAX) is actually 2**63 (floats cannot represent
-        # the maximum) — rounding it is an overflow, not a silent wrap.
+        # the maximum) - rounding it is an overflow, not a silent wrap.
         with self.assertRaises(NewrOverflowError):
             round_half_away(float(INT64_MAX))
         with self.assertRaises(NewrOverflowError):
@@ -326,7 +326,7 @@ class TestConversions(unittest.TestCase):
             to_float(10 ** 400)
 
     def test_to_bool_parses(self):
-        # P7: parsing, not truthiness — bool("false") is False.
+        # P7: parsing, not truthiness - bool("false") is False.
         self.assertIs(to_bool("true"), True)
         self.assertIs(to_bool("false"), False)
         with self.assertRaises(ValueError):
@@ -359,7 +359,7 @@ class TestToStr(unittest.TestCase):
         self.assertEqual(to_str([[1, 2], [3]]), "[[1, 2], [3]]")
 
     def test_set_contains_both(self):
-        # Set order is unspecified (P3) — assert membership, not order.
+        # Set order is unspecified (P3) - assert membership, not order.
         rendered = to_str({1, 2})
         self.assertTrue(rendered.startswith("{") and rendered.endswith("}"))
         self.assertIn("1", rendered)
@@ -421,7 +421,7 @@ class TestResult(unittest.TestCase):
         r = try_result(lambda: 1 / 0)
         self.assertTrue(r.is_err())
         # as_error coerced the ZeroDivisionError into a NewrError
-        # whose .code names the Python type — unwrap raises that.
+        # whose .code names the Python type - unwrap raises that.
         with self.assertRaises(NewrError) as ctx:
             r.unwrap()
         self.assertEqual(ctx.exception.code, "ZeroDivisionError")

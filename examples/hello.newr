@@ -1,4 +1,4 @@
-# hello.newr — a program written in the newr language.
+# hello.newr - a program written in the newr language.
 # Build it with: newr build examples/hello.newr
 # Then run it with: python examples/hello.py
 

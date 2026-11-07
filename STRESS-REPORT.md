@@ -1,4 +1,4 @@
-# newr — Stress / Endurance Report
+# newr - Stress / Endurance Report
 
 **Date:** 6–7 November 2026 (WIB, UTC+7) · **Compiler under test:** `~/workspace/newr/`,
 pinned by SHA-256 in `stress/results/compiler-pinned.sha256`
@@ -6,7 +6,7 @@ pinned by SHA-256 in `stress/results/compiler-pinned.sha256`
 `parser.py c2f6beb8…`, `cli.py 111ba9d8…`).
 **Suite at test time:** 414 tests, all OK (re-verified by hand after the
 14 must-fix fixes landed; gate had passed 2× at 411, the fix agent added
-3 more tests). No compiler file changed after 16:59 UTC 6 Nov — every
+3 more tests). No compiler file changed after 16:59 UTC 6 Nov - every
 number below is against one fixed compiler version.
 
 **Harness:** `stress/run_stress.py` + `stress/gen_corpus.py`
@@ -20,17 +20,17 @@ BAD_JSON (`--json` output not parseable), WRONG_EXIT.
 
 The compiler did **not** break the way the task hoped it would: no
 hang, no memory blow-up, no wrong exit code, no invalid JSON anywhere
-in 3,000 fuzz cases. It broke in exactly **one crash-class way** —
+in 3,000 fuzz cases. It broke in exactly **one crash-class way** -
 plus one silent checker gap and two minor lexer gaps, and one
 performance cliff that is a slow clean failure, not a hang.
 
 | # | Finding | Severity | Status |
 |---|---------|----------|--------|
-| 1 | Lexer `TypeError` on any file ending in an identifier with no trailing newline (§2) | **High — real crash** | Open, repro saved |
-| 2 | Top-level use-before-def silently accepted, `E2005` not enforced (§3) | Medium — checker gap, contradicts SPEC §8 | Open, repro saved |
+| 1 | Lexer `TypeError` on any file ending in an identifier with no trailing newline (§2) | **High - real crash** | Open, repro saved |
+| 2 | Top-level use-before-def silently accepted, `E2005` not enforced (§3) | Medium - checker gap, contradicts SPEC §8 | Open, repro saved |
 | 3 | `1__2` and `1_` lex as valid ints (§4) | Low | Open |
 | 4 | Raw NUL byte accepted inside string literals (§4) | Low | Open |
-| 5 | Nested `if` / nested blocks go quadratic: clean error, but 14 s at depth 3000, past the 30 s timeout at depth ~4060/4374 (§5) | Medium — perf cliff | Open, slow-probe pending (§5) |
+| 5 | Nested `if` / nested blocks go quadratic: clean error, but 14 s at depth 3000, past the 30 s timeout at depth ~4060/4374 (§5) | Medium - perf cliff | Open, slow-probe pending (§5) |
 
 Everything else held: depth guard at 200 works for 8/10 constructs to
 depth 5000; 10k-line / 10k-var / 1 MB-string / 100k-element / 100-file
@@ -49,7 +49,7 @@ lexer's own crash (which happens before any JSON can be produced).
 | CLI robustness (`--mode cli`) | 27 cases: 7 byte-level inputs × plain/`--json`, `--json` on every error corpus file, 13 invocations | 0 real failures (§8) |
 | Endurance (`--mode endurance`) | Full suite + examples + whole corpus, repeated 30 min | **138 iterations, suite green 138/138, no flakiness, no slowdown** (§10) |
 
-## 2. CRASH-1 — lexer `TypeError` at end of file (the worst find)
+## 2. CRASH-1 - lexer `TypeError` at end of file (the worst find)
 
 **Trigger:** any source file whose last token is an identifier and which
 has **no trailing newline**. Minimal repros (all crash, exit 1, raw
@@ -85,7 +85,7 @@ TypeError: category() argument must be a unicode character, not str
 (and `_is_name_start`) pass it straight to `unicodedata.category`,
 which raises `TypeError` on anything that is not a single character.
 The lexer has no EOF guard on the name loop. The same crash fires
-through `--json` (`json-b_truncated_fn` in the CLI run) — the crash
+through `--json` (`json-b_truncated_fn` in the CLI run) - the crash
 happens during lexing, before any diagnostic or JSON can be produced.
 
 **Impact:** any truncated file, any file saved without a trailing
@@ -102,7 +102,7 @@ with `if not ch or len(ch) != 1: return False`, and let the parser
 produce the normal "unexpected end of file" diagnostic. Add a
 regression test: `check("print x")` with no trailing newline.
 
-## 3. BUG-2 — top-level use-before-def silently accepted
+## 3. BUG-2 - top-level use-before-def silently accepted
 
 **Repro** (`stress/corpus/i_use_before_def.newr`, saved):
 
@@ -113,11 +113,11 @@ let later = 1
 
 `newr check` → `ok`, exit 0. Expected: `E2005` use before definition.
 
-**Why this is a real bug, not a spec judgement call:** SPEC.md §8 —
+**Why this is a real bug, not a spec judgement call:** SPEC.md §8 -
 "A `.newr` file is a **program**. Top-level statements execute in
 file order; declarations (functions, structs, imports, bot blocks)
 are resolved across the whole file (forward references are allowed…)."
-`let` is a top-level *statement*, not in the declaration list — it
+`let` is a top-level *statement*, not in the declaration list - it
 executes in file order, so using `later` before its `let` must be an
 error. The resolver only enforces E2005 for **locals**: the same
 pattern inside a function is correctly rejected (verified by hand:
@@ -133,7 +133,7 @@ top-level statement order mistake, which is easy to write.
 
 **`1__2` and `1_` lex as valid ints.** Verified against the lexer
 directly: `1__2` → `INT 12`, `1_` → `INT 1`. SPEC says "underscores
-group digits and are ignored" (`1_000`) — a double or trailing
+group digits and are ignored" (`1_000`) - a double or trailing
 underscore groups nothing. Python rejects both. Low severity; the
 spec wording is loose enough that this is arguably conformant, but a
 strict reading says these are not valid groupings.
@@ -146,11 +146,11 @@ what a program means. Low severity; the spec does not explicitly
 forbid it, so this is filed as an inconsistency, not a violation.
 
 **Not a bug (corrected expectation):** `print 1 / 0` passes the
-checker — correctly. Division by zero is a *runtime* error per the
+checker - correctly. Division by zero is a *runtime* error per the
 spec, not a compile-time one; the checker has no business rejecting
 it. The corpus case was reclassified to `valid`.
 
-## 5. Depth — the guard holds, except `if` / blocks go quadratic
+## 5. Depth - the guard holds, except `if` / blocks go quadratic
 
 Every construct was swept at depths 100, 150, 200, 250, 300, 400,
 500, 750, 1000, 1500, 2000, 3000, 5000 (30 s timeout each), then
@@ -158,23 +158,23 @@ bisected at the first breaking depth.
 
 | Construct | OK up to | Guard trips (clean exit 4) | Survives to 5000? |
 |-----------|----------|----------------------------|-------------------|
-| parens | 150 | 200 | Yes — 0.16–0.32 s at every depth |
-| binop chains | 150 | 200 | Yes — ≤0.34 s |
-| calls | 150 | 200 | Yes — ≤0.42 s |
-| list literals | 150 | 200 | Yes — ≤0.26 s |
-| dict literals | 150 | 200 | Yes — ≤0.25 s |
-| unary chains | 150 | 200 | Yes — ≤0.30 s |
-| ternary chains | 150 | 200 | Yes — ≤0.38 s |
-| interpolation (nested ternary) | 150 | 200 | Yes — ≤0.26 s |
-| **nested `if`** | 150 | 200 | **Yes, slowly — ~30 s at depth ~4060** |
-| **nested blocks** | 150 | 200 | **Yes, slowly — ~30 s at depth ~4374** |
+| parens | 150 | 200 | Yes - 0.16–0.32 s at every depth |
+| binop chains | 150 | 200 | Yes - ≤0.34 s |
+| calls | 150 | 200 | Yes - ≤0.42 s |
+| list literals | 150 | 200 | Yes - ≤0.26 s |
+| dict literals | 150 | 200 | Yes - ≤0.25 s |
+| unary chains | 150 | 200 | Yes - ≤0.30 s |
+| ternary chains | 150 | 200 | Yes - ≤0.38 s |
+| interpolation (nested ternary) | 150 | 200 | Yes - ≤0.26 s |
+| **nested `if`** | 150 | 200 | **Yes, slowly - ~30 s at depth ~4060** |
+| **nested blocks** | 150 | 200 | **Yes, slowly - ~30 s at depth ~4374** |
 
 The 200-level nesting guard does its job everywhere: past 200 the
 compiler returns a clean diagnostic (exit 4) instead of recursing.
 That is the fix for the old `RecursionError` crash, and it holds to
 depth 5000 for 8 of 10 constructs.
 
-**The exception — nested `if` and nested blocks.** The guard still
+**The exception - nested `if` and nested blocks.** The guard still
 fires (exit 4, clean diagnostic), but the *cost* of producing that
 diagnostic grows superlinearly with depth:
 
@@ -192,25 +192,25 @@ first breaks 4059; nested blocks last survives 4373, first breaks
 4374. Saved inputs: `stress/crashes/depth-if-4059.newr`,
 `stress/crashes/depth-blocks-4374.newr`. **Read these numbers as
 "depth at which wall time crosses 30 s", not as a correctness
-boundary** — with a 180 s timeout both inputs complete cleanly
+boundary** - with a 180 s timeout both inputs complete cleanly
 (see verdict above).
 
-**Verdict — SLOW, NOT A HANG.** Both breaking inputs were re-run
+**Verdict - SLOW, NOT A HANG.** Both breaking inputs were re-run
 with a 180 s timeout: nested `if` at depth 4059 finished in
 **29.9 s** with a clean diagnostic (exit 4, "nesting limited to 200
 levels…"), nested blocks at depth 4374 in **28.8 s**, same clean
 exit 4. There is no infinite loop. The 4059/4374 "boundaries" are
 artifacts of the 30 s timeout: the compiler still produces the
 correct diagnostic, it just takes ~30 s to do it, right at the
-timeout edge (which is also why the bisection boundary is jittery —
+timeout edge (which is also why the bisection boundary is jittery -
 a re-run a minute later could land a few depths either way).
 The cost curve is ~quadratic (13.9 s at depth 3000 → 29.9 s at
 4059 ≈ 13.9 × (4059/3000)² = 25 s, plus overhead), so the honest
 statement is: **the compiler survives any depth, but rejecting a
 4,000-deep `if` nest costs ~30 s of CPU.**
 
-**Reading:** even in the worst case this is a *clean* failure — a
-diagnostic, not a traceback — but a 3,000-deep `if` nest taking
+**Reading:** even in the worst case this is a *clean* failure - a
+diagnostic, not a traceback - but a 3,000-deep `if` nest taking
 14 seconds to *reject* means the checker/parser walks the whole
 structure (probably re-scanning indentation or re-walking the
 nesting on every level) instead of bailing at the depth guard.
@@ -219,18 +219,18 @@ service on `newr check`. Suggested fix: bail out of the nesting
 walk as soon as the depth guard fires, instead of completing the
 walk and then reporting.
 
-## 6. Fuzz — 3,000 programs, 4 crashes, all one bug
+## 6. Fuzz - 3,000 programs, 4 crashes, all one bug
 
 Seed 20261106, three generators mixed (plausible programs, token
 mutations, byte soup incl. truncated files and Unicode edge cases).
 Result: **2,996 CLEAN, 4 CRASH, 0 TIMEOUT, 0 BAD_JSON, 0 WRONG_EXIT.**
-All 4 crashes are CRASH-1 (§2) — truncated files ending
+All 4 crashes are CRASH-1 (§2) - truncated files ending
 mid-identifier. No other failure class appeared in 3,000 cases:
 no hang, no invalid `--json`, no wrong exit code. The fuzzer's
 Unicode, truncation and soup inputs otherwise all produced clean
 diagnostics or OK.
 
-## 7. Scale — everything finishes, two cost notes
+## 7. Scale - everything finishes, two cost notes
 
 | Case | Size | Wall | Peak RSS | Exit |
 |------|------|------|----------|------|
@@ -245,13 +245,13 @@ diagnostics or OK.
 | 100-file import chain | 55 B entry | 0.16 s | 16 MB | 0 |
 
 Notes, not failures: 10,000 top-level `let`s take 5.5 s while 10,000
-`print` lines take 0.7 s — per-binding cost grows with the number of
+`print` lines take 0.7 s - per-binding cost grows with the number of
 bindings (worth a profile pass; likely scope lookup). A 1 MB string
-literal peaks at 74 MB RSS and a 689 KB list literal at 91 MB — the
+literal peaks at 74 MB RSS and a 689 KB list literal at 91 MB - the
 checker holds many copies of large literals. Nothing pathological:
 no case timed out, no case came close to memory pressure on this VM.
 
-## 8. CLI robustness — 27 cases, 0 real failures
+## 8. CLI robustness - 27 cases, 0 real failures
 
 Byte-level inputs through `check`, plain and `--json`: non-UTF-8
 bytes → exit 2 (clean env error naming the file); CESU-8
@@ -266,10 +266,10 @@ bad flag / `check` with no file / `build` without `--check` /
 `--explain` on a real lexer code and on `E1001` → exit 0; bare
 `newr`, `--fast`, `--json` on the examples → exit 0. (An earlier
 run flagged six of these as WRONG_EXIT; that was a harness
-classifier bug — exit 1 is the documented usage-error code — now
+classifier bug - exit 1 is the documented usage-error code - now
 fixed in the harness.)
 
-## 9. Corpus — 79 cases, template bugs fixed, 3 real mismatches left
+## 9. Corpus - 79 cases, template bugs fixed, 3 real mismatches left
 
 The first corpus run showed 12 mismatches; 9 were bugs in the
 *stress harness's own templates*, not the compiler, and each was
@@ -280,12 +280,12 @@ verified against the live compiler before fixing:
   `(timestamp, format)`, not `(format)`; `task` blocks need a `do:`
   body **and** a `bot` block in the file (`E2008`); `min`/`max` take
   exactly 2 args; `bot "B":` with no indented body is a parse error
-  (every `:` needs an indented block — 12 Discord templates fixed);
+  (every `:` needs an indented block - 12 Discord templates fixed);
   cross-module names need qualification **and** `pub`
   (`E3005` name not exported: `pub let` / `pub fn`); bare
   cross-module names are module-local by design (`E3001`).
 - The empty-bot-block observation: a bot with zero settings cannot
-  be written — a description (or other indented body) is required
+  be written - a description (or other indented body) is required
   in practice. Filed as an observation, not a bug.
 
 After fixing the templates and re-running, the remaining corpus
@@ -293,21 +293,21 @@ mismatches are exactly the real findings: `i_use_before_def` (§3),
 `i_bad_number` (§4), `b_nul_byte` (§4), plus the `b_truncated_fn`
 crash (§2).
 
-## 10. Endurance — 138 iterations, 30 minutes, zero flakiness
+## 10. Endurance - 138 iterations, 30 minutes, zero flakiness
 
 Full suite + all examples + a rotating quarter of the corpus,
 repeated for exactly 30.0 minutes (`stress/results/endurance-20261106-175146.json`).
 
-- **138 iterations, suite green 138/138** — the suite tail is `OK`
+- **138 iterations, suite green 138/138** - the suite tail is `OK`
   on every single run (414 tests × 138 runs = 57,132 test
   executions, zero failures).
 - **No slowdown, no memory-growth signal:** iteration wall time
   min 12.1 s, mean 13.13 s, max 16.8 s (one outlier, iteration 137,
-  system noise — the iterations around it are 12–14 s). First five
+  system noise - the iterations around it are 12–14 s). First five
   iterations average ~12.9 s, last five ~13.5 s: flat, not creeping.
 - **All examples clean on every iteration.**
 - **The only recurring "bad" slice entry is the known bug:**
-  `b_truncated_fn.newr` CRASH exit 1, 35 times — exactly once every
+  `b_truncated_fn.newr` CRASH exit 1, 35 times - exactly once every
   4th iteration, when the rotating slice includes it. That is CRASH-1
   (§2) reproducing deterministically, not flakiness. No other file
   ever appears in `slice_bad`, in any iteration.
@@ -316,7 +316,7 @@ repeated for exactly 30.0 minutes (`stress/results/endurance-20261106-175146.jso
   wall time over 30 minutes / 138 full-suite runs. The one thing
   that breaks, breaks the same way on iteration 1 and iteration 138.
 
-## Appendix — reproduction
+## Appendix - reproduction
 
 ```sh
 cd ~/workspace/newr
@@ -340,16 +340,16 @@ JSON `stress/results/`; compiler pin
 `stress/results/compiler-pinned.sha256`. Nothing under `compiler/`,
 `SPEC.md` or `tests/` was modified by this campaign.
 
-## Addendum — re-stress after fix round 2 (7 Nov 2026)
+## Addendum - re-stress after fix round 2 (7 Nov 2026)
 
 See **[STRESS-REPORT-2.md](STRESS-REPORT-2.md)** for the full
 re-stress report. Short version: all 5 findings from this report
 are verified fixed (original fuzz seed 3000/3000 clean, depth
-cliff gone — worst case 0.49 s, 1 MB string peak RSS 74 → 26 MB,
+cliff gone - worst case 0.49 s, 1 MB string peak RSS 74 → 26 MB,
 endurance 60/60 green), but the fresh fuzz seed 20261107 found
 **one new pre-existing parser crash (CRASH-2)**: a malformed
 `t(...)` call raises `AttributeError: 'Span' object has no attribute
 'span'` at `parser.py:1838` / `:1842` instead of the intended E1001
 diagnostic. Minimized repros: `stress/crashes/min-crash-t-call-2pos.newr`
 (`print t("k", 1)`) and `min-crash-t-call-badkey.newr` (`print t(1)`).
-Ship gate: NOT passed — fix round 3 + targeted re-stress required.
+Ship gate: NOT passed - fix round 3 + targeted re-stress required.

@@ -1,22 +1,22 @@
 """The Python emitter (M2, SPEC.md §18).
 
 ``newr build --target py`` lowers a *checked* program (the front end
-has already run: parse -> resolve -> check) to readable Python — one
+has already run: parse -> resolve -> check) to readable Python - one
 `.newr` file -> one `.py` file, structure preserved, user names
 verbatim, helpers only in `newr_rt.py` (imported when used).
 
 Readability is a requirement, not a nicety: the output is code a
-human would write — the v0 goldens (`examples/hello.py`,
+human would write - the v0 goldens (`examples/hello.py`,
 `examples/showcase.py`) are the style oracle, and the emitter
 reproduces them byte-for-byte (BUILD_REPORT.md §14, D2).
 
 The emitter NEVER runs on an unchecked program: the CLI checks first
 and exits 4 on errors. If it meets a node without a type (which only
-happens on an unchecked program), it raises `EmitterError` — a clean
+happens on an unchecked program), it raises `EmitterError` - a clean
 refusal, never an AttributeError traceback.
 
 Python floor: 3.10 (P1). The emitter uses only the 3.10-safe f-string
-subset — alternate quotes inside replacement fields, and any
+subset - alternate quotes inside replacement fields, and any
 expression containing a backslash is hoisted to a temp variable
 before the statement.
 
@@ -40,7 +40,7 @@ class EmitterError(Exception):
     """The program cannot be emitted (unchecked input, an unsupported
     construct, or a checker gap the emitter refuses to paper over).
     The CLI reports this cleanly; it is never a traceback. ``span``
-    points at the expression that could not be emitted, when known —
+    points at the expression that could not be emitted, when known -
     the CLI renders it instead of the file start."""
 
     def __init__(self, msg: str, span=None):
@@ -54,7 +54,7 @@ class EmitResult:
 
     `files` maps an output filename (basename, e.g. `hello.py`) to
     its text. `main_file` is the main output's filename. `uses_rt`
-    says whether any file imports `newr_rt` — the caller copies
+    says whether any file imports `newr_rt` - the caller copies
     `compiler/newr_rt.py` next to the output when it is true.
     """
 
@@ -73,10 +73,10 @@ class EmitResult:
 # `os` and `logging` are reserved here, by the emitter. The `newr_rt`
 # helper FUNCTIONS are imported bare (`from newr_rt import add, ...`,
 # pinned by tests/test_emitter.py::test_rt_import_is_usage_tracked),
-# so their names are reserved too — a user fn named `add` becomes
+# so their names are reserved too - a user fn named `add` becomes
 # `add_`, or it would shadow the imported helper. (The runtime's
-# CLASSES are referenced module-qualified — `newr_rt.NewrError`,
-# pinned by test_contract_check_is_not_assert — so their names need
+# CLASSES are referenced module-qualified - `newr_rt.NewrError`,
+# pinned by test_contract_check_is_not_assert - so their names need
 # no reservation; `newr_rt` itself is reserved.)
 _RT_HELPERS = frozenset({
     "add", "sub", "mul", "neg", "pow_int", "pow_float", "tdiv", "tmod",
@@ -132,7 +132,7 @@ def _py_str(value: str, quote: str = '"') -> str:
 
 def _py_fstr_text(text: str, quote: str = '"') -> str:
     """A literal part of an f-string: braces doubled, escapes as in
-    `_py_str` (backslashes are fine here — they are in the literal
+    `_py_str` (backslashes are fine here - they are in the literal
     part, not a replacement field). The delimiter quote is escaped
     (``\\"`` / ``\\'``) so a literal quote cannot end the string."""
     out = []
@@ -238,7 +238,7 @@ class _Emitter:
         self.main_path = main_path
         self.sources = sources
         self.line_comments = line_comments
-        # Imports collected while emitting (per output file — reset
+        # Imports collected while emitting (per output file - reset
         # for each module file).
         self.plain_imports: set[str] = set()
         self.plain_import_aliases: dict[str, str] = {}
@@ -265,7 +265,7 @@ class _Emitter:
         # while emitting its body; inserted at the top afterwards).
         self._fn_globals: set[str] = set()
         # Hoists for the statement being emitted: each is a list of
-        # lines (base indent 0) to emit before the statement —
+        # lines (base indent 0) to emit before the statement -
         # f-string temp assignments and hoisted lambda defs.
         self._hoists: list[list[str]] | None = None
         self._hoist_counter = 0
@@ -377,7 +377,7 @@ class _Emitter:
     def _bind_fresh(self, name: str, type: Type | None = None,
                     kind: str = "local") -> _Binding:
         """Bind `name` in the current scope WITHOUT renaming against
-        enclosing scopes — for function/lambda parameters, where
+        enclosing scopes - for function/lambda parameters, where
         shadowing an enclosing name is the correct semantics (the
         parameter is a new function-local scope). Only the current
         function's used-name set is consulted, so two parameters
@@ -428,7 +428,7 @@ class _Emitter:
 
     def _need_rt_class(self):
         """A runtime CLASS is referenced (`newr_rt.NewrError`,
-        `newr_rt.Result`) — the file needs `import newr_rt`."""
+        `newr_rt.Result`) - the file needs `import newr_rt`."""
         self.rt_module_used = True
 
     def _render_imports(self) -> list[str]:
@@ -594,12 +594,12 @@ class _Emitter:
                            "as a value", span=node.span)
             if binding.kind == "enum":
                 # A bare enum name is not a value (the checker types
-                # it UNKNOWN without erroring, §20) — the JS twin
+                # it UNKNOWN without erroring, §20) - the JS twin
                 # already refused it with this message; refusing here
                 # too means the failure points at the name itself
                 # instead of surfacing later at its first use.
                 self._fail(
-                    f"`{node.name}` is not a value — use a variant "
+                    f"`{node.name}` is not a value - use a variant "
                     "or construct it", span=node.span)
             return binding.value
         # A builtin used as a first-class value: only the ones Python
@@ -631,7 +631,7 @@ class _Emitter:
                 # `T? or T` (SPEC §7.2): the default when the value is
                 # absent. Python's `or` would also take the default
                 # for a present-but-falsy value (0, ""), so it is
-                # not the same — use coalesce.
+                # not the same - use coalesce.
                 self._need_rt("coalesce")
                 left = self.emit_expr(node.left, 0)
                 right = self.emit_expr(node.right, 0)
@@ -681,7 +681,7 @@ class _Emitter:
         # D19: the int64 minimum is written `-9223372036854775808`
         # in newr. Its positive magnitude (9223372036854775808) is
         # out of int64 range, so the checker leaves the literal's
-        # own type unset — the plain `neg(...)` form would also be
+        # own type unset - the plain `neg(...)` form would also be
         # wrong (it would check the out-of-range literal first).
         # Emit the minimum directly.
         if isinstance(node.operand, A.Lit) and \
@@ -730,7 +730,7 @@ class _Emitter:
         else:
             self._fail(f"cannot interpolate a value of type `{t}` "
                        "(interpolation takes int, float, str, bool, "
-                       "or a Discord entity — use `str(x)` for the "
+                       "or a Discord entity - use `str(x)` for the "
                        "rest)")
         return self._interp_field_or_hoist(text, quote)
 
@@ -787,7 +787,7 @@ class _Emitter:
         type arguments substituted. A nullable method's "T" is the
         receiver's inner type; a method found only in the nullable
         table on a NON-nullable receiver is a rebased `?.` method
-        inside an `opt_chain` lambda (D38) — the receiver is proven
+        inside an `opt_chain` lambda (D38) - the receiver is proven
         non-none there, so "T" is the receiver itself.
         """
         table = None
@@ -814,7 +814,7 @@ class _Emitter:
 
     def _is_plain_field(self, recv_type: Type, name: str) -> bool:
         """True when `name` is a real field of `recv_type` (a struct
-        field, or an enum variant) — a plain attribute access, never
+        field, or an enum variant) - a plain attribute access, never
         a method value. Provider/entity types have no tables here,
         so they report False and the method-signature lookup decides.
         """
@@ -827,7 +827,7 @@ class _Emitter:
                            sig) -> str:
         """A method used as a value (§16, hole 2): a lambda taking
         the method's parameters, capturing the receiver by value
-        (D10) as a defaulted parameter — the receiver expression is
+        (D10) as a defaulted parameter - the receiver expression is
         evaluated once, when the lambda is created, never again at
         call time. The body is the ordinary method call with the
         receiver replaced by the snapshot name."""
@@ -889,7 +889,7 @@ class _Emitter:
         obj_type = self._type_of(obj)
         t = self._type_of(node)
         # §16 (hole 2): a method used as a value is a lambda, not a
-        # Python attribute — `int` has no `is_some`, `list` has no
+        # Python attribute - `int` has no `is_some`, `list` has no
         # `len`. A real struct field stays a plain attribute.
         if t.name == "fn" and not self._is_plain_field(obj_type,
                                                        node.name):
@@ -912,7 +912,7 @@ class _Emitter:
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
                 self._fail(f"`file.{node.name}` cannot be used as a "
-                           "value (it needs a statement — the `with` "
+                           "value (it needs a statement - the `with` "
                            "block cannot live inside a lambda)")
             params = t.params[:-1]  # the last param is the return type
             names = [f"_a{i}" for i in range(len(params))]
@@ -935,7 +935,7 @@ class _Emitter:
 
         The emitted file is named after the real file (`helper.py`),
         so an aliased import must render as `import helper as h`,
-        not `import h` — the alias alone names no file. Passing the
+        not `import h` - the alias alone names no file. Passing the
         bound name straight to `_need_import` broke every aliased
         file-module use at runtime; the fn-call branch and the §20
         enum branches share this helper.
@@ -976,7 +976,7 @@ class _Emitter:
         return (binding.py, obj.name, node.name)
 
     def _emit_enum_variant(self, enum_name: str, node: A.Member) -> str:
-        """`Color.Red` — a bare variant value is an instance of its
+        """`Color.Red` - a bare variant value is an instance of its
         variant dataclass; a variant with fields, used as a value,
         is the dataclass itself (a constructor)."""
         t = self._type_of(node)
@@ -1057,7 +1057,7 @@ class _Emitter:
         if name == "input":
             if self._is_bot:
                 self.warnings.append(
-                    "input() in a bot program blocks on stdin — bots "
+                    "input() in a bot program blocks on stdin - bots "
                     "have no stdin (D21)")
             args = [self.emit_expr(a, 0) for a in node.args]
             return f"input({', '.join(args)})"
@@ -1115,7 +1115,7 @@ class _Emitter:
             t = self._type_of(arg)
             text = self.emit_expr(arg, 0)
             # A nullable value must go through to_str even when its
-            # inner type is int/float/str — its runtime value is
+            # inner type is int/float/str - its runtime value is
             # Python's None when absent, and print would render that
             # as "None" instead of newr's "none" (P8).
             if _is_bool(t) or t.nullable or \
@@ -1129,7 +1129,7 @@ class _Emitter:
         t = self._type_of(arg)
         text = self.emit_expr(arg, 0)
         if name == "str":
-            # A nullable str's runtime value is None when absent —
+            # A nullable str's runtime value is None when absent -
             # bare `str(None)` would print "None", not newr's "none"
             # (P8), so nullable values go through to_str.
             if _is_str(t) and not t.nullable:
@@ -1159,7 +1159,7 @@ class _Emitter:
         return f"bool({text})"  # int -> 0 is False (P7)
 
     def _emit_log_call(self, level: str, node: A.Call) -> str:
-        """`log.info/warn/error(msg)` (P10). `warn` is `warning` —
+        """`log.info/warn/error(msg)` (P10). `warn` is `warning` -
         never the deprecated `logging.warn`. In a bot program the
         message goes to the bot's named logger (`log.warning(...)`);
         in a general program it goes to the root logger."""
@@ -1175,7 +1175,7 @@ class _Emitter:
     def _emit_module_call_text(self, real: str, ref: str, name: str,
                                args: list[str]) -> str:
         """The Python call text for a named-module function (not a
-        file module, not a file op — those are handled by their
+        file module, not a file op - those are handled by their
         callers). `real` is the module name (for dispatch); `ref` is
         the Python reference (the alias, when the import is aliased)."""
         alias = ref if ref != real else None
@@ -1214,7 +1214,7 @@ class _Emitter:
                           binding: _Binding) -> str:
         if binding.kind == "file-module":
             # A function in an imported .newr file: a plain call on
-            # the imported module — and the import itself (D13: one
+            # the imported module - and the import itself (D13: one
             # `.py` per imported `.newr`, imported by its module name).
             # `_need_file_module` renders an aliased import as
             # `import <real> as <alias>`; the bare alias names no file.
@@ -1352,8 +1352,8 @@ class _Emitter:
         `old_base` (by identity) with `new_base`, and clearing the
         `optional` flags (the optionality is handled by the
         `opt_chain` wrapper, not inside the lambda body). Types are
-        copied onto the clones — the checker already typed the
-        original nodes — except when `in_lambda_types` maps a link
+        copied onto the clones - the checker already typed the
+        original nodes - except when `in_lambda_types` maps a link
         to its in-lambda type (§16, hole 1): the checker's chain
         type conflates the `?.` short-circuit with a field's own
         nullability, and inside the lambda only the latter survives,
@@ -1389,7 +1389,7 @@ class _Emitter:
                 name=node.func.name, optional=False,
                 expr_type=node.func.expr_type)
             # D38: the result of an OPTIONAL call link (`s?.unwrap()`)
-            # is nullable only because the `?.` short-circuits — inside
+            # is nullable only because the `?.` short-circuits - inside
             # the lambda the receiver is proven non-none, so the
             # result is the plain (stripped) type. Without this, a
             # later link (`.upper()` in `s?.unwrap().upper()`)
@@ -1398,7 +1398,7 @@ class _Emitter:
             # (`a?.b`) may be nullable because the FIELD itself is
             # nullable, which survives inside the lambda. When the
             # caller supplies the exact in-lambda type (§16), that
-            # wins over this heuristic — it is exact where D38
+            # wins over this heuristic - it is exact where D38
             # over-strips (a method whose own return type is
             # nullable, e.g. `unwrap()` on `Result[str?, _]`).
             expr_type = node.expr_type
@@ -1418,7 +1418,7 @@ class _Emitter:
 
         Inside an `opt_chain` lambda the receiver is proven
         non-none, so this is the link's result type with the `?.`
-        short-circuit removed — but a nullable FIELD type or a
+        short-circuit removed - but a nullable FIELD type or a
         nullable method return survives. Returns None when the type
         cannot be determined (provider/entity types); the caller
         treats None as nullable and splits the segment, which is
@@ -1483,13 +1483,13 @@ class _Emitter:
             recv_type = self._type_of(inner_recv)
             # Inside the lambda the receiver is proven non-none
             # (opt_chain only calls it then), so the parameter and
-            # the rebased base carry the STRIPPED (inner) type —
+            # the rebased base carry the STRIPPED (inner) type -
             # otherwise a method call on it would dispatch as if the
             # value were still nullable.
             inner_type = Type(recv_type.name, params=recv_type.params,
                               nullable=False)
             # §16 (hole 1): a segment must also end before any link
-            # whose receiver can be `none` INSIDE the lambda — a
+            # whose receiver can be `none` INSIDE the lambda - a
             # nullable field (`o?.inner.name`) or a nullable method
             # result (`r?.unwrap().upper()` on `Result[str?, _]?`).
             # The checker's `expr_type` conflates the `?.`
@@ -1499,7 +1499,7 @@ class _Emitter:
             # in-lambda result type, so `_rebase` types the clones
             # exactly: a Member link's nullability inside the lambda
             # is its FIELD's nullability, not the checker's chain
-            # type — without this, a method after a nullable field
+            # type - without this, a method after a nullable field
             # dispatches against `T?` and fails with E4001.
             in_lambda: dict[int, Type | None] = {}
             cur_type = self._in_lambda_link_type(links[i], inner_type)
@@ -1516,7 +1516,7 @@ class _Emitter:
             seg_end = links[j - 1]
             self._push_scope()
             binding = self._bind_fresh("_v", type=inner_type, kind="param")
-            # The rebased base is a Name for the NEWR name `_v` — the
+            # The rebased base is a Name for the NEWR name `_v` - the
             # lookup returns the binding's Python name (which may be
             # `_v_1` in a nested chain).
             new_base = A.Name(span=links[i].span, name="_v",
@@ -1532,7 +1532,7 @@ class _Emitter:
 
     def _callable_body(self, expr: A.Expr, prefix: str) -> str:
         """Emit `expr` as a lambda body with the given prefix
-        (`lambda ...: `). If the body needs hoists (D33 — an f-string
+        (`lambda ...: `). If the body needs hoists (D33 - an f-string
         part with a backslash, a nested block-body lambda), the
         lambda becomes a hoisted `def` and its name is returned
         instead, so the hoisted statements run at call time, inside
@@ -1576,7 +1576,7 @@ class _Emitter:
         for name, b in free:
             # The snapshot parameter is named after the enclosing
             # binding's Python name (so the default `a=a` reads the
-            # enclosing value) — unless that is not a valid
+            # enclosing value) - unless that is not a valid
             # identifier (a handler binding's value form is an
             # expression, e.g. `interaction.user`), in which case
             # the mangled newr name is the parameter and the value
@@ -1638,7 +1638,7 @@ class _Emitter:
             b = self._lookup(name)
             # "global-let" is included: a top-level `let` is mutable,
             # so a lambda reading it at call time would see a LATER
-            # value — capture by value (D10) requires a snapshot.
+            # value - capture by value (D10) requires a snapshot.
             # (A top-level `const` is registered the same way; it
             # never changes, so snapshotting it is harmless.) Module
             # functions / structs / enums / modules / stores are
@@ -1844,7 +1844,7 @@ class _Emitter:
                     self._last_answer = (len(lines) - 1, kind)
                 elif isinstance(st, (A.ButtonDecl, A.SelectDecl)):
                     # The component's instantiation lines must come
-                    # BEFORE the answer they attach to — the answer
+                    # BEFORE the answer they attach to - the answer
                     # references the view variable, so defining it
                     # after the answer would be a NameError.
                     if self._last_answer is not None:
@@ -1890,7 +1890,7 @@ class _Emitter:
                 f"{view}.message = await interaction.followup.send(",
                 1).rstrip()[:-1] + ", wait=True)")
         else:
-            # A reply / edit answers the original response — the
+            # A reply / edit answers the original response - the
             # message line goes right after the answer, not at the
             # end of the block (statements may follow the component).
             lines.insert(idx + 1, f"{p}{view}.message = await "
@@ -1918,7 +1918,7 @@ class _Emitter:
         Result-returning function; a nullable operand returns `None`
         from a nullable-returning function. The mismatched kinds
         (D30) and a nullable `Result` (G-M2-6) are clean
-        `EmitterError`s — the checker should have rejected them, and
+        `EmitterError`s - the checker should have rejected them, and
         there is no defined early-return value to invent."""
         operand = prop.expr
         t = self._type_of(operand)
@@ -1931,7 +1931,7 @@ class _Emitter:
         text = self.emit_expr(operand, 0)
         if ctx.get("in_handler"):
             # A handler returns nothing, so `?` just exits the
-            # handler (a bare `return`) — there is no value to
+            # handler (a bare `return`) - there is no value to
             # propagate. (A handler that may exit early without
             # answering is the discord checker's E2010, not the
             # emitter's problem.)
@@ -1951,17 +1951,17 @@ class _Emitter:
                 return temp
             if t.name == "Result" and t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             self._fail("`?` needs a `Result[T, E]` or a `T?` value")
         if t.name == "Result" and t.params:
             if t.nullable:
                 self._fail("`?` on a nullable `Result` has no defined "
-                           "meaning (G-M2-6) — unwrap it first, then "
+                           "meaning (G-M2-6) - unwrap it first, then "
                            "propagate the `Result`")
             if ret is None or ret.name != "Result":
                 self._fail("`?` on a `Result` value inside a function "
-                           "that does not return a `Result` (D30 — the "
+                           "that does not return a `Result` (D30 - the "
                            "checker should have rejected this)")
             self._hoists.append([
                 f"{temp} = {text}",
@@ -1972,7 +1972,7 @@ class _Emitter:
         if t.nullable:
             if ret is None or not ret.nullable:
                 self._fail("`?` on a nullable value inside a function "
-                           "that does not return a nullable (D30 — the "
+                           "that does not return a nullable (D30 - the "
                            "checker should have rejected this)")
             self._hoists.append([
                 f"{temp} = {text}",
@@ -2108,7 +2108,7 @@ class _Emitter:
         else:
             self._fail(f"cannot iterate over a `{it_type}` value")
         # The iterable is emitted BEFORE the loop variable is bound
-        # (it cannot see the loop variable — `for x in x` reads the
+        # (it cannot see the loop variable - `for x in x` reads the
         # enclosing `x`).
         iterable = self.emit_expr(stmt.iterable, 0)
         self._push_scope()
@@ -2163,7 +2163,7 @@ class _Emitter:
                 self._need_import("sys")
                 return [f"{p}sys.exit(0)"]
             self._fail("a top-level `return` with a value is not "
-                       "supported — a top-level `return` exits the "
+                       "supported - a top-level `return` exits the "
                        "program")
         ensures = ctx["ensures"]
         if stmt.value is None:
@@ -2217,7 +2217,7 @@ class _Emitter:
                                                      scrut_type)
             if arm.guard is not None:
                 # The guard may reference the pattern's bindings
-                # (e.g. `x if x > 100:`) — bind each name to its
+                # (e.g. `x if x > 100:`) - bind each name to its
                 # pattern expression text while emitting it.
                 self._push_scope()
                 for name, expr_text, typ in bindings:
@@ -2228,7 +2228,7 @@ class _Emitter:
                 cond = f"{cond} and {guard}" if cond else guard
             arms.append((cond, bindings, arm))
         # The last unconditional arm becomes `else:`; otherwise the
-        # final `else` raises (defense — the checker proves
+        # final `else` raises (defense - the checker proves
         # exhaustiveness, so it is unreachable in a checked program).
         last_uncond = (arms and arms[-1][0] is None)
         for i, (cond, bindings, arm) in enumerate(arms):
@@ -2403,7 +2403,7 @@ class _Emitter:
                                            new_scope=False))
         if ensures and not (rest and isinstance(rest[-1], A.Return)):
             # The implicit return (falling off the end) is also a
-            # return — check the `ensures` against `None`.
+            # return - check the `ensures` against `None`.
             body_lines.append(f"{bp}_newr_result = None")
             body_lines.extend(self._ensures_check_lines(ensures, indent + 1))
             body_lines.append(f"{bp}return _newr_result")
@@ -2424,7 +2424,7 @@ class _Emitter:
     def _py_type(self, t: Type) -> str:
         """A newr type as a Python annotation. Struct/enum field
         annotations are emitted QUOTED (see _emit_struct), so the
-        names are never evaluated — forward references and cycles
+        names are never evaluated - forward references and cycles
         are safe."""
         if t is None:
             return "None"
@@ -2658,7 +2658,7 @@ class _Emitter:
         self.stores = {s.name: s for s in program.stores}
         # The module scope (imports, structs, enums, fns, lets,
         # stores) must be registered before any handler body is
-        # emitted — a handler calling a file-module function
+        # emitted - a handler calling a file-module function
         # (`shop_items.price_of`) or a store (`economy.balance`)
         # resolves through it, exactly as in a general program.
         self._register_module_scope(program)
@@ -2667,7 +2667,7 @@ class _Emitter:
         # The body is emitted first (imports are usage-tracked).
         body: list[str] = []
         # §19: the file's top-level declarations are part of a bot
-        # file (SPEC §8, §8.2, §13.7) — structs/enums/functions
+        # file (SPEC §8, §8.2, §13.7) - structs/enums/functions
         # first (hoisted, as in a general file), then the top-level
         # statements in file order. They run at module import time,
         # before `bot = Bot()` and main(); handlers read them at
@@ -2836,7 +2836,7 @@ class _Emitter:
         lines.append(f'@bot.tree.command(name="{cmd.name}", '
                      f'description="{desc}")')
         # describe (only for options with a description, or any
-        # option — the v0 shop golden describes every option).
+        # option - the v0 shop golden describes every option).
         if cmd.options:
             parts = []
             for opt in cmd.options:
@@ -2884,7 +2884,7 @@ class _Emitter:
 
     def _option_param(self, opt: A.OptionDecl) -> str:
         """One command-option parameter: the discord.py annotation
-        (Range for min/max — D15, the generic-subscript form) and
+        (Range for min/max - D15, the generic-subscript form) and
         the default (None for an optional option without one)."""
         t = opt.type
         if t is None:
@@ -2931,7 +2931,7 @@ class _Emitter:
         """A task's loop-function name, from its interval (a task
         has no name in newr). Two tasks with the same interval get a
         numeric suffix. The name is computed once per task and
-        cached — setup_hook and the definition must agree."""
+        cached - setup_hook and the definition must agree."""
         if not hasattr(self, "_task_names_by_id"):
             self._task_names_by_id: dict[int, str] = {}
             self._task_name_counts: dict[str, int] = {}
@@ -2981,7 +2981,7 @@ class _Emitter:
         return lines
 
     def _emit_error_handler(self) -> list[str]:
-        """@bot.tree.error — the v0 golden's handler, verbatim in
+        """@bot.tree.error - the v0 golden's handler, verbatim in
         shape (only when commands exist)."""
         return [
             "@bot.tree.error",
@@ -3119,7 +3119,7 @@ class _Emitter:
         (D16). Template placeholders that are handler bindings
         (user, guild, ...) are auto-passed in their interpolation
         form; the rest must be explicit arguments (the checker
-        enforces it — E2009)."""
+        enforces it - E2009)."""
         index, default = self._strings_index()
         entry = None
         for locale_entries in index.values():
@@ -3200,7 +3200,7 @@ class _Emitter:
         §19 guard: the `await` is only valid inside an async handler
         (command / event / task / component). At the top level,
         inside a (sync) top-level fn, or inside a lambda there is no
-        async context — emitting the `await` would produce a
+        async context - emitting the `await` would produce a
         SyntaxError in the generated file (proven live: a store call
         inside a lambda in a handler emitted `await` inside a sync
         lambda on both targets). Fail cleanly instead of emitting
@@ -3209,7 +3209,7 @@ class _Emitter:
         if ctx is None or not ctx.get("in_handler"):
             self._fail(
                 f"a store call (`{store_name}.{method}`) is only "
-                "possible inside a command, event, or task handler — "
+                "possible inside a command, event, or task handler - "
                 "top-level functions and statements run outside the "
                 "bot's async context",
                 span=node.span)
@@ -3480,7 +3480,7 @@ class _Emitter:
             lines.append(f'        await self.{name}_db.execute("CREATE TABLE IF NOT EXISTS ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, user TEXT NOT NULL, amount INTEGER NOT NULL, key TEXT UNIQUE, created_at INTEGER NOT NULL)")')
         lines.append(f"        await self.{name}_db.commit()")
         # The economy ops (only when the store has a balances table
-        # of the required shape — the checker verifies it).
+        # of the required shape - the checker verifies it).
         tables = {t.name: t for t in store.tables}
         if "balances" in tables:
             lines.extend(self._emit_economy_methods(name))
@@ -3533,7 +3533,7 @@ class _Emitter:
             "        # The balance check is inside the transaction (no",
             "        # TOCTOU): a concurrent debit cannot slip between",
             "        # the check and the write. A replayed key returns",
-            "        # True — the debit already happened.",
+            "        # True - the debit already happened.",
             f"        async with self.{n}_lock:",
             "            if key is not None:",
             f"                async with self.{n}_db.execute(\"SELECT 1 FROM ledger WHERE key = ?\", (key,)) as cursor:",
@@ -3560,7 +3560,7 @@ class _Emitter:
             "        # to its intended total (the out-leg debits `amount`,",
             "        # the in-leg credits `amount`), so no money is",
             "        # created or destroyed however the first attempt",
-            "        # died — a crash between the legs, or a poisoned",
+            "        # died - a crash between the legs, or a poisoned",
             "        # ledger row. The leg INSERTs upsert on the key:",
             "        # a row that merely exists (amount 0) is topped up",
             "        # instead of colliding with the UNIQUE constraint.",
@@ -3683,7 +3683,7 @@ class _Emitter:
             sub_path = imp.resolved_path or imp.path
             # The header names the file as the user would see it:
             # relative to the working directory when it is under it
-            # (D2 — so building `examples/shop.newr` and building
+            # (D2 - so building `examples/shop.newr` and building
             # `examples/shop_items.newr` directly give the same
             # shop_items.py header).
             import os
@@ -3706,7 +3706,7 @@ class _Emitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"# Generated by newr from {main_path} — do not edit by hand.",
+            f"# Generated by newr from {main_path}. Do not edit by hand.",
             f"# Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:
@@ -3749,7 +3749,7 @@ class _Emitter:
             self._bind_module_level(decl.name, kind="store")
         # The top level's used-name set starts with every module-level
         # Python name, so a `let` in a top-level block cannot reuse one
-        # (at module level Python has no block scope — the name would
+        # (at module level Python has no block scope - the name would
         # clobber the module global).
         self._fn_used = set(self._module_used)
 
@@ -3757,9 +3757,9 @@ class _Emitter:
     def _emit_general_file(self, program: A.Program, main_path: str):
         """A general (non-bot) program: header, imports, structs/enums,
         functions, then the top-level STATEMENTS in file order (SPEC
-        §8). Definitions (structs/enums/functions) are hoisted — a
+        §8). Definitions (structs/enums/functions) are hoisted - a
         function body reads module globals at call time, so emitting
-        the `def` before the statements is safe — but the statements
+        the `def` before the statements is safe - but the statements
         themselves (lets, assignments, prints, ...) must run in the
         order written. The old two-phase layout (all lets, then the
         other statements) silently computed the wrong value whenever
@@ -3817,7 +3817,7 @@ class _Emitter:
 def emit_program(program: A.Program, *, main_path: str,
                  sources: dict[str, str],
                  line_comments: bool = False) -> EmitResult:
-    """Emit a CHECKED program to Python — one `.py` per `.newr` file.
+    """Emit a CHECKED program to Python - one `.py` per `.newr` file.
 
     `main_path` is the input file as passed (D2: the header names
     it); `sources` maps file paths to their text (for diagnostics

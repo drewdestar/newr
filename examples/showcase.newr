@@ -1,4 +1,4 @@
-# showcase.newr — a bot written in the newr language.
+# showcase.newr - a bot written in the newr language.
 # It shows off several .newr features in one small file:
 # a bot description, four commands (one ephemeral, one with no
 # description so it defaults to its name), and both events.
@@ -18,11 +18,11 @@ command whereami:
 
 command secret:
   description: "A private reply only you can see"
-  reply: "Shh, {user} — only you can see this."
+  reply: "Shh, {user} - only you can see this."
   ephemeral: true
 
 command rules:
-  reply: "Be kind, {user} — this is {guild}!"
+  reply: "Be kind, {user} - this is {guild}!"
 
 event ready:
   log: "{bot} is online"

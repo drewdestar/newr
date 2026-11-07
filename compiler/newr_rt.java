@@ -7,7 +7,7 @@
 // helpers. It is stdlib-only (java.base) and dependency-free.
 //
 // It lives in the compiler package as `compiler/newr_rt.java` and
-// `newr build --target java` copies it — byte-identical — next to
+// `newr build --target java` copies it - byte-identical - next to
 // an emitted `.java` file when (and only when) that program uses a
 // helper from it. Do not edit a copied file by hand: edit this file
 // in the newr repo and rebuild.
@@ -115,9 +115,9 @@ public class NewrRt {
 
     /** Division or modulo by zero. Same code rule as above: the
      * Python twin is constructed without a code, so e.code is none
-     * in a `catch`. The builtin sites — `0.0 ** -1`, where Python
+     * in a `catch`. The builtin sites - `0.0 ** -1`, where Python
      * raises ZeroDivisionError itself, and float `/` by zero, where
-     * Python's native `/` raises it — throw
+     * Python's native `/` raises it - throw
      * codedError("ZeroDivisionError", ...) in powFloat and fdiv
      * instead (§18 fix 2: fdiv was missed by the §17.4 item-4 list). */
     public static class NewrDivisionByZeroError extends NewrError {
@@ -230,7 +230,7 @@ public class NewrRt {
         // newr `**` on ints: checked, bounded before computing.
         // A negative exponent is an error (an int result cannot
         // represent it). The exponent is bounded by repeated
-        // squaring with a check at every multiply — `10 ** 10**9`
+        // squaring with a check at every multiply - `10 ** 10**9`
         // raises instead of allocating by computing blindly.
         if (b < 0) {
             throw new NewrError("negative exponent for int pow");
@@ -261,7 +261,7 @@ public class NewrRt {
 
     public static long tdiv(long a, long b) {
         // newr `/` on ints: truncating division (toward zero).
-        // Java `/` already truncates — the check is the two error
+        // Java `/` already truncates - the check is the two error
         // cases.
         if (b == 0) {
             throw new NewrDivisionByZeroError("integer division by zero");
@@ -287,7 +287,7 @@ public class NewrRt {
     public static double powFloat(double a, double b) {
         // newr `**` on floats: IEEE semantics. Java `Math.pow`
         // already returns NaN for a negative base with a fractional
-        // exponent (Python returns a complex there — newr has no
+        // exponent (Python returns a complex there - newr has no
         // complex type, so the answer is NaN) and Infinity on
         // overflow. The one case Java gets wrong is a zero base
         // with a negative exponent: Java gives Infinity, Python
@@ -295,7 +295,7 @@ public class NewrRt {
         if (a == 0 && b < 0) {
             // Python raises the builtin ZeroDivisionError here (not
             // the NewrError subclass), so a `catch e:` sees code
-            // "ZeroDivisionError" — codedError, not the class.
+            // "ZeroDivisionError" - codedError, not the class.
             throw codedError("ZeroDivisionError",
                 "0.0 cannot be raised to a negative power");
         }
@@ -320,10 +320,10 @@ public class NewrRt {
         // non-zero dividend and NaN for 0/0). `b == 0` covers -0
         // as well. Python's native `/` raises the BUILTIN
         // ZeroDivisionError, so this throws the coded error
-        // (§18 fix 2), not the codeless class — a `catch e:` sees
+        // (§18 fix 2), not the codeless class - a `catch e:` sees
         // e.code == "ZeroDivisionError" on both targets. (Float `%`
         // is different: both targets route it through fmod, which
-        // raises the codeless NewrDivisionByZeroError — that parity
+        // raises the codeless NewrDivisionByZeroError - that parity
         // is correct.)
         if (b == 0) {
             throw codedError("ZeroDivisionError", "float division by zero");
@@ -421,7 +421,7 @@ public class NewrRt {
 
     /** Round the exact decimal (digits / 10**scale) to `n` places,
      * half away from zero, as a double. `n` below -308 rounds every
-     * finite double to (signed) zero — 10**309 already exceeds the
+     * finite double to (signed) zero - 10**309 already exceeds the
      * largest finite double, so no huge power is ever built. */
     private static double roundExactToDouble(long sign, BigInteger digits,
                                              long scale, long n) {
@@ -438,7 +438,7 @@ public class NewrRt {
     }
 
     /** newr `round()`: half-away-from-zero (schoolbook), on the
-     * EXACT value of the float — not its shortest repr.
+     * EXACT value of the float - not its shortest repr.
      * `round(2.675, 2)` is 2.67, because the float 2.675 is stored
      * slightly below 2.675. `round(x)` returns an `int` (int64
      * range-checked); `round(x, n)` returns a `float`. Non-finite
@@ -446,7 +446,7 @@ public class NewrRt {
      * `round(inf, n)` returns `inf`, `round(nan, n)` returns `nan`.
      * An int input rounds its exact value too (unlike the JS
      * runtime, which returns an int input unchanged when ndigits
-     * is given — `round(5, -1)` is 10 in Python, 5 in JS). */
+     * is given - `round(5, -1)` is 10 in Python, 5 in JS). */
     public static long roundHalfAway(double x) {
         if (!Double.isFinite(x)) {
             // Python raises the builtin OverflowError here.
@@ -664,7 +664,7 @@ public class NewrRt {
      * (Double.toString(5e-324) is "4.9E-324", Python repr is
      * "5e-324"). So the digits are derived here from the EXACT
      * decimal expansion: the shortest prefix that parses back to
-     * the same double (round to nearest, ties to even — David
+     * the same double (round to nearest, ties to even - David
      * Gay's dtoa mode 0, the rule behind Python's repr). */
     public static String floatStr(double x) {
         if (Double.isNaN(x)) {
@@ -681,7 +681,7 @@ public class NewrRt {
         }
         boolean neg = x < 0;
         double ax = Math.abs(x);
-        // Exact decimal digits of ax (finite expansion — every
+        // Exact decimal digits of ax (finite expansion - every
         // binary fraction has one) plus the decimal exponent of
         // the leading digit.
         java.math.BigDecimal exact = new java.math.BigDecimal(ax);
@@ -983,7 +983,7 @@ public class NewrRt {
      * holds the copy). Defaults to an empty list before main runs.
      * Java's main() args exclude the program name, but newr's
      * env.args is sys.argv 1:1 (Python: sys.argv, JS:
-     * process.argv.slice(1)) — argv[0] is the program, so
+     * process.argv.slice(1)) - argv[0] is the program, so
      * setMainArgs prepends the main class name. */
     public static String[] _mainArgs = new String[0];
 
@@ -1027,7 +1027,7 @@ public class NewrRt {
      * NaN is never equal to NaN (not even inside a collection). */
     public static boolean eq(Object a, Object b) {
         if (a == b) {
-            // Same reference — but NaN is not == itself even as a
+            // Same reference - but NaN is not == itself even as a
             // boxed Double, and `a == b` on two distinct NaN boxes
             // is false anyway; a single NaN box compared to itself
             // reaches here, so exclude it.
@@ -1120,7 +1120,7 @@ public class NewrRt {
     // ---------------------------------------------------------------- ?. / ?? / accessors
 
     /** newr `?.`: `null` when `v` is `null`, else `f(v)`. The test
-     * is `== null`, never truthiness — `0`, `""` and `[]` are
+     * is `== null`, never truthiness - `0`, `""` and `[]` are
      * values, not absences. A whole `?.` chain collapses into one
      * call with the full postfix path inside `f`, so the base
      * expression is evaluated exactly once. */
@@ -1134,7 +1134,7 @@ public class NewrRt {
         return v != null ? v : dflt.get();
     }
 
-    /** newr `list[i]`: SPEC §9.2 — out-of-range indexing is a
+    /** newr `list[i]`: SPEC §9.2 - out-of-range indexing is a
      * runtime error. Valid indices are `0 <= i < len(lst)`; a
      * negative index is out of range (never a wrap). */
     public static Object listIndex(List<?> lst, long i) {
@@ -1144,7 +1144,7 @@ public class NewrRt {
         return lst.get((int) i);
     }
 
-    /** newr `list.get(i, default)`: P9 — a negative index is
+    /** newr `list.get(i, default)`: P9 - a negative index is
      * out-of-range (no wrap-around); anything outside
      * `0 <= i < len(lst)` returns `default`. */
     public static Object listGet(List<?> lst, long i, Object dflt) {
@@ -1223,7 +1223,7 @@ public class NewrRt {
                             "TypeError", null);
     }
 
-    /** `{"k": v, ...}` — alternating key/value pairs into a
+    /** `{"k": v, ...}` - alternating key/value pairs into a
      * LinkedHashMap (insertion order). Unlike `Map.ofEntries`,
      * null keys and values are allowed. */
     @SuppressWarnings("unchecked")
@@ -1257,7 +1257,7 @@ public class NewrRt {
 
     /** `s[i]` by code point (P5). Negative indices wrap like
      * Python; out of range raises IndexError (the JS runtime's
-     * `[...s][i]` returns undefined there — a JS latent bug). */
+     * `[...s][i]` returns undefined there - a JS latent bug). */
     public static String strIndex(String s, long idx) {
         List<String> cps = chars(s);
         long i = idx < 0 ? cps.size() + idx : idx;
@@ -1369,7 +1369,7 @@ public class NewrRt {
     private static final Set<String> TIME_FORMATS = new HashSet<>(List.of(
         "%Y-%m-%d", "%H:%M", "%Y-%m-%d %H:%M", "%d/%m/%Y", "%H:%M:%S"));
 
-    /** newr `time.format(ts, fmt)`: UTC, never local time (P4) —
+    /** newr `time.format(ts, fmt)`: UTC, never local time (P4) -
      * the same program prints the same output on every machine.
      * The format must be one of the spec's fixed set (§12.2). */
     public static String timeFormat(long ts, String fmt) {

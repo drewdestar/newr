@@ -1,4 +1,4 @@
-# shop.newr — ping + economy buy + button confirm, in newr v1.
+# shop.newr - ping + economy buy + button confirm, in newr v1.
 # Prices live in shop_items.newr; the shop itself lives here.
 # Build it with: newr build examples/shop.newr
 
@@ -10,10 +10,10 @@ bot "ShopBot":
 
 strings en:
   "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
-  "buy.poor": "Not enough gold — {item} costs {price}, you have {balance}."
+  "buy.poor": "Not enough gold - {item} costs {price}, you have {balance}."
 strings id:
   "buy.ok": "Membeli {item} seharga {price} gold. Saldo: {balance}."
-  "buy.poor": "Gold tidak cukup — {item} harganya {price}, kamu punya {balance}."
+  "buy.poor": "Gold tidak cukup - {item} harganya {price}, kamu punya {balance}."
 
 store economy:
   table balances (user: str, balance: int)

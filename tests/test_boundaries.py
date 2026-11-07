@@ -6,7 +6,7 @@ find no ``import`` of a ``discord*`` module.
 
 The by-name exemption (SPEC.md SS2.1) is also asserted here: the
 literal ``"discord"`` may occur in core only at the documented
-exemption sites — the two bypasses in checker.py, the NAMED_MODULES
+exemption sites - the two bypasses in checker.py, the NAMED_MODULES
 registry + W1002 exemption in resolver.py, and RESERVED_BUILTIN_NAMES
 in modules.py. Entity type *names* (``user``/``guild``) are core types
 -- the test targets imports and the exact exemption list, not words
@@ -57,7 +57,7 @@ class TestCoreDiscordBoundary(unittest.TestCase):
 
     def test_checker_discord_literal_only_at_bypass_sites(self):
         # SPEC.md SS2.1: exactly two bypasses, both `if mod ==
-        # "discord": return UNKNOWN` — never a Discord rule.
+        # "discord": return UNKNOWN` - never a Discord rule.
         hits = _discord_literal_lines(_root() / "compiler" / "checker.py")
         self.assertEqual(len(hits), 2, hits)
         for _lineno, line in hits:

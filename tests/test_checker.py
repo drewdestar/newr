@@ -25,7 +25,7 @@ def check(src):
 
     The returned diagnostics COMBINE the resolver and the checker
     (M-04): a helper that silently dropped resolver diagnostics made
-    the `ensures result` test false-green — the checker said "ok"
+    the `ensures result` test false-green - the checker said "ok"
     while the resolver had already failed the program. Any test that
     asserts a program is clean through this helper now asserts the
     whole front end, not just the checker.
@@ -328,7 +328,7 @@ class TestNullability(unittest.TestCase):
 
     def test_optional_nullable_methods_are_nullable(self):
         # M2 evaluation must-fix #5 (G-M2-2 / D31): `?.is_some()` /
-        # `?.is_none()` / `?.unwrap()` must type as nullable — the
+        # `?.is_none()` / `?.unwrap()` must type as nullable - the
         # chain short-circuits on `none`.
         r = check('let v: int? = none\n'
                   'let b: bool? = v?.is_some()\n'
@@ -498,7 +498,7 @@ class TestResultAndPropagate(unittest.TestCase):
 
     def test_propagate_result_in_handler_is_ok(self):
         # A handler returns nothing, so `?` there just exits the
-        # handler — either operand kind is allowed (matches the
+        # handler - either operand kind is allowed (matches the
         # emitter's handler branch).
         r = check('fn g() -> Result[int, error]:\n  return ok(1)\n'
                   'command ping:\n'
@@ -796,7 +796,7 @@ class TestNestedImports(unittest.TestCase):
 
 class TestImportedEnumMember(unittest.TestCase):
     """§20: a qualified imported enum member (`m.Shade.Red`) is a
-    value — the checker must type it from the imported module's enum
+    value - the checker must type it from the imported module's enum
     declaration, not leave it untyped (which made the emitter fail
     with E4001 on a program `check` had accepted)."""
 
@@ -822,7 +822,7 @@ class TestImportedEnumMember(unittest.TestCase):
     def _outer_member_type(self, result):
         """Type of the outermost Member in the main program (the
         qualified enum member itself). None means the checker left
-        it untyped — the exact gap this round closes."""
+        it untyped - the exact gap this round closes."""
         import dataclasses
         from compiler import ast_nodes as A
         found = []

@@ -2,7 +2,7 @@
 
 Compare-only: each test builds a golden's source (from examples/)
 to a temp dir and diffs the emitted text against goldens/py/*.py.
-A mismatch fails — the golden is the contract. Regeneration needs
+A mismatch fails - the golden is the contract. Regeneration needs
 an explicit `python3 conformance/run.py --bless [--only <name>]`;
 never hand-edit a golden.
 """
@@ -26,7 +26,7 @@ class TestGoldens(unittest.TestCase):
                 for out in outputs:
                     golden = GOLDEN_DIR / out
                     self.assertTrue(golden.is_file(),
-                                    f"golden {golden} is missing — "
+                                    f"golden {golden} is missing - "
                                     f"run `python3 conformance/run.py "
                                     f"--bless --only {name}`")
                     expected = golden.read_text(encoding="utf-8")
@@ -56,7 +56,7 @@ class TestGoldensJs(unittest.TestCase):
                 for out in outputs:
                     golden = GOLDEN_DIR_JS / out
                     self.assertTrue(golden.is_file(),
-                                    f"golden {golden} is missing — "
+                                    f"golden {golden} is missing - "
                                     f"run `python3 conformance/run.py "
                                     f"--bless --target js --only {name}`")
                     expected = golden.read_text(encoding="utf-8")
@@ -109,7 +109,7 @@ class TestGoldensJava(unittest.TestCase):
                 for out in outputs:
                     golden = GOLDEN_DIR_JAVA / out
                     self.assertTrue(golden.is_file(),
-                                    f"golden {golden} is missing — "
+                                    f"golden {golden} is missing - "
                                     f"run `python3 conformance/run.py "
                                     f"--bless --target java --only {name}`")
                     expected = golden.read_text(encoding="utf-8")
@@ -138,7 +138,7 @@ class TestGoldensCs(unittest.TestCase):
                 for out in outputs:
                     golden = GOLDEN_DIR_CS / out
                     self.assertTrue(golden.is_file(),
-                                    f"golden {golden} is missing — "
+                                    f"golden {golden} is missing - "
                                     f"run `python3 conformance/run.py "
                                     f"--bless --target cs --only {name}`")
                     expected = golden.read_text(encoding="utf-8")

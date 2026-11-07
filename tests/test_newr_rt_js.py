@@ -3,7 +3,7 @@
 The runtime's rules are tested in JavaScript (node:assert) because
 they are JavaScript semantics (BigInt, float rendering, exact-decimal
 rounding). This module just runs that file under node and asserts
-exit 0 — the per-rule assertions live in the JS file.
+exit 0 - the per-rule assertions live in the JS file.
 """
 
 import shutil

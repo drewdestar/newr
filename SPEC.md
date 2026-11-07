@@ -1,14 +1,14 @@
-# newr — Language Specification v1
+# newr - Language Specification v1
 
 **Status:** SPEC FROZEN (M0), 6 November 2026.
 **Version:** newr 0.1.0 (the language line; distinct from `discord-py-skills` 0.5.0).
-**Authors:** chie (Muse) for drewdestar/newr (repo not yet created — LOCAL ONLY).
+**Authors:** chie (Muse) for drewdestar/newr (repo not yet created - LOCAL ONLY).
 
 This document is the contract M1–M6 build against. Changing it later needs a
 spec amendment, not a quiet edit. Anything marked **UNVERIFIED** is a claim
-nobody has proven yet — never cite it as fact.
+nobody has proven yet - never cite it as fact.
 
-## 0. Supersession record — read this first
+## 0. Supersession record - read this first
 
 This spec replaces the bot-language design in
 `~/workspace/discord-py-skills-research/newr-language-design.md` (§2–§3) and
@@ -16,7 +16,7 @@ the "What newr is NOT" section of `newr-universal-expansion.md` (§1), on the
 user's direct orders:
 
 - **21:49 WIB 6 Nov 2026:** newr is a **general-purpose programming language**,
-  one language for all — like programming languages in general — **NOT** a
+  one language for all - like programming languages in general - **NOT** a
   Discord-bot language. A Discord bot is just ONE use of the language.
   Consequences: `while` and recursion bans are reversed (a general language
   needs them); the core gains types, functions, modules, error handling,
@@ -24,12 +24,12 @@ user's direct orders:
 - **21:50 WIB 6 Nov 2026:** newr must be **powerful and usable on ALL OSes**
   (Linux, macOS, Windows, …). Portability is a spec chapter (§3), not an
   afterthought.
-- **21:58 WIB 6 Nov 2026:** **stability contract** — newr is not Discord-focused.
+- **21:58 WIB 6 Nov 2026:** **stability contract** - newr is not Discord-focused.
   If Discord changes, newr must not be affected. Core has zero Discord
   dependencies; Discord lives entirely behind the `discord` module (§2).
 - **21:59 WIB 6 Nov 2026:** newr must be **POWERFUL, FASTER, and THINKING**
   (§4 performance, §5 thinking compiler).
-- **22:02 WIB 6 Nov 2026:** "Best of all" and "Wishlist" chapters (§23, §24) —
+- **22:02 WIB 6 Nov 2026:** "Best of all" and "Wishlist" chapters (§23, §24) -
   the best features taken from each major language, and the features other
   languages' developers rejected or deferred, each with a verdict. With the
   honesty correction from the deep research: the chapters record the features
@@ -45,20 +45,20 @@ user's direct orders:
 
 Where the old design contradicts this spec, **this spec wins**. Where the old
 design's *v0-behavior* facts are concerned (what the current 2,219-line
-compiler actually does), the **code wins** — see §25 for contradictions found.
+compiler actually does), the **code wins** - see §25 for contradictions found.
 
 ## 1. What newr is
 
 **newr is a general-purpose programming language.** One `.newr` source compiles
 to a runnable program in a chosen target language (Python, TypeScript, Java,
-C#, Rust, Kotlin, Dart — §18). The language is the product; every library and
+C#, Rust, Kotlin, Dart - §18). The language is the product; every library and
 every target is a backend.
 
 - A plain program is an ordinary program: `print "Hello, world!"` (§21.1).
 - A Discord bot is one program shape: `import discord` + bot declarations
   (§13). The bot syntax from v0 keeps working as sugar over the discord
   module (§13.1).
-- A file-I/O tool, a CLI, a game, a bot — all are programs in the same
+- A file-I/O tool, a CLI, a game, a bot - all are programs in the same
   language, with the same types, control flow, functions, modules, and
   error handling.
 
@@ -80,9 +80,9 @@ seven readable outputs, with each target's libraries available."** That is
 a *portability* story, and it is the only fame claim v1 makes. "Best of
 all" is **not** claimed: every language that became famous won by being
 best at *one* thing, not best at everything, and "one language, compiles
-to all targets" has a 20-year precedent (Haxe) that stayed niche — the
+to all targets" has a 20-year precedent (Haxe) that stayed niche - the
 technology worked and the fame did not follow automatically (§23).
-**v1 domain (one, named): small cross-platform command-line tools** —
+**v1 domain (one, named): small cross-platform command-line tools** -
 concrete and demonstrable (file I/O + argv + multi-target fits it), with
 AI-assisted code generation as the wave to surf (a language that is easy
 for models to write correctly: explicit types, small spec, great errors,
@@ -105,7 +105,7 @@ precedents (Rust, Go, TypeScript, Python).
 3. **Errors name file + line + column, with a fix** (§16). Similar-name
    suggestions use the rustc named form ("there is a variable with a
    similar name: `count`"), not the folk "did you mean" wording (the v0
-   wording is deliberately changed — verdicts identical); add source
+   wording is deliberately changed - verdicts identical); add source
    snippets everywhere.
 4. **No silent behavior.** Never silently ignore a construct, never silently
    coerce a type, never silently drop an event. Unknown lines are errors.
@@ -113,8 +113,8 @@ precedents (Rust, Go, TypeScript, Python).
    blocks. An escape hatch would let every hard mapping be dodged instead of
    solved, and generated code would stop being regenerable. If a program
    needs something the language cannot say, it drops to the host language
-   via the skills — same rule as v0, now enforced by the compiler. The
-   FFI/binding story — how newr calls existing target libraries — is
+   via the skills - same rule as v0, now enforced by the compiler. The
+   FFI/binding story - how newr calls existing target libraries - is
    specified as M1 design work (§20.1): the v1.1 direction is `extern`
    declarations with per-target bindings verified by the compiler; the v1
    interim answer is to extend readable generated code by hand.
@@ -124,18 +124,18 @@ precedents (Rust, Go, TypeScript, Python).
 7. **Handler/source wins.** Every emitter mapping must be proven by a test or
    a live run, never by analogy between target languages (the v3 lesson).
 
-## 2. Stability contract — the language is the stable part
+## 2. Stability contract - the language is the stable part
 
 This is the architecture principle the user set on 21:58 WIB 6 Nov 2026.
 
 ### 2.1 The core language has zero Discord dependencies
 
-The core language — types (§7), control flow (§9), functions (§9), modules
-and imports (§11), error handling (§10), I/O (§12), core stdlib (§12) — **must
+The core language - types (§7), control flow (§9), functions (§9), modules
+and imports (§11), error handling (§10), I/O (§12), core stdlib (§12) - **must
 not depend on Discord in any way**: no Discord names in core syntax, no
 Discord constants in core checking, no Discord concepts in core types.
 
-Discord lives **entirely behind the `discord` module** — one hard module
+Discord lives **entirely behind the `discord` module** - one hard module
 boundary:
 
 - All Discord rules (command-name rule, description/reply limits, placeholder
@@ -148,10 +148,10 @@ boundary:
   `compiler/discord_check.py` does. A test asserts this boundary (no import
   of `discord_*` from core modules).
 - **By-name exemption (deliberate, narrow, tested).** The core names
-  the string `"discord"` only to *bypass* Discord — never to validate
+  the string `"discord"` only to *bypass* Discord - never to validate
   it: in `checker.py` it occurs at exactly two sites (`_module_member_type`
   and `_call_module_member`), both of the form `if mod == "discord":
-  return UNKNOWN` — "this module is not core's job; leave it to the
+  return UNKNOWN` - "this module is not core's job; leave it to the
   discord checker". In `resolver.py` it occurs in the `NAMED_MODULES`
   registry (the list of known named modules) and in the W1002 exemption
   (`import discord` does not warn when bot blocks exist, because bot
@@ -161,7 +161,7 @@ boundary:
   of entity type names (`user`, `guild`, `channel`, ...) the core needs
   to type-check member access. These are exemptions from the by-name
   rule, not violations of the module boundary: no Discord rule, limit,
-  or constant lives in core — only the name that says "not mine".
+  or constant lives in core - only the name that says "not mine".
   `tests/test_boundaries.py` asserts the exact exemption list.
 - A program that never mentions Discord compiles identically whether or not
   the discord module exists in the toolchain.
@@ -172,7 +172,7 @@ boundary:
   change lands **only** in the discord module's implementation (its limits
   table, its mappings, its emitter code). The language syntax, the core
   types, and user programs do not change.
-- If Discord **removes** something, the module's surface shrinks — recorded
+- If Discord **removes** something, the module's surface shrinks - recorded
   as a **module breaking change, NOT a language change** (versioned as a
   `discord` module major version, not a language major version). User
   programs that used the removed surface fail the build with a clear error
@@ -190,14 +190,14 @@ unchanged), and any program that never uses Discord at all.
 ### 2.3 The same principle applies to every target
 
 - If Python, TypeScript, Java, C#, Rust, Kotlin, or Dart changes, **only that
-  target's emitter changes** — the language and user code stay the same.
+  target's emitter changes** - the language and user code stay the same.
 - The language is the stable contract; backends adapt. A target's breakage is
   a per-target fix, never a language change, unless the spec itself must move
   (and then it moves by amendment, §0).
 - A feature that cannot be expressed identically on all shipped targets does
-  not ship in v1 — it waits, with a version attached.
+  not ship in v1 - it waits, with a version attached.
 
-## 3. Portability — one language, all OSes
+## 3. Portability - one language, all OSes
 
 newr is OS-agnostic by construction. The language and the toolchain must work
 on Linux, macOS, and Windows.
@@ -208,7 +208,7 @@ on Linux, macOS, and Windows.
   CRLF → LF on read. A lone CR (classic Mac line ending) is an error.
   Spans are **raw-file byte offsets** (§16): the lexer counts the CR
   bytes, so a CRLF newline is 2 bytes in a span even though it is 1
-  character after normalization — JSON offsets match the bytes on disk.
+  character after normalization - JSON offsets match the bytes on disk.
 - **Encoding:** UTF-8, with or without BOM (a BOM, if present, is stripped).
   Non-UTF-8 source is an environment error (exit 2) naming the file.
 - **Tabs:** banned for indentation (v0 rule, kept). A tab anywhere in leading
@@ -231,14 +231,14 @@ on Linux, macOS, and Windows.
   source on Windows; it is not portable source, and the compiler does not
   pretend otherwise).
 
-### 3.3 Case sensitivity — explicit rule
+### 3.3 Case sensitivity - explicit rule
 
 - **Module names are case-sensitive on every OS, including Windows and
   macOS.** `import "Shop.newr"` and `import "shop.newr"` are different
   modules. On a case-insensitive filesystem the compiler resolves by exact
   name match against the directory listing and errors if the on-disk name
   differs in case from the import string ("imported `shop.newr` but the file
-  on disk is `Shop.newr` — module names are case-sensitive").
+  on disk is `Shop.newr` - module names are case-sensitive").
 - Identifiers, keywords, and locale tags are case-sensitive everywhere.
 
 ### 3.4 No OS-specific syscalls in the core language
@@ -256,7 +256,7 @@ on Linux, macOS, and Windows.
   host OS line ending by the runtime (the language writes `\n`; the runtime
   translates), and reading normalizes line endings to `\n`.
 
-### 3.5 Build output — byte-identical on all OSes (DECIDED)
+### 3.5 Build output - byte-identical on all OSes (DECIDED)
 
 - **`newr build` output is byte-identical on every OS.** Generated code uses
   **LF line endings always**, on Linux, macOS, and Windows alike.
@@ -268,7 +268,7 @@ on Linux, macOS, and Windows.
 - Source input may be CRLF; output is always LF. This is a compiler
   guarantee, tested in CI on all three OSes.
 
-### 3.6 Distribution — how the compiler reaches every OS
+### 3.6 Distribution - how the compiler reaches every OS
 
 - **Primary distribution: PyPI `newr-lang`** (name verified free 6 Nov 2026
   via the PyPI JSON API). Python 3.10+ on Linux, macOS, and Windows.
@@ -279,7 +279,7 @@ on Linux, macOS, and Windows.
 - **The `newr` CLI must work from PowerShell and cmd on Windows, not only
   bash.** This is satisfied by the pip console-script entry point (pip
   creates the Windows executable wrapper automatically) and by the zipapp
-  shebang path on Unix. No `.bat`/`.cmd`/`.ps1` launcher is needed — and
+  shebang path on Unix. No `.bat`/`.cmd`/`.ps1` launcher is needed - and
   none is shipped, so there is no second launcher to drift.
 - **Standalone binary (PyInstaller/Nuitka): a post-v1 decision, NOT assumed.**
   Reasons it is not the v1 distribution: binary size (tens of MB for a
@@ -288,7 +288,7 @@ on Linux, macOS, and Windows.
   zipapp already gives one-file distribution. Revisit after v1 ships, with a
   measured size/startup comparison, if a user asks for it.
 
-### 3.7 Honest limit — Windows/macOS execution is UNVERIFIED here
+### 3.7 Honest limit - Windows/macOS execution is UNVERIFIED here
 
 This VM is Linux-only. **Windows and macOS execution of the compiler and of
 generated programs is UNVERIFIED in this run** and must never be claimed as
@@ -297,12 +297,12 @@ verified from a Linux-only run. The proof is the CI matrix
 the completion condition for the cross-platform claim. Design is
 portable-by-construction (§3.1–§3.5); evidence comes from CI.
 
-## 4. Performance — FASTER
+## 4. Performance - FASTER
 
 ### 4.1 Compile speed: small projects feel instant
 
 - `newr build` on a small project (a handful of files, the hello bot) must
-  feel instant — well under a second on a normal machine. The front end is
+  feel instant - well under a second on a normal machine. The front end is
   stdlib-only Python with no heavy imports; there is no startup cost beyond
   the interpreter.
 - **Incremental compilation + caching, designed from the start.** The v1
@@ -316,7 +316,7 @@ portable-by-construction (§3.1–§3.5); evidence comes from CI.
     the scaffold).
   - The import graph is part of the cache key: a file is re-checked when its
     own hash changes **or** when any file it imports (transitively) changes.
-  - Cache misses and cache corruption never fail a build — a corrupt or
+  - Cache misses and cache corruption never fail a build - a corrupt or
     stale cache entry is discarded and the file is rebuilt (the cache is a
     performance aid, never a correctness dependency).
   - `newr build --no-cache` forces a full rebuild (for CI and for
@@ -325,7 +325,7 @@ portable-by-construction (§3.1–§3.5); evidence comes from CI.
 - **Two modes (G14).** `newr check` runs the full front end (parse +
   resolve + full type check) and emits nothing. `newr build --fast` emits
   with only parse + minimal checking (syntax + name resolution, skipping
-  the full type check) — an explicit opt-in, and the compiler warns that
+  the full type check) - an explicit opt-in, and the compiler warns that
   `--fast` output is not fully verified.
 - **Startup target (a design target, not a measured claim):** `newr --help`
   in under 100 ms cold, via lazy imports. A persistent compiler daemon is
@@ -342,7 +342,7 @@ portable-by-construction (§3.1–§3.5); evidence comes from CI.
   unnecessary wrappers, no pointless allocations, no generic runtime blob
   that every generated program must carry. The rule is: **generated code
   must be within a reasonable distance of the performance of equivalent
-  hand-written code** — a reviewer reading the generated `hello.py` should
+  hand-written code** - a reviewer reading the generated `hello.py` should
   not find a slower way to do the same thing.
 - Concretely: no per-call overhead beyond what the target idiom needs
   (a reply is one send call, not a dispatch through three layers); store
@@ -361,14 +361,14 @@ portable-by-construction (§3.1–§3.5); evidence comes from CI.
 
 - A built program starts fast: **no heavy runtime bootstrap.** Generated
   programs import only what they use (the Python emitter emits only the
-  imports the program needs — v0 already does this; the rule is kept for
+  imports the program needs - v0 already does this; the rule is kept for
   every target). There is no newr runtime library that must load before
   `main()` runs; the only shared code is the small per-target helper set
   the emitter writes into the generated file itself.
 - The compiler itself starts fast for the same reason (stdlib only, no
   heavy imports at CLI startup).
 
-## 5. Thinking compiler — THINKING
+## 5. Thinking compiler - THINKING
 
 The compiler reasons about the program. It does not guess.
 
@@ -383,32 +383,32 @@ The compiler reasons about the program. It does not guess.
 2. **Smart diagnostics.** Every error carries file + line + column, a source
    snippet, a machine code, and a hint (§16). Where the fix is unambiguous
    and safe, the diagnostic also carries a machine-readable `fix` (a span
-   and a replacement string) — e.g. an unknown name with exactly one close
+   and a replacement string) - e.g. an unknown name with exactly one close
    match, an unknown placeholder with exactly one close match, a command
    name with an uppercase letter (fix: lowercase it). The `fix` is data in
    the diagnostic; applying it is a separate, explicit command (§5.2).
 3. **`newr check` reasons about the program.** Beyond type errors, the
    checker reports reasoning warnings (they do not fail the build):
-   - **unused import** (W1002) — a module imported but never referenced;
-   - **unused variable / parameter** (W1001) — a `let`/`const`/parameter
+   - **unused import** (W1002) - a module imported but never referenced;
+   - **unused variable / parameter** (W1001) - a `let`/`const`/parameter
      never read (a variable written and never read is almost always a bug).
      Parameters of a `pub` function do not warn: they are the function's
      public contract, and an unused one is an API choice, not a bug
      signal (decided 6 Nov 2026 during M1, when the `pub fn price_of`
      fixture showed the rule firing on idiomatic public API);
-   - **unreachable code** (W1003) — statements after `return`/`throw`/
+   - **unreachable code** (W1003) - statements after `return`/`throw`/
      `break` in the same block, and statements after a statement that
      always terminates (including after an infinite loop);
-   - **dead branch / always-true-or-false literal condition** (W1005) —
+   - **dead branch / always-true-or-false literal condition** (W1005) -
      an `if`/`elif`/`while` whose condition is a constant literal
      (`true`/`false`), so one branch can never run; narrow syntactic
-     cases only — no general constant folding in v1;
-   - **shadowing** (W1004) — a name that shadows an outer-scope name; warn,
+     cases only - no general constant folding in v1;
+   - **shadowing** (W1004) - a name that shadows an outer-scope name; warn,
      do not forbid (shadowing is legitimate in many languages);
-   - **integer-division pitfall** — only when both operands are integer
+   - **integer-division pitfall** - only when both operands are integer
      literals flowing into a `float` context; labelled newr-specific, not
      a standard lint (no standard lint for this was found);
-   - **suspicious comparison** — comparing values of incompatible types
+   - **suspicious comparison** - comparing values of incompatible types
      (this is a type error, not a warning: `1 == "a"` is rejected, because
      it is never what the user meant).
    Assignment in a condition (`if x = 1`) is a *parse* error for free:
@@ -418,30 +418,30 @@ The compiler reasons about the program. It does not guess.
    `newr build --check` runs the same front end plus emit + verify.
 4. **Human-readable errors.** Messages are written for the person reading
    them, in plain words, naming the thing and the fix ("command `buy` may
-   not answer on some path — every branch of this `if` must end in a
+   not answer on some path - every branch of this `if` must end in a
    reply"), not in compiler jargon. Error messages are English in v1
    (localizing them is future work, as in v0).
 
-### 5.2 `newr fix` — scope decided for v1
+### 5.2 `newr fix` - scope decided for v1
 
 - `newr fix` applies the safe, unambiguous fixes from §5.1(2) to the source
   files. It only applies a fix when the diagnostic's `fix` field says the
   fix is **unambiguous** (exactly one candidate) and **safe** (a pure rename
-  or a pure deletion of a provably-dead token — never a change to program
+  or a pure deletion of a provably-dead token - never a change to program
   meaning). It prints every change it makes, and it refuses to run on a file
   with any error that has no safe fix (it fixes what it can and reports the
-  rest — it never half-fixes silently).
+  rest - it never half-fixes silently).
 - **`newr fix` is NOT in M1.** M1 designs the diagnostic `fix` field;
   in M1 only the resolver attaches one (the similar-name rename,
-  E3001) — the checker does not attach fixes yet. The `fix` command
+  E3001) - the checker does not attach fixes yet. The `fix` command
   itself lands in M4 (tooling), once the diagnostics are proven. M1's
   CLI is `build` / `build --check` / `check` / `help` (§19).
 
-### 5.3 What "thinking" is NOT — explicit boundary
+### 5.3 What "thinking" is NOT - explicit boundary
 
 - **No AI model inside the compiler.** No LLM, no model weights, no network
   call, no "smart" completion. The compiler reasons from the code in front
-  of it, using types, scopes, and the import graph — never from a model.
+  of it, using types, scopes, and the import graph - never from a model.
 - **No auto-generating code.** The compiler never writes program logic on
   the user's behalf. `newr fix` applies mechanical renames; it does not
   invent statements, bodies, or handlers.
@@ -454,7 +454,7 @@ The compiler reasons about the program. It does not guess.
 **The compiler / LSP / AI boundary (verbatim from the deep research,
 §6.5).** v1 COMPILER promises (testable): lexer/parser/resolver/checker;
 local + bidirectional inference (§7.4); structured diagnostics (§16); the
-v1 checker list (§5.1). LSP — later milestone (M2+, not M0/M1): reuse the
+v1 checker list (§5.1). LSP - later milestone (M2+, not M0/M1): reuse the
 v1 checker as a library; `publishDiagnostics`, `hover`, `completion`,
 `definition`, `codeAction` (apply the compiler's machine-applicable
 fixes). No new *reasoning* in the LSP. Do not promise
@@ -465,12 +465,12 @@ design/algorithm; judging business correctness; auto-fixing ambiguous
 errors without user confirmation; anything requiring a model, a network
 call, or training data. The compiler must work offline,
 deterministically, with stdlib only. **Things a v1 compiler can NEVER
-do:** (1) understand programmer intent — both fixes type-check, only the
+do:** (1) understand programmer intent - both fixes type-check, only the
 human knows which is right; (2) know whether code is "correct" in the
-business sense — types prove *shape*, not *meaning*; (3) prove absence
-of *all* bugs — runtime errors in the target (e.g. division by zero,
+business sense - types prove *shape*, not *meaning*; (3) prove absence
+of *all* bugs - runtime errors in the target (e.g. division by zero,
 network failure) are outside the source type system unless the language
-models them; (4) resolve genuine ambiguity without an annotation — `[]`,
+models them; (4) resolve genuine ambiguity without an annotation - `[]`,
 overloaded intent, same-type swapped arguments are
 information-theoretically ambiguous; the honest response is a precise
 "annotate here" error, not a guess.
@@ -483,7 +483,7 @@ information-theoretically ambiguous; the honest response is a precise
   levels are multiples of 2; an odd indent or a dedent to a level that is
   not on the indent stack is an error.
 - **Keywords are English** (as in every mainstream language); **names and
-  strings are any language** — Indonesian, Japanese, Arabic, Thai, emoji —
+  strings are any language** - Indonesian, Japanese, Arabic, Thai, emoji -
   same as v0.
 - **One statement per line** for declarations and statements; expressions
   may span lines only inside brackets (`[...]`, `{...}`, `(...)`).
@@ -492,31 +492,31 @@ information-theoretically ambiguous; the honest response is a precise
 - **String literals:** double-quoted only. Escapes: `\"`, `\\`, `\n`, `\t`,
   `\r`, `\u{XXXX}` (Unicode code point, hex, 1–6 digits). Any other escape
   is an error naming the escape. A string may not span lines (a newline
-  inside a string literal is an error — use `\n`).
-- **Interpolation:** `"Hello {expr}"` — any expression inside `{...}` (§9.3).
+  inside a string literal is an error - use `\n`).
+- **Interpolation:** `"Hello {expr}"` - any expression inside `{...}` (§9.3).
   `{{` and `}}` escape to literal `{` and `}`. An unclosed `{` is an error;
   a stray `}` is an error. (v0's `{user}` placeholders are the same
   mechanism: `user` is a binding in scope, interpolated like any other
-  expression — §13.4.)
-- **Number literals:** decimal ints (`42`, `1_000` — underscores group
+  expression - §13.4.)
+- **Number literals:** decimal ints (`42`, `1_000` - underscores group
   digits and are ignored), hex (`0xFF`), binary (`0b1010`), floats
   (`3.14`, `1e3`, `1.5e-2`). A leading `0x`/`0b` with an invalid digit is
   an error. `int` is a 64-bit signed integer on every target (balances are
   `int`); a literal outside that range is a build error.
 - **Duration literals:** a positive integer immediately followed by `s`
-  (seconds), `m` (minutes), `h` (hours), or `d` (days) — `60s`, `5m`,
+  (seconds), `m` (minutes), `h` (hours), or `d` (days) - `60s`, `5m`,
   `1h`, `1d`. Used by `task every ...` and component `timeout:`.
-- **Identifiers:** Unicode letters (any script — Latin, Thai, Devanagari,
-  Arabic, …), combining marks, digits (not first), and `_` — the lexer
+- **Identifiers:** Unicode letters (any script - Latin, Thai, Devanagari,
+  Arabic, …), combining marks, digits (not first), and `_` - the lexer
   decides by Unicode category (L/M/N), mirroring v0's Unicode-correct
   command names. Keywords are reserved and may not be used as identifiers
   (full list in §6.1). An identifier that starts with a digit is an error.
 - **Comments:** `#` to end of line. There is no block comment in v1
-  (documented; add one only if demanded — a block comment is a lexer
+  (documented; add one only if demanded - a block comment is a lexer
   feature, not a language feature). There is also **no doc-comment
   syntax in v1** (no `///`, no `DocComment` token): a `#` comment
   above a declaration is an ordinary comment, never carried into
-  emitted code as a docstring — the emitter's "doc comments →
+  emitted code as a docstring - the emitter's "doc comments →
   docstrings" mapping is vacuous until the doc-comment syntax is
   frozen (M6, §24 idea 14).
 
@@ -538,7 +538,7 @@ its own position is a build error naming the collision.)
 
 ## 7. Types
 
-### 7.1 Type table (frozen at M0 — anything not here waits for v1.1)
+### 7.1 Type table (frozen at M0 - anything not here waits for v1.1)
 
 | Type | Meaning |
 |---|---|
@@ -549,12 +549,12 @@ its own position is a build error naming the collision.)
 | `list[T]` | Ordered list of `T`. |
 | `dict[str, T]` | String-keyed dictionary of `T`. |
 | `set[T]` | Unordered set of `T` (no duplicates). |
-| `T?` | A value of type `T`, or `none` — the ONE nullability spelling (§7.2). There is no `option[T]` spelling. |
-| `Result[T, E]` | `ok(v)` or `err(e)` — the value form of an error (§10). Exists in v1 as a type, but is NOT the primary error model (exceptions are). |
-| `fn(T1, ...) -> R` | A function type — first-class functions and closures (§9.5). |
+| `T?` | A value of type `T`, or `none` - the ONE nullability spelling (§7.2). There is no `option[T]` spelling. |
+| `Result[T, E]` | `ok(v)` or `err(e)` - the value form of an error (§10). Exists in v1 as a type, but is NOT the primary error model (exceptions are). |
+| `fn(T1, ...) -> R` | A function type - first-class functions and closures (§9.5). |
 | `error` | An error value (a message + an optional code). |
 | `none` | The type of the `none` literal (absence). |
-| `duration` | A duration literal (`60s`, `5m`, `1h`, `1d`) — valid only in `task every ...` and `timeout:` (§6). |
+| `duration` | A duration literal (`60s`, `5m`, `1h`, `1d`) - valid only in `task every ...` and `timeout:` (§6). |
 | `<StructName>` | A user-defined struct type (§8.5). |
 | `<EnumName>` | A user-defined enum type (§8.6). |
 | `user`, `member`, `guild`, `channel`, `role` | Discord entity types (§13.5). Only the fields the language exposes may be read. |
@@ -566,16 +566,16 @@ There is **no `any`**. A type error is a build error with the span.
 
 ### 7.2 Type rules
 
-- **No implicit numeric coercion (G7, DECIDED — Gleam-style).** `1 + 2.5`
+- **No implicit numeric coercion (G7, DECIDED - Gleam-style).** `1 + 2.5`
   is a type error; write `float(1) + 2.5`. `let x: float = 5` is an error;
   write `float(5)` or `5.0`. `1 == 1.0` is a type error (compare like with
-  like — §5.1). Every mismatch is an error naming both types and the span.
+  like - §5.1). Every mismatch is an error naming both types and the span.
   Rationale: removing coercion removes a whole class of cross-target
   drift (each target coerces differently); explicit conversion is one
   function call. `/` on two `int`s is truncating int division; `/` on
   floats is float division (§7.5).
 - **Collections are invariant in their element type:** `list[int]` is not
-  `list[float]`, and `list[int]` is not `list[int?]` — no subtyping in v1.
+  `list[float]`, and `list[int]` is not `list[int?]` - no subtyping in v1.
 - **`T?` (exactly one absent value, G19):** `.is_some() -> bool`,
   `.is_none() -> bool`, `.unwrap() -> T` (throws an error if the value is
   `none`). The `or` operator unwraps with a default: `T? or T -> T`
@@ -586,12 +586,12 @@ There is **no `any`**. A type error is a build error with the span.
 - **Function types:** a function's type is its signature
   `fn(param types) -> return type`. Functions ARE first-class values in
   v1 (§9.5): they can be stored in variables, passed as arguments, and
-  returned. Closures capture **by value** (a snapshot at creation — this
+  returned. Closures capture **by value** (a snapshot at creation - this
   matches value-type semantics and avoids loop-variable capture bugs).
 - **`void`:** there is no `void` type. A function with no `->` return type
   returns `none` (its body must not `return <expr>` with a value).
 
-### 7.3 Entity field access (discord types — the complete list)
+### 7.3 Entity field access (discord types - the complete list)
 
 Anything not listed here is a build error: `user.id`, `user.mention`,
 `user.name`, `user.bot`; `member.id`, `member.mention`, `member.name`,
@@ -600,10 +600,10 @@ Anything not listed here is a build error: `user.id`, `user.mention`,
 `interaction.user`, `interaction.guild`, `interaction.channel`,
 `interaction.locale`; `message.content`, `message.author`, `message.channel`.
 **Deliberately not exposed in v1:** `user.avatar`, `member.roles`,
-`guild.channels`, message history — each needs a fetch and a permission
+`guild.channels`, message history - each needs a fetch and a permission
 story; add them one at a time with their own verification.
 
-### 7.4 Type inference — local / bidirectional, NOT Hindley–Milner, NOT gradual typing
+### 7.4 Type inference - local / bidirectional, NOT Hindley–Milner, NOT gradual typing
 
 newr uses **local / bidirectional inference: annotate function signatures,
 infer locals from initialisers + expected (contextual) type, with a small
@@ -636,7 +636,7 @@ R5.  Empty collection with no expected type → error E2002
      "type annotation needed" (E0282 analogue). With an expected
      list[T] / dict[str,T], the empty literal takes that type.
 R6.  Non-empty list [e1…en]: all ei must have identical type T
-     (synth each, then unify by equality only — no subtyping,
+     (synth each, then unify by equality only - no subtyping,
      no best-common supertype). Result: list[T]. Else E2003.
      Same for dict[str,T]: keys must be str, values identical T.
 R7.  Call: callee's parameter types are the expected types for
@@ -664,11 +664,11 @@ usefulness; borrow/ownership checking; whole-program dead-function
 detection; LSP server; AI features (natural-language explanations, code
 generation, intent guessing).
 
-### 7.5 Number semantics (G2 — frozen at M0; the most dangerous drift vector)
+### 7.5 Number semantics (G2 - frozen at M0; the most dangerous drift vector)
 
 - `int` is a **signed 64-bit integer on every target**. Overflow of any
   `int` operation is a **runtime error** on every target (checked
-  arithmetic is emitted even where the target would wrap or promote —
+  arithmetic is emitted even where the target would wrap or promote -
   e.g. Python's arbitrary precision and JS's f64 must both be constrained
   to the i64 rule).
 - `/` on `int` **truncates toward zero**; `%` takes the **sign of the
@@ -676,7 +676,7 @@ generation, intent guessing).
 - `float` is **IEEE-754 binary64 (f64)** on every target.
 - The conformance corpus (§18.1) MUST test these rules (overflow,
   truncating division, dividend-sign modulo, division by zero) on every
-  target — a target that wraps or promotes silently does not ship.
+  target - a target that wraps or promotes silently does not ship.
 
 ### 7.6 String / Unicode semantics (G8)
 
@@ -687,7 +687,7 @@ generation, intent guessing).
   one code point per element.
 - `dict` iteration is **insertion order**; `set` is **unordered**.
 
-### 7.7 Generics semantic (G11 — decided at M0)
+### 7.7 Generics semantic (G11 - decided at M0)
 
 Built-in generics (`list[T]`, `dict[str, T]`, `set[T]`, `T?`,
 `Result[T, E]`) exist in v1; **user-defined generics are deferred to v2**.
@@ -703,7 +703,7 @@ mapping is documented here, not discovered per emitter.
 
 - Structs (§8.5) and enums (§8.6) are **value types**: copied on
   assignment, `==` is structural value equality, there is no identity
-  (`is` does not exist). `struct` IS newr's value type — there is no
+  (`is` does not exist). `struct` IS newr's value type - there is no
   separate `value` keyword (Valhalla-style semantics, not the JVM
   performance promise: newr promises value *semantics* in v1; flattening
   / zero-allocation is a per-target optimisation, not a language
@@ -716,10 +716,10 @@ mapping is documented here, not discovered per emitter.
 
 A `.newr` file is a **program**. Top-level statements execute in file order;
 declarations (functions, structs, imports, bot blocks) are resolved across
-the whole file (forward references are allowed — the resolver pass handles
+the whole file (forward references are allowed - the resolver pass handles
 them). There is no special `main()` function: top-level executable statements
 *are* the main program. (Emitters wrap them in a `main` for targets that
-require one — Java/C#/Rust — which is the emitter's job, not the language's.)
+require one - Java/C#/Rust - which is the emitter's job, not the language's.)
 
 ### 8.1 Top-level items
 
@@ -732,22 +732,22 @@ require one — Java/C#/Rust — which is the emitter's job, not the language's.
 | Command | `command <name>:` + keys/options/`do:` | §13.2 |
 | Event | `event <kind>:` + `log:`/`reply:`/`do:` | §13.3 |
 | Enum | `enum Name:` + variants | §8.6 |
-| Task | `task every <duration>:` + `do:` | Discord module (§13) — NOT core |
-| Strings | `strings <locale>:` + `"key": "template"` | Discord module (§15) — NOT core |
-| Store | `store <name>:` + `table`/`ledger` | Discord module (§14) — NOT core |
+| Task | `task every <duration>:` + `do:` | Discord module (§13) - NOT core |
+| Strings | `strings <locale>:` + `"key": "template"` | Discord module (§15) - NOT core |
+| Store | `store <name>:` + `table`/`ledger` | Discord module (§14) - NOT core |
 | Statement | any statement (§9) | top-level executable code |
 
 `fn`, `struct`, `enum`, `import`, `bot`, `command`, `event`, `task`,
-`strings`, `store` are top-level only — using one inside a body is an
+`strings`, `store` are top-level only - using one inside a body is an
 error. **Visibility:** declarations are **private by default**; `pub`
 exports them (`pub fn`, `pub struct`, `pub enum`, top-level `pub let` /
 `pub const`). Accessing a non-`pub` name from another module is an error
 (§11).
 
-### 8.2 The `bot` block (discord sugar — §13.1)
+### 8.2 The `bot` block (discord sugar - §13.1)
 
 At most one per file; position is free among top-level items (v0 required it
-first — relaxed in v1; v0 files still satisfy it). Keys: `description:`
+first - relaxed in v1; v0 files still satisfy it). Keys: `description:`
 (optional, lands in the generated header) and `intents:` (optional, §13.6).
 
 ### 8.3 Commands and events
@@ -757,7 +757,7 @@ default = name), `reply:` (sugar for a one-reply `do:` body), `ephemeral:`,
 `option` lines, and/or a `do:` body. `event ready|member_join|member_remove|
 message:` with `log:` / `reply:` sugar or a `do:` body.
 
-### 8.4 Tasks (discord module — scheduled bot work, NOT a general scheduler)
+### 8.4 Tasks (discord module - scheduled bot work, NOT a general scheduler)
 
 `task` is **discord-module surface** (G1): it is the v1 concurrency
 primitive for bots, and general programs have **no built-in scheduler in
@@ -770,7 +770,7 @@ task every 1h:
     log "Hourly shop check ran"
 ```
 
-- `task every <duration>:` — durations only (`5m`, `1h`, `1d`). **No cron
+- `task every <duration>:` - durations only (`5m`, `1h`, `1d`). **No cron
   expressions in v1** (cron syntax is a second language; a `task` with a
   cron schedule is v1.1).
 - The body is a `do:` block. It may use general statements, `store`, and
@@ -778,10 +778,10 @@ task every 1h:
   it may never use interaction replies (`reply`/`defer`/`edit`/`followup`
   are errors in a task body).
 - Emitted as `discord.ext.tasks` (py) / `setInterval` with a drift guard
-  (js) / the target's scheduler for other targets — the emitter's job.
+  (js) / the target's scheduler for other targets - the emitter's job.
 - **Concurrency model (G18):** v1 has **no threads and no shared mutable
   state**. `task` is scheduled work, not concurrency. Value types are safe
-  to share (§7.8); structured concurrency (async/await or actors — the
+  to share (§7.8); structured concurrency (async/await or actors - the
   decision is not yet made) is deferred to v1.1+ with its own design
   document. The thread-safety promise lives here: nothing in v1 can create
   a data race, because nothing in v1 can share mutable state across
@@ -798,15 +798,15 @@ struct Point:
 - A `struct` block declares fields (`name: type`, one per line). Field
   types must be complete types (§7.1); a struct may reference another
   struct declared in the same file or an imported file (no cyclic struct
-  definitions — a cycle is an error).
-- Construction: `Point(x: 1, y: 2)` — named arguments, all fields required,
+  definitions - a cycle is an error).
+- Construction: `Point(x: 1, y: 2)` - named arguments, all fields required,
   no positional construction. Field access: `p.x`.
-- Structs are value types (copied on assignment, like a record — §7.8).
+- Structs are value types (copied on assignment, like a record - §7.8).
   There is no inheritance, no methods on structs in v1 (methods are v1.1).
   **Struct field assignment is an error** (`p.x = 5` → error; construct a
-  new value instead — §7.8).
+  new value instead - §7.8).
 
-### 8.6 Enums (typed, in v1 — G12)
+### 8.6 Enums (typed, in v1 - G12)
 
 ```
 enum Color:
@@ -821,7 +821,7 @@ enum Shape:
 
 - An `enum` block declares variants: bare variants (`Red`) or variants
   with **named associated values** (`Circle(radius: float)`).
-- Construction: `Color.Red`, `Shape.Circle(radius: 1.5)` — the enum name
+- Construction: `Color.Red`, `Shape.Circle(radius: 1.5)` - the enum name
   qualifies the variant. Enum values are value types (§7.8).
 - `match` (§9.6) on an enum is exhaustiveness-checked: every variant must
   be covered or a `_` arm must be present, else a build error.
@@ -839,42 +839,42 @@ enum Shape:
 | `for` | `for name in expr:` + block | Iterates `list[T]`, `set[T]`, `dict[str, T]` (keys), or `range(...)`. |
 | `while` | `while expr:` + block | **INCLUDED in v1.** The v1 design's ban is reversed (see §9.4). |
 | `try` / `catch` / `finally` | `try:` + block, `catch name:` + block, `finally:` + block | §10. |
-| `try` expression | `try <expr>` | §10 — returns `Result[T, error]`; `ok(v)` / `err(e)` build one. |
-| `?` propagation | `let x = expr?` / `return expr?` / `expr?` | §10 — statement-level ONLY; a nested `?` (inside a call or a larger expression) is an error. |
-| `match` | `match expr:` + arms `pattern [if guard]:` + block | §9.6 — statement in v1; the expression form is v1.1. |
-| Contracts | `requires <expr>` / `ensures <expr>` as the first statements of a `fn` body | §9.7 — runtime-only; `result` is bound in `ensures`. |
+| `try` expression | `try <expr>` | §10 - returns `Result[T, error]`; `ok(v)` / `err(e)` build one. |
+| `?` propagation | `let x = expr?` / `return expr?` / `expr?` | §10 - statement-level ONLY; a nested `?` (inside a call or a larger expression) is an error. |
+| `match` | `match expr:` + arms `pattern [if guard]:` + block | §9.6 - statement in v1; the expression form is v1.1. |
+| Contracts | `requires <expr>` / `ensures <expr>` as the first statements of a `fn` body | §9.7 - runtime-only; `result` is bound in `ensures`. |
 | `throw` | `throw expr` | §10. |
 | `return` | `return [expr]` | In `fn` only (a value must match the declared return type; bare `return` returns `none`). |
 | `break` / `continue` | bare | Inside `for`/`while` only. |
 | `pass` | bare | No-op (useful for an intentionally empty body). |
-| `print` | `print(expr, ...)` | §12.1 — a builtin call, written as a statement. |
-| `input` | `let s = input("Name? ")` | §12.1 — a builtin call. |
-| `log` | `log expr` | §12.1 — info level; `log.info/warn/error(msg)` calls also exist. |
+| `print` | `print(expr, ...)` | §12.1 - a builtin call, written as a statement. |
+| `input` | `let s = input("Name? ")` | §12.1 - a builtin call. |
+| `log` | `log expr` | §12.1 - info level; `log.info/warn/error(msg)` calls also exist. |
 | `reply` / `defer` / `edit` / `followup` / `send` | §13.8 | Discord handler statements only. |
 | `button` / `select` / `modal` | §13.9 | Discord component declarations, handler bodies only. |
 | Expression statement | `expr` | A call or any expression, evaluated for its effect. |
 
-### 9.2 Expressions (precedence, loosest → tightest — FROZEN at M0)
+### 9.2 Expressions (precedence, loosest → tightest - FROZEN at M0)
 
 | Level | Operators | Notes |
 |---|---|---|
 | 0 (loosest) | ternary `cond ? a : b` | C-style; `?` is lexed as distinct tokens `?` / `?.` / `??` |
-| 1 | pipeline `\|>` | left-associative; `a \|> f` = `f(a)`; `a \|> f(b, c)` = `f(a, b, c)` — the piped value is the FIRST argument; RHS must be a Name or a Call (Elixir-style, frozen) |
+| 1 | pipeline `\|>` | left-associative; `a \|> f` = `f(a)`; `a \|> f(b, c)` = `f(a, b, c)` - the piped value is the FIRST argument; RHS must be a Name or a Call (Elixir-style, frozen) |
 | 2 | `??` | `a ?? b`: `a` must be `T?`; `b` may be `T` (result `T`), `T?` (result `T?`), or `none` (result `T?`); `??` may not mix with `and`/`or` unparenthesized (parse error) |
 | 3 | `or` | |
 | 4 | `and` | |
-| 5 | comparison `==` `!=` `<` `<=` `>` `>=` `in` | non-associative — `a < b < c` is an error; parenthesize it |
+| 5 | comparison `==` `!=` `<` `<=` `>` `>=` `in` | non-associative - `a < b < c` is an error; parenthesize it |
 | 6 | additive `+` `-` | |
 | 7 | multiplicative `*` `/` `%` | |
 | 8 | power `**` | right-associative |
 | 9 | unary `-x`, `not x` | `-x` binds with operand precedence 6, so `-x ** 2` = `-(x ** 2)`; `not` binds with operand precedence 3, so `not a == b` = `not (a == b)` |
 | 10 (tightest) | postfix `.name`, `[expr]`, `(args)`, `?.` | |
 
-- **Ternary IS in v1** (G12): C-style `cond ? a : b` — the most widely
+- **Ternary IS in v1** (G12): C-style `cond ? a : b` - the most widely
   recognized form. (The pre-research decision to exclude it is reversed;
-  the old reason — Go has no ternary — is not a reason to remove a
+  the old reason - Go has no ternary - is not a reason to remove a
   construct every other target has.)
-- **`?.` / `??` — the swallow rule, settled (G12, the rule Python's PEP
+- **`?.` / `??` - the swallow rule, settled (G12, the rule Python's PEP
   505 could not agree on):** `?.` only short-circuits on `none` (an
   absent value). A missing attribute/field is still a **compile error**
   (fields are statically known). `x?.name` where `x: T?` → the field type
@@ -884,13 +884,13 @@ enum Shape:
   the chain is dead code and almost certainly a typo for `.`. `?[]` is
   NOT in v1 (rare case; `?.` + explicit handling covers it).
 - **String `+` is concatenation; `*` is repetition** (`"ab" * 3` →
-  `"ababab"`). `+` on a `str` and a non-`str` is a type error — use
+  `"ababab"`). `+` on a `str` and a non-`str` is a type error - use
   interpolation or `str(x)`.
 - `in`: `x in list` / `x in dict` (key) / `x in set` / `x in str`
   (substring) → `bool`.
 - Indexing: `list[int]`, `dict[str]`. **String indexing is a compile
-  error** (`s[i]` → use `.chars()` — §7.6). Out-of-range indexing is a
-  runtime error (an `error` value thrown — §10).
+  error** (`s[i]` → use `.chars()` - §7.6). Out-of-range indexing is a
+  runtime error (an `error` value thrown - §10).
 - Calls support positional and named arguments: `f(a, b, key: v)`.
   Named arguments must match the declared parameter names; a duplicate
   argument (positional + named for the same parameter) is an error.
@@ -898,13 +898,13 @@ enum Shape:
 ### 9.3 String interpolation
 
 `"Hello {expr}"` interpolates any expression whose type is `int`, `float`,
-`str`, or `bool` (or `T?` of those — `none` renders as an empty
+`str`, or `bool` (or `T?` of those - `none` renders as an empty
 string? **DECIDED: no.** A `T?` in interpolation is a type error
-with a hint to unwrap it — silently rendering `none` as `""` is exactly
+with a hint to unwrap it - silently rendering `none` as `""` is exactly
 the silent behavior §1.1(4) forbids). Any other type is a build error with
 a hint to convert explicitly (`str(x)`).
 
-### 9.4 `while` and recursion — the bans, reversed, with reasons
+### 9.4 `while` and recursion - the bans, reversed, with reasons
 
 The v1 bot-design banned `while` and recursion because handlers run
 against a 3-second / 15-minute interaction token and an unbounded loop is
@@ -915,7 +915,7 @@ general language**, on the user's order (21:49 WIB 6 Nov 2026):
   general-purpose. The handler-hang risk is real but it is a *runtime*
   concern, not a language concern: a `while` loop in a handler body is
   allowed, and the 3-second token still applies at runtime (the bot answers
-  late or the interaction expires — the same as in the host language). The
+  late or the interaction expires - the same as in the host language). The
   compiler does not bound loops in v1; a loop-bound rule is future work
   (and would be a warning, not a ban).
 - **Recursion is in v1.** All targets support recursion natively. A
@@ -926,7 +926,7 @@ general language**, on the user's order (21:49 WIB 6 Nov 2026):
   targets use their native stack.
 - The old handler-hang concern moves to the **discord checker as a
   WARNING** (G3): an unbounded loop in a handler body warns (the
-  interaction token expires after 15 minutes), but it is not a ban — the
+  interaction token expires after 15 minutes), but it is not a ban - the
   core language does not bound loops.
 - The old reasons are preserved here so the reversal is a decision, not an
   accident.
@@ -948,24 +948,24 @@ fn price_of(item: str) -> int:
 - **Closures / first-class functions ARE in v1 (G4).** Lambda syntax:
   `fn(params) -> type:` + an indented block, or `fn(params) -> type:
   <expr>` (single-expression body). Function types are `fn(T1, ...) -> R`.
-  Closures capture **by value** (a snapshot at creation — §7.2). `fn`
+  Closures capture **by value** (a snapshot at creation - §7.2). `fn`
   declarations are top-level only; nested functions use the lambda form.
   A lambda may be stored in a variable, passed as an argument, or
   returned. (The pre-research "no closures" decision is reversed; the old
-  reason — emitter lowering — is an implementation cost, not a language
+  reason - emitter lowering - is an implementation cost, not a language
   reason, and every target has closures natively.)
 - **Functions are pure-ish:** they may read `store` and call other
-  functions, but they may not send replies (only handler bodies reply —
+  functions, but they may not send replies (only handler bodies reply -
   the checker enforces this). A function may `throw` (§10).
 - Parameter names must not shadow the reserved handler bindings (`user`,
-  `guild`, `channel`, `bot`, `interaction`, `message`) — those names are
+  `guild`, `channel`, `bot`, `interaction`, `message`) - those names are
   reserved in handler scope; a function parameter with one of those names
   is an error only if the function is called from a handler... **DECIDED
   simply: those names are reserved as parameter names everywhere** (a
   parameter named `user` is an error, with a hint to rename it). Simple
   beats clever.
 
-### 9.6 `match` — statement in v1 (G12)
+### 9.6 `match` - statement in v1 (G12)
 
 ```
 match shape:
@@ -984,11 +984,11 @@ match shape:
 - **Exhaustiveness:** an enum scrutinee missing variants without a `_`
   arm is an **error**; a non-enum scrutinee without a `_` arm is an
   **error**. (v1 does set-comparison only; full usefulness checking is
-  v2 — §7.4 deferred table.)
+  v2 - §7.4 deferred table.)
 - The expression form of `match` is v1.1; in v1 `match` is a statement
   (assign inside the arms instead).
 
-### 9.7 Contracts — `requires` / `ensures`, runtime-only (G12)
+### 9.7 Contracts - `requires` / `ensures`, runtime-only (G12)
 
 ```
 fn withdraw(balance: int, amount: int) -> int:
@@ -1003,18 +1003,18 @@ fn withdraw(balance: int, amount: int) -> int:
   statements). `result` is bound in `ensures` (the return value).
 - Violations **throw**. Contracts are **always evaluated in v1** (no
   debug/release split, no violation-handler / continuation-mode /
-  "assume" semantics — that semantic swamp is what sank C++ contracts).
+  "assume" semantics - that semantic swamp is what sank C++ contracts).
 - The hard part is only defining when checks run; the cross-target
   lowering is trivial (Python `assert`, TS `assert`, Java explicit
   `if throw`, C# `ArgumentException`, Rust `assert!`, Kotlin
   `require`/`check`, Dart `assert`).
 
-## 10. Error handling — unchecked exceptions (primary) + `Result` (value form) (DECIDED, G5)
+## 10. Error handling - unchecked exceptions (primary) + `Result` (value form) (DECIDED, G5)
 
 **Decision: `try` / `catch` / `finally` with `throw` is the primary error
 model (unchecked exceptions).** `Result[T, E]` exists in v1 as a *value*
 form for code that wants to handle errors as values, with a `try`
-expression and a statement-level `?` — but pervasive `Result` is v2, not
+expression and a statement-level `?` - but pervasive `Result` is v2, not
 the primary model.
 
 ```
@@ -1041,7 +1041,7 @@ finally:
   M5** (the Rust emitter proves it); the spec records the approach, not the
   code.
 
-**Rules — statements:**
+**Rules - statements:**
 
 - `try:` takes a block. `catch <name>:` takes a block; the name binds the
   caught `error` value in that block. `finally:` takes a block. At least
@@ -1053,7 +1053,7 @@ finally:
 - **Builtins that fail throw** (they do not return sentinel values):
   `file.read` of a missing file, `file.write` to an unwritable path,
   `input` on a closed stream. `economy.debit` on insufficient funds is the
-  **one exception** — it returns `bool` (§14), because the v1 design's
+  **one exception** - it returns `bool` (§14), because the v1 design's
   rule ("the error is a value the handler branches on") is kept for
   economy: a failed debit is a normal branch, not an exceptional one.
   Indexing out of range throws. `T?.unwrap()` on `none` throws. Division
@@ -1061,7 +1061,7 @@ finally:
 - An uncaught error in a command handler is answered by the generated
   error handler with the generic message (v0 behavior, kept).
 
-**Rules — the value form (G5):**
+**Rules - the value form (G5):**
 
 - `try <expr>` (single-expression form) returns `Result[T, error]`:
   it Ok-wraps the expression's value, and catches a thrown error into
@@ -1073,31 +1073,31 @@ finally:
 - `Result[T, E]` methods (minimal, v1): `.is_ok() -> bool`,
   `.is_err() -> bool`, `.unwrap() -> T` (throws on `err`),
   `.unwrap_or(default: T) -> T`.
-- **Statement-level `?` only** — the Go-blog lesson, learned in advance:
+- **Statement-level `?` only** - the Go-blog lesson, learned in advance:
   `expr?` where `expr` is `Result[T, E]` or `T?`: on `Err`/`none`, return
   early from the enclosing function (the function's return type must be
   compatible: `Result[?, E]` or `?`); on `Ok`/`Some`, unwrap to `T`. `?`
   may ONLY appear as the **outermost postfix of a statement's RHS**
-  (`let`/`const`/assign/expr-statement/`return`) — the parser enforces
+  (`let`/`const`/assign/expr-statement/`return`) - the parser enforces
   this (`parse_expr` never handles `?`; statement parsers check for a
   trailing `?` and wrap in a `Propagate` node). A nested `?` (e.g.
   `f(g()?)`, `f()? + 1`) is an **error**: a `?` hidden inside a nested
   expression hides an early return from view, and hidden control flow is
   exactly what §1.1(4) forbids.
 - `Result` as the **primary** error model (pervasive `Result`, no
-  exceptions) is v2 — not v1.
+  exceptions) is v2 - not v1.
 
 ## 11. Modules and imports
 
-- `import "path.newr"` — a file module, resolved at build time from a path
+- `import "path.newr"` - a file module, resolved at build time from a path
   **relative to the importing file**. It binds the module under its **file
   stem**: `import "shop_items.newr"` binds `shop_items`, and its names
   are accessed **qualified**: `shop_items.price_of(...)`. There is no
-  merged namespace (the pre-research merged namespace is replaced — it
+  merged namespace (the pre-research merged namespace is replaced - it
   made name collisions silent and cross-module reasoning impossible).
-- `import "path.newr" as <name>` — an explicit alias for the bound name.
-- `import <name>` — a named module: a stdlib module (`math`, `time`,
-  `random`, `file`, `env` — §12) or a domain module (`discord` — §13).
+- `import "path.newr" as <name>` - an explicit alias for the bound name.
+- `import <name>` - a named module: a stdlib module (`math`, `time`,
+  `random`, `file`, `env` - §12) or a domain module (`discord` - §13).
   Named modules are resolved by the compiler, not by the filesystem.
 - **Visibility (G9):** declarations are **private by default**. `pub`
   exports them (`pub fn`, `pub struct`, `pub enum`, top-level `pub let` /
@@ -1110,7 +1110,7 @@ finally:
 - **No cycles.** An import cycle is an error naming the cycle chain
   (`a.newr -> b.newr -> a.newr`).
 - **Duplicate top-level names are errors** (within one module; the same
-  name in two different modules is fine — that is what qualified access
+  name in two different modules is fine - that is what qualified access
   is for).
 - **No wildcards** (`import *` does not exist).
 - An imported file must itself be a valid v1 program. There is no package
@@ -1118,12 +1118,12 @@ finally:
   install` for shared modules).
 - Imported files are compiled with the importing file (one program, one
   build). The cache (§4.1) tracks the import graph.
-- **Manifest (`newr.json`) — DRAFT schema, compiler support in M4:**
-  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str }` — `name` and
+- **Manifest (`newr.json`) - DRAFT schema, compiler support in M4:**
+  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str }` - `name` and
   `version` are required; `target`, `default_locale`, and `db_path`
-  are optional. (Secrets NEVER go in it — the token stays in `.env`.)
+  are optional. (Secrets NEVER go in it - the token stays in `.env`.)
   The schema is a draft until M4 decides it (the M4/M6 decision in
-  §25 records the same deferral); v1 resolution needs no manifest —
+  §25 records the same deferral); v1 resolution needs no manifest -
   relative paths only. `newr init` (M4) scaffolds it. (Recorded as "G9
   partially applied; manifest deferred to M4 with reason" in
   BUILD_REPORT.md.)
@@ -1151,12 +1151,12 @@ on all shipped targets.
 | `abs` | `abs(x) -> T` | Numbers. |
 | `round` | `round(x) -> int` / `round(x, n: int) -> float` | |
 | `range` | `range(n) -> list[int]` / `range(a, b) -> list[int]` / `range(a, b, step) -> list[int]` | Half-open `[a, b)`. |
-| `ok` / `err` | `ok(v) -> Result[T, error]` / `err(e) -> Result[T, error]` | §10 — build a `Result` value. |
+| `ok` / `err` | `ok(v) -> Result[T, error]` / `err(e) -> Result[T, error]` | §10 - build a `Result` value. |
 | `log` | `log expr` (statement) / `log.info/warn/error(msg)` | Goes to the program's logger. |
 
 ### 12.2 Core modules (import by name)
 
-Named modules are available **by name without an import** — `math.sqrt(2)`
+Named modules are available **by name without an import** - `math.sqrt(2)`
 works with no `import` line. Writing `import math` is still allowed (and
 is the documented style when a file leans on a module heavily); it changes
 nothing about what is checked. The one exception is `discord`, which is
@@ -1165,7 +1165,7 @@ imported implicitly by bot blocks (§13.1) and is not core-checked (§2.1).
 | Module | Members | Notes |
 |---|---|---|
 | `math` | `sqrt(x) -> float`, `floor(x) -> int`, `ceil(x) -> int`, `pi -> float`, `e -> float` | `pi`/`e` are constants, not functions. |
-| `time` | `now() -> int` (unix seconds), `format(ts: int, fmt: str) -> str` | `fmt` is a small fixed set (`"%Y-%m-%d"`, `"%H:%M"`, `"%Y-%m-%d %H:%M"`, `"%d/%m/%Y"`, `"%H:%M:%S"` — not `strftime`, which is a footgun across locales). |
+| `time` | `now() -> int` (unix seconds), `format(ts: int, fmt: str) -> str` | `fmt` is a small fixed set (`"%Y-%m-%d"`, `"%H:%M"`, `"%Y-%m-%d %H:%M"`, `"%d/%m/%Y"`, `"%H:%M:%S"` - not `strftime`, which is a footgun across locales). |
 | `random` | `int(a: int, b: int) -> int`, `choice(list) -> T`, `shuffle(list)` | Seeded by the runtime, not user-seedable in v1. |
 | `file` | `read(path: str) -> str`, `write(path: str, content: str)`, `append(path: str, content: str)`, `exists(path: str) -> bool` | Text files, UTF-8 (§3.4). `read`/`write` throw on failure (§10). Paths use `/` (§3.2). |
 | `env` | `get(name: str) -> str?`, `get(name: str, default: str) -> str`, `args -> list[str]` | The only env access (§3.4). `env.args` is the command-line arguments **including the program name at index 0** (the Python/Go/Rust/Node convention). |
@@ -1173,14 +1173,14 @@ imported implicitly by bot blocks (§13.1) and is not core-checked (§2.1).
 **`json` is v1.1, not v1.** `json.parse` cannot be typed honestly without
 an `any` type (the spec has none, §7.1), and typing it as
 `dict[str, str]` would be a lie. It arrives with a typed JSON value (or
-with `any`, if a later spec amendment adds one) — documented, not
+with `any`, if a later spec amendment adds one) - documented, not
 forgotten.
 
 ### 12.3 I/O scope for v1 (DECIDED)
 
 - **In v1:** `print`, `input`, `file.read/write/append/exists`, `env.get`,
   `env.args`.
-- **NOT in v1 — HTTP `fetch`.** Reasons: it needs timeouts, secret handling,
+- **NOT in v1 - HTTP `fetch`.** Reasons: it needs timeouts, secret handling,
   and an allowlist (a language that can phone home to arbitrary URLs is a
   security review, not a builtin); and every target needs an HTTP client
   dependency with different semantics. **Deferred to v1.1 with a dated
@@ -1188,19 +1188,19 @@ forgotten.
   allowlist of hosts declared in `newr.json`, secrets never in source
   (env vars only), and a single response type (`str` body + status code).
   Programs that need HTTP in v1 use the host language.
-- **NOT in v1 — subprocess/shell, `eval`, crypto builtins, regex.**
+- **NOT in v1 - subprocess/shell, `eval`, crypto builtins, regex.**
   Subprocess: §3.4 (portability). `eval`: never (it defeats the compiler).
-  Crypto: a program should never hand-roll hashing/signing — the host
+  Crypto: a program should never hand-roll hashing/signing - the host
   language's vetted libraries own it. Regex: the classic injection/DoS
   vector in a bot language; revisit with a timeout.
 - **No file I/O in the *bot* sense:** a bot's only durable state is
-  `store` (§14) — file I/O is for general programs, not for bot state.
+  `store` (§14) - file I/O is for general programs, not for bot state.
 
 ### 12.4 String / list / dict / set methods (on values)
 
 | Type | Methods |
 |---|---|
-| `str` | `upper() -> str`, `lower() -> str`, `strip() -> str`, `split(sep: str) -> list[str]`, `join(list[str]) -> str`, `contains(s: str) -> bool`, `starts_with(s: str) -> bool`, `ends_with(s: str) -> bool`, `chars() -> list[str]` (one Unicode code point per element — §7.6) |
+| `str` | `upper() -> str`, `lower() -> str`, `strip() -> str`, `split(sep: str) -> list[str]`, `join(list[str]) -> str`, `contains(s: str) -> bool`, `starts_with(s: str) -> bool`, `ends_with(s: str) -> bool`, `chars() -> list[str]` (one Unicode code point per element - §7.6) |
 | `list[T]` | `append(x: T)`, `contains(x: T) -> bool`, `len() -> int` (also `len(x)`), `get(i: int, default: T) -> T` |
 | `dict[str, T]` | `keys() -> list[str]`, `get(k: str, default: T) -> T`, `contains(k: str) -> bool` |
 | `set[T]` | `add(x: T)`, `remove(x: T)`, `contains(x: T) -> bool` |
@@ -1210,7 +1210,7 @@ forgotten.
 `set` construction: `set([1, 2])` (a builtin call on a list). There is no
 set-literal syntax in v1 (keeps `{...}` unambiguous for dict literals).
 
-## 13. The `discord` module — one domain module
+## 13. The `discord` module - one domain module
 
 Everything in this section is **discord-module surface, not core language**.
 It lives behind `import discord` and the stability contract (§2.1): if
@@ -1227,22 +1227,22 @@ Discord changes, only this section's tables and checker change.
 - Using a bot block **implicitly imports the discord module** (the compiler
   records an implicit import; the user does not have to write it). Writing
   `import discord` explicitly alongside bot blocks is allowed and
-  recommended for clarity — it is the same single import, not a duplicate.
+  recommended for clarity - it is the same single import, not a duplicate.
 - The general-language way to build a bot is exactly this: `import discord`
   (explicit or implicit) + bot declarations. There is no separate "bot
-  language" — the bot syntax is the discord module's declaration syntax.
+  language" - the bot syntax is the discord module's declaration syntax.
 - **Migration path:** there is no migration. v0 files are valid v1 files
   with no changes (§13.10). A future version may add an explicit
   `discord.bot(...)` API; v1 does not need it.
 
 ### 13.2 Commands
 
-- **Kept from v0:** `command <name>:` (Discord name rule, unchanged —
+- **Kept from v0:** `command <name>:` (Discord name rule, unchanged -
   §13.2.1), `description:` (≤ 100, default = name), `reply:` (fixed string
-  — sugar for a `do:` body containing one reply), `ephemeral:` on a reply.
+  - sugar for a `do:` body containing one reply), `ephemeral:` on a reply.
 - **Options.** `option <name>: <type>` with `(required | default: <lit>,
   choices: [...], min: n, max: n, description: "...")`. Types: `str`,
-  `int`, `num` (float — the Discord name for a float option), `bool`,
+  `int`, `num` (float - the Discord name for a float option), `bool`,
   `user`, `member`, `channel`, `role`. Limits enforced at build time:
   ≤ 25 options per command, name 1–32 chars, description ≤ 100,
   `choices` ≤ 25, `min`/`max` only on numeric options (`int`/`num`),
@@ -1254,7 +1254,7 @@ Discord changes, only this section's tables and checker change.
   branch ends in `reply`/`defer`/`edit`/`followup`, or the build fails with
   "command buy may not answer on some path"). This is the compile-time form
   of the 3-second rule.
-- A command must have either `reply:` or `do:` — not both, not neither.
+- A command must have either `reply:` or `do:` - not both, not neither.
 - **Subcommands are v1.1, not v1.** The grammar reserves
   `command <name> <sub>:` but the compiler rejects it in v1 with
   "subcommands arrive in v1.1". Stating this now prevents a half-baked
@@ -1266,9 +1266,9 @@ Command names follow Discord's rule: `^[-_\u02BC\p{L}\p{N}\p{sc=Deva}
 \p{sc=Thai}]{1,32}$` with the unicode flag, **lowercase where a lowercase
 variant exists**. The reference implementation mirrors discord.py's stdlib
 translation (Thai/Devanagari combining marks listed by hand, U+02BC added
-explicitly) — the exact regex is in `compiler/discord_limits.py`, ported
+explicitly) - the exact regex is in `compiler/discord_limits.py`, ported
 from the v0 compiler (`_NEWR_COMMAND_NAME`). An uppercase letter is an
-error (with a `fix` to lowercase it — §5.1).
+error (with a `fix` to lowercase it - §5.1).
 
 **Fn-name collision (v0 rule, kept):** `foo-bar` and `foo_bar` both
 sanitize to `cmd_foo_bar`, so the parser rejects the pair instead of
@@ -1280,7 +1280,7 @@ letting one handler shadow the other.
   Each event kind at most once per file (a duplicate is an error).
 - Each event block has a `do:` body, or the v0 sugar: `log:` for `ready`,
   `reply:` for `member_join`/`member_remove`. `message` requires `do:`
-  (it receives the `message` binding and must answer via `send` — it
+  (it receives the `message` binding and must answer via `send` - it
   cannot use interaction replies; the checker enforces this).
 - `ready` with `reply:` is an error (ready cannot reply);
   `member_join`/`member_remove` with `log:` is an error.
@@ -1295,14 +1295,14 @@ bindings** in their contexts, so every v0 file still compiles:
 | Binding | Context | Type | Notes |
 |---|---|---|---|
 | `user` | command / member_join / member_remove / message (as `message.author`) | `user` (command) / `member` (member events) | In a command, `user` is the interaction user; in member events, the joining/leaving member. |
-| `guild` | command / member_join / member_remove | `guild` | May be absent in a DM — the emitter generates the DM-safe fallback (`interaction.guild.name if interaction.guild else 'DM'` in py; `interaction.guild?.name ?? 'DM'` in js). Entity field access on `guild` is total by this emitter contract (M2 must prove it with the golden files). |
+| `guild` | command / member_join / member_remove | `guild` | May be absent in a DM - the emitter generates the DM-safe fallback (`interaction.guild.name if interaction.guild else 'DM'` in py; `interaction.guild?.name ?? 'DM'` in js). Entity field access on `guild` is total by this emitter contract (M2 must prove it with the golden files). |
 | `channel` | command only | `channel` | |
 | `bot` | ready log only | `user` | The bot's own user. |
 
 A placeholder used outside its context is an error naming the allowed
 contexts (v0 rule, kept). In the general language this is expressed as:
 the binding is simply not in scope outside its context, and the diagnostic
-says so ("`{channel}` is not available in a member_join handler — it is
+says so ("`{channel}` is not available in a member_join handler - it is
 only available in command handlers").
 
 Exposed entity fields: §7.3.
@@ -1312,7 +1312,7 @@ Exposed entity fields: §7.3.
 `user`, `guild`, `channel`, `bot`, `interaction` (command/component
 handlers), `message` (message events), `values: list[str]` (select
 handlers), modal field values (modal handlers, bound by field name).
-These names are reserved — a user variable may not shadow them in handler
+These names are reserved - a user variable may not shadow them in handler
 scope (§9.5).
 
 ### 13.6 Intents (explicit, derived, validated)
@@ -1325,7 +1325,7 @@ scope (§9.5).
   (v0 derivation, kept).
 - Declaring a privileged intent (`members`, `message_content`, `presences`)
   triggers a **warning** naming the 10,000-user rule (Discord requires
-  verification/approval for privileged intents in bots in 10,000+ servers —
+  verification/approval for privileged intents in bots in 10,000+ servers -
   the threshold is a Discord-platform rule, not a library rule).
 - The generated code declares exactly the computed set in every backend.
   No intent is ever silently on.
@@ -1348,13 +1348,13 @@ let card: embed = embed:
   ≤ 4096, fields ≤ 25, field name ≤ 256, field value ≤ 1024, total
   ≤ 6000 characters, color 0–16777215.
 - `reply <embed-expr>` replies with the embed. `reply` accepts `str` or
-  `embed` (or a list of embeds — **v1.1**; one embed per reply in v1).
+  `embed` (or a list of embeds - **v1.1**; one embed per reply in v1).
 
 ### 13.8 Handler statements
 
 | Statement | Form | Context |
 |---|---|---|
-| `reply` | `reply <expr>` / `reply <expr> ephemeral` | Command/component handlers. `<expr>` is `str` or `embed`. Length ≤ 2000 enforced with placeholders at max expansion (user 22, guild 100, channel 22 — v0 rule, kept). |
+| `reply` | `reply <expr>` / `reply <expr> ephemeral` | Command/component handlers. `<expr>` is `str` or `embed`. Length ≤ 2000 enforced with placeholders at max expansion (user 22, guild 100, channel 22 - v0 rule, kept). |
 | `defer` | `defer` | Command/component handlers. Shows "thinking", buys 15 min. |
 | `edit` | `edit <expr>` | After a `defer` (edits the deferred reply). |
 | `followup` | `followup <expr>` | After a reply/defer (a second message). |
@@ -1365,7 +1365,7 @@ let card: embed = embed:
 body is a build error. `send` outside a `message` handler or a task body
 is a build error. **Handler-hang warning (G3):** an unbounded loop in a
 handler body is a warning (the interaction token expires after 15
-minutes) — a warning, not a ban; the core language does not bound loops
+minutes) - a warning, not a ban; the core language does not bound loops
 (§9.4).
 
 ### 13.9 Components (inside handler bodies)
@@ -1392,7 +1392,7 @@ button "Buy again" (style: primary, id: "buy-again", timeout: 60s):
   (bound by field name, type `str`).
 - Limits enforced at build time: customId ≤ 100 chars, ≤ 5 action rows
   per message, ≤ 5 components per modal, **a timeout is required on every
-  collector** (no collector without a timeout — the v0 skill's own rule).
+  collector** (no collector without a timeout - the v0 skill's own rule).
   `only:` defaults to `author` when omitted.
 
 ### 13.10 v0 compatibility (DECIDED)
@@ -1407,21 +1407,21 @@ button "Buy again" (style: primary, id: "buy-again", timeout: 60s):
   expansion (user 22, guild 100, channel 22); `ephemeral` default false;
   placeholder contexts; fn-name collision rejection; similar-name
   suggestions in the rustc named form (the v0 "did you mean" wording is
-  deliberately changed — verdicts identical); never silently ignore a
+  deliberately changed - verdicts identical); never silently ignore a
   line.
 - **Relaxed in v1 (documented, not silent):** the bot block no longer has
   to be first (position free, at most one); top-level statements and other
   declarations may appear in the same file as bot blocks; `event
   member_remove` and `event message` are new kinds.
 - **Generated Python for the v0 examples must stay byte-identical** to the
-  v0 golden files (`examples/hello.py`, `examples/showcase.py`) — that is
+  v0 golden files (`examples/hello.py`, `examples/showcase.py`) - that is
   an **M2** exit criterion (there is no emitter in M1, so M1 cannot prove
   it; M1 proves the front-end verdicts match: both examples parse + check
   cleanly, and every invalid v0 file still fails with the same verdict).
   If M2 changes any byte, the change is recorded with its reason in
   BUILD_REPORT.md. Never silently change output.
 
-## 14. Store and economy (discord module — NOT core)
+## 14. Store and economy (discord module - NOT core)
 
 `store` is **discord-module surface** (G1), not a core-language feature:
 it is durable state for bots (balances, ledgers, idempotency keys). A
@@ -1438,23 +1438,23 @@ store economy:
 - `store <name>:` declares SQLite-backed tables: `table <name>
   (<col>: <type>, ...)` plus `ledger true/false`. The **first column is the
   key column**. A table's row type is named after the table (a `balances`
-  row has fields `user: str, balance: int` — a struct-like type the checker
+  row has fields `user: str, balance: int` - a struct-like type the checker
   knows).
 - **Builtins (complete v1 list):**
-  - `economy.balance(user) -> int` — requires a `balances` table with
+  - `economy.balance(user) -> int` - requires a `balances` table with
     columns `(user: str, balance: int)`; the checker verifies the shape.
-  - `economy.credit(user, delta, key: str)` — add `delta` (may be negative).
-  - `economy.debit(user, delta, key: str) -> bool` — subtract `delta`;
-    returns `false` (not an exception) on insufficient funds — the error
+  - `economy.credit(user, delta, key: str)` - add `delta` (may be negative).
+  - `economy.debit(user, delta, key: str) -> bool` - subtract `delta`;
+    returns `false` (not an exception) on insufficient funds - the error
     is a value the handler branches on (§10).
-  - `economy.transfer(from, to, amount, key: str) -> bool` — atomic
+  - `economy.transfer(from, to, amount, key: str) -> bool` - atomic
     transfer; `false` on insufficient funds.
-  - `store.get(table, key) -> RowType?` — `table` is a string
+  - `store.get(table, key) -> RowType?` - `table` is a string
     literal naming a declared table; `key` matches the key column's type.
-  - `store.set(table, row)` — `row` is the table's row type.
+  - `store.set(table, row)` - `row` is the table's row type.
   - `store.delete(table, key)`.
 - **In this list, `store` stands for the declared store's name**: the
-  call is `economy.get(...)` for a store declared `store economy:` —
+  call is `economy.get(...)` for a store declared `store economy:` -
   there is no bare `store` qualifier (a fixed namespace could not
   address two stores with same-named tables). The same applies to
   `economy.balance/credit/debit/transfer` above. (Clarified 6 Nov 2026
@@ -1468,7 +1468,7 @@ store economy:
   run; changing a `table` declaration after data exists is a build warning
   telling the user to migrate by hand. Real migrations are v1.1.
 
-## 15. i18n — `strings` blocks and `t()` (discord module — NOT core)
+## 15. i18n - `strings` blocks and `t()` (discord module - NOT core)
 
 `strings` + `t()` are **discord-module surface** (G1): they localize bot
 replies per interaction locale. A general `i18n` module for non-bot
@@ -1486,22 +1486,22 @@ strings id:
 - `strings <locale>:` blocks hold `"key": "template"` pairs. Locales are
   BCP 47 tags (`en`, `id`, `en-US`); the compiler validates that **every
   locale defines the same key set** (a missing key is a build error naming
-  the locale and the key — no silent fallback to English at runtime; the
+  the locale and the key - no silent fallback to English at runtime; the
   fallback is decided at build time).
 - `t("key", name: expr, ...)` resolves the template for the **interaction's
   locale** (in a bot) or the program's default locale (in a general
   program), interpolating the named arguments. Placeholders inside
   templates are checked like any other interpolation: each `{name}` in the
   template must be either a `t()` argument name or a handler binding in
-  scope at the `t()` call site — an unknown `{name}` is a build error.
-- Registration-time localization of command *names* is v1.1 — command
+  scope at the `t()` call site - an unknown `{name}` is a build error.
+- Registration-time localization of command *names* is v1.1 - command
   names stay single-locale in v1; only *replies* are localized.
 - The (locale, key) cache rule is enforced by construction in generated
   code (per-interaction lookup, never a key-only cache).
 
-## 16. Diagnostics — rustc form, Elm tone (G10)
+## 16. Diagnostics - rustc form, Elm tone (G10)
 
-One error type, one format, everywhere — modelled on rustc's data model
+One error type, one format, everywhere - modelled on rustc's data model
 with Elm's tone:
 
 ```
@@ -1515,24 +1515,24 @@ error[E2001]: mismatched types
    = note: `x` was declared as `int` here (file.newr:12:9)
 ```
 
-Required fields for every diagnostic: `code` (stable — `E1xxx` syntax,
+Required fields for every diagnostic: `code` (stable - `E1xxx` syntax,
 `E2xxx` types, `E3xxx` resolver, `W1xxx` warnings; every code documented
 in an error-index file; `newr --explain E2001` prints the long form);
 `severity` (`error` | `warning` | `note` | `help`); `span` (**byte
-offsets** — `Span(file, start_byte, end_byte)`; line/col are derived at
-render time via a `line_col(source, byte_offset)` helper — §4.3 of the
+offsets** - `Span(file, start_byte, end_byte)`; line/col are derived at
+render time via a `line_col(source, byte_offset)` helper - §4.3 of the
 research); `expected` / `found` in user terms, never internal
 type-variable names; `help` (optional, one concrete edit); `suggestion`
-(optional: `{span, replacement, applicability: "certain" | "maybe"}` —
+(optional: `{span, replacement, applicability: "certain" | "maybe"}` -
 only `"certain"` suggestions may ever be auto-applied by a future
 `--fix` / LSP code action); `--error-format=json` (one JSON object per
 diagnostic, same fields, for editor/LSP consumption).
 **Recovery rule: at most one error per function body per compile**
 (report the first, skip the rest of that body); warnings are
-independent. Recovery is a CHECKER/RESOLVER rule only — the PARSER has
+independent. Recovery is a CHECKER/RESOLVER rule only - the PARSER has
 no recovery: it stops at the first syntax error. (An earlier draft of
 this section said "panic-mode + statement-boundary synchronisation";
-that was wrong — the M1 parser aborts on the first syntax error, and
+that was wrong - the M1 parser aborts on the first syntax error, and
 the code agrees.)
 
 The full code scheme is 38 codes: 29 numbered (`E1xxx` syntax,
@@ -1566,7 +1566,7 @@ any of them. The numbered codes:
 
 Similar-name suggestions use the rustc **named** form ("there is a
 variable with a similar name: `count`"), never the folk "did you mean"
-wording — the rustc style guide discourages it, and the v0 wording is
+wording - the rustc style guide discourages it, and the v0 wording is
 deliberately changed (verdicts identical). The similarity gate is
 documented and tested, not claimed as "standard": difflib ratio ≥ 0.7.
 The v0 gate was 0.6, but 0.6 admits false positives once builtins join
@@ -1587,15 +1587,15 @@ source text (.newr)
   → lexer            tokens with byte-offset spans; UTF-8; # comments; 2-space indent tokens (INDENT/DEDENT); CRLF normalized
   → parser           recursive descent + Pratt expressions → AST (typed nodes, every node carries a byte-offset Span)
   → resolver         scopes, imports (cycle check), duplicate top-level names, reserved bindings, `pub` visibility
-  → checker (core)   types, inference (R1–R11), general limits — NEVER imports discord_*
+  → checker (core)   types, inference (R1–R11), general limits - NEVER imports discord_*
   → checker (discord) discord declarations, limits, placeholders, intents, "every path answers",
                      store/economy rules, strings/`t()` validation, task rules, handler-hang warning,
-                     idempotency keys on store mutations in handlers — only runs if discord is used
+                     idempotency keys on store mutations in handlers - only runs if discord is used
   → emitter (py | js | java | csharp | rust | kotlin | dart | …)   AST → target source (M2+)
   → verifier         per target, native toolchain (compile() / tsc --noEmit / gradle build / dotnet build / cargo check / dart analyze / …)
 ```
 
-### 17.2 AST (node list — the v1 set)
+### 17.2 AST (node list - the v1 set)
 
 `Program` · `BotDecl` · `Import` · `StringsDecl` · `StoreDecl` ·
 `FnDecl` · `StructDecl` · `EnumDecl` (with `EnumVariant`) ·
@@ -1608,13 +1608,13 @@ enum-variant, struct, list, or-pattern), `Require`, `Ensure`, `Reply`,
 `Lit`, `Name`, `BinOp`, `UnaryOp`, `Ternary`, `Call`, `Member`, `Index`,
 `Interp`, `TCall`, `ListLit`, `DictLit`, `EmbedExpr`, `Lambda`,
 `TryExpr`, `Propagate` (statement-level `?`). Declarations carry a
-`pub` flag. Every node carries `Span(file, start_byte, end_byte)` —
+`pub` flag. Every node carries `Span(file, start_byte, end_byte)` -
 byte offsets, not line/col (§16).
 
 ### 17.3 Distribution and CI
 
 - **Source layout:** the compiler is a real package in the repo
-  (`compiler/` — `lexer.py`, `parser.py`, `ast_nodes.py`, `resolver.py`,
+  (`compiler/` - `lexer.py`, `parser.py`, `ast_nodes.py`, `resolver.py`,
   `checker.py`, `discord_check.py`, `discord_limits.py`, `modules.py`,
   `errors.py`, `cli.py`). The `newr` executable is a **thin
   launcher**: if run from a checkout it adds the package dir to
@@ -1627,7 +1627,7 @@ byte offsets, not line/col (§16).
 - **PyPI:** `newr-lang` (Python 3.10+). The compiler is stdlib-only, so the
   package has no dependencies.
 - **npm: DROPPED from v1 (G13).** The `npm i -g newr-lang` route for a
-  Python CLI is HIGH RISK / UNVERIFIED — no precedent was found for an
+  Python CLI is HIGH RISK / UNVERIFIED - no precedent was found for an
   npm `bin` pointing at a Python program. v1 distribution is PyPI / pipx
   / zipapp / GitHub Releases + a PowerShell installer. Revisit only if a
   real precedent is found.
@@ -1657,10 +1657,10 @@ byte offsets, not line/col (§16).
 | 6 | Kotlin | Kord | **0.18.1** | **P2** | Gradle Kotlin DSL project; verify `gradle build` |
 | 7 | Dart | nyxx (+ nyxx_commands) | **nyxx 6.9.1** + `nyxx_commands` 6.1.0 | **P2** | `pubspec.yaml` + `main.dart`; verify `dart analyze` |
 
-Deferred (real library, blocked/niche, with revisit triggers — see the
-expansion doc §2): Go (DiscordGo fork 0x00-sys, 0 tags — revisit when it
-tags a release), Swift (SwiftDisc 2.5.0, 46★, one maintainer — re-check
-~May 2027), C++ (DPP 10.1.6 — codegen complexity, only on user demand),
+Deferred (real library, blocked/niche, with revisit triggers - see the
+expansion doc §2): Go (DiscordGo fork 0x00-sys, 0 tags - revisit when it
+tags a release), Swift (SwiftDisc 2.5.0, 46★, one maintainer - re-check
+~May 2027), C++ (DPP 10.1.6 - codegen complexity, only on user demand),
 Elixir/Ruby/PHP (libraries alive, niche demand). **Not viable:** Crystal,
 Lua, Javacord (dead 2023). **NEVER:** Disnake (CONTRIBUTING bans ALL LLM
 contributions repo-wide, verified verbatim).
@@ -1674,7 +1674,7 @@ a Node script in TS, a `main()` in Java/C#/Rust/Kotlin/Dart).
   no owner is a target that silently drifts). A target with no owner does
   not ship.
 - **Divergence table:** where targets cannot be made identical, this spec
-  says so in one place with the weaker behaviour named — a
+  says so in one place with the weaker behaviour named - a
   "(non-standard)" is a bug with a version attached, not a quirk.
 
 ### 18.1 Conformance
@@ -1696,16 +1696,16 @@ a Node script in TS, a `main()` in Java/C#/Rust/Kotlin/Dart).
 
 | Command | In v1 | Notes |
 |---|---|---|
-| `newr build` | `build [--target py\|js] [--check] [--fast] <file.newr> [-o <out>]` | `--target` selects the emitter (default `py`); without `--check` it emits (M2+). In M1 (no emitter yet) `build` without `--check` is an error telling the user to use `--check` — emitters land in M2. `--fast` emits with only parse + minimal checking (syntax + name resolution), with a warning that the output is not fully verified (§4.1). |
+| `newr build` | `build [--target py\|js] [--check] [--fast] <file.newr> [-o <out>]` | `--target` selects the emitter (default `py`); without `--check` it emits (M2+). In M1 (no emitter yet) `build` without `--check` is an error telling the user to use `--check` - emitters land in M2. `--fast` emits with only parse + minimal checking (syntax + name resolution), with a warning that the output is not fully verified (§4.1). |
 | `newr build --check` | Parse + resolve + check (+ emit + verify from M2) | Writes nothing. Exit 0 on success, 4 on build error. |
 | `newr check` | Parse + resolve + check, print errors + warnings | The "thinking" command (§5.1). Exit 0 if no errors (warnings allowed), 4 on error. |
-| `newr fix` | **NOT in M1** — M4 | Applies safe, unambiguous diagnostic fixes (§5.2). |
+| `newr fix` | **NOT in M1** - M4 | Applies safe, unambiguous diagnostic fixes (§5.2). |
 | `newr --explain <code>` | Yes (M1) | Prints the long form of a diagnostic code (§16). |
 | `newr --error-format=json` | Yes (M1) | One JSON object per diagnostic, same fields (§16). |
-| `newr fmt` | **NOT in v1** — M4/M6 | Canonical formatting, idempotent, `fmt --check` for CI. |
-| `newr init` | **NOT in v1** — M4/M6 | Scaffolds a newr project (`main.newr` + `newr.json` + `locales/` + `.env.example` + `.gitignore`). |
-| `newr.json` | Schema defined in §11; **compiler support M4** | Project config `{name, version, target, default_locale, db_path}`. Secrets NEVER go in it — the token stays in `.env`. |
-| `newr test` | **NOT in v1** — M6 / v1.1 | Built-in testing in the same language; needs the emitter interface stable first (§24.2 #13). |
+| `newr fmt` | **NOT in v1** - M4/M6 | Canonical formatting, idempotent, `fmt --check` for CI. |
+| `newr init` | **NOT in v1** - M4/M6 | Scaffolds a newr project (`main.newr` + `newr.json` + `locales/` + `.env.example` + `.gitignore`). |
+| `newr.json` | Schema defined in §11; **compiler support M4** | Project config `{name, version, target, default_locale, db_path}`. Secrets NEVER go in it - the token stays in `.env`. |
+| `newr test` | **NOT in v1** - M6 / v1.1 | Built-in testing in the same language; needs the emitter interface stable first (§24.2 #13). |
 | `newr --help` / `newr help` | Yes | Usage for every command. |
 
 Error/exit-code contract (from v0, kept): 0 success, 1 usage, 2 environment,
@@ -1718,43 +1718,43 @@ Voice (DAVE minimums make it a project of its own). Prefix commands
 (slash-only). HTTP `fetch` (v1.1, §12.3). Subcommands (§13.2, v1.1).
 Command-name localization (§15, v1.1). Components V2. Sharding
 configuration (deploy concern). Custom emoji / stickers. Threads /
-forums / scheduled events. Classes (structs cover the data case — §8.5).
-User-defined generics (v2 — §7.7; built-in generics are in v1). Full
-pattern exhaustiveness / usefulness (v2 — core `match` is in v1, §9.6).
+forums / scheduled events. Classes (structs cover the data case - §8.5).
+User-defined generics (v2 - §7.7; built-in generics are in v1). Full
+pattern exhaustiveness / usefulness (v2 - core `match` is in v1, §9.6).
 `json` module (§12.2, v1.1). `newr fix`/`fmt`/`init` (§19, M4/M6).
 Subprocess/shell (§3.4). Regex (§12.3). Crypto builtins (§12.3). Threads
-/ shared mutability (v1.1+ — §8.4). Reflection splicing / codegen
-(later — a narrow `reflect` API first). Full TCO (later — explicit
+/ shared mutability (v1.1+ - §8.4). Reflection splicing / codegen
+(later - a narrow `reflect` API first). Full TCO (later - explicit
 `@tailrec` / self-recursion first). Parameter decorators (until TC39
-settles — §24.3). LSP server (M2+ — §5.3). Borrow/ownership checking
-(never — §7.4 deferred table; ownership is a property of one target, not
-of the source language). AI features in the compiler (never — §5.3).
-`eval` (never — it defeats the compiler). Each has a one-line reason
+settles - §24.3). LSP server (M2+ - §5.3). Borrow/ownership checking
+(never - §7.4 deferred table; ownership is a property of one target, not
+of the source language). AI features in the compiler (never - §5.3).
+`eval` (never - it defeats the compiler). Each has a one-line reason
 above; none is forgotten, all are deferred with a version attached (or
 rejected, with the reason written here).
 
-### 20.1 FFI / bindings — the escape-hatch question, answered as design work (G20)
+### 20.1 FFI / bindings - the escape-hatch question, answered as design work (G20)
 
-"No inline target code in v1" stays as a compiler rule — but the FFI /
+"No inline target code in v1" stays as a compiler rule - but the FFI /
 binding story is specified as M1 design work, because "who debugs the
 generated code?" and "how do I call the libraries I already use?" must
 have a v1 answer:
 
 - **v1.1 direction:** `extern` declarations with per-target bindings,
   verified by the compiler against a binding manifest (the DefinitelyTyped
-  lesson: bridge first, native libraries later — call existing
+  lesson: bridge first, native libraries later - call existing
   Python/TS/Java libraries from newr from day one).
-- **v1 interim answer:** no FFI — extend readable generated code by hand
+- **v1 interim answer:** no FFI - extend readable generated code by hand
   (§1.1.6: the generated code stays readable, so hand-extension is
   practical; source maps / round-tripping are the longer-term answer).
 - **Never:** inline host-language blocks inside `.newr` source (§1.1.5).
 
 ## 21. Examples
 
-### 21.1 Hello — an ordinary program (the canonical hello)
+### 21.1 Hello - an ordinary program (the canonical hello)
 
 ```newr
-# hello.newr — a program written in the newr language.
+# hello.newr - a program written in the newr language.
 # Build it with: newr build examples/hello.newr
 # Then run it with: python examples/hello.py
 
@@ -1764,7 +1764,7 @@ print "Hello, world!"
 ### 21.2 A program that uses the language (file I/O + functions + while)
 
 ```newr
-# count.newr — read a file, count the lines longer than 10 characters.
+# count.newr - read a file, count the lines longer than 10 characters.
 fn is_long(line: str) -> bool:
   return len(line) > 10
 
@@ -1779,10 +1779,10 @@ while i < len(lines):
 print "Long lines: {count} of {len(lines)}"
 ```
 
-### 21.3 A bot — the discord module (v0 hello, unchanged)
+### 21.3 A bot - the discord module (v0 hello, unchanged)
 
 ```newr
-# hello_bot.newr — a bot written in the newr language.
+# hello_bot.newr - a bot written in the newr language.
 bot "HelloBot":
   description: "A friendly bot that answers in plain words"
 
@@ -1805,7 +1805,7 @@ event member_join:
 ### 21.4 The shop bot (v1 features: options, functions, store, t(), button)
 
 ```newr
-# shop.newr — ping + economy buy + button confirm, in newr v1.
+# shop.newr - ping + economy buy + button confirm, in newr v1.
 import "shop_items.newr"
 
 bot "ShopBot":
@@ -1814,16 +1814,16 @@ bot "ShopBot":
 
 strings en:
   "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
-  "buy.poor": "Not enough gold — {item} costs {price}, you have {balance}."
+  "buy.poor": "Not enough gold - {item} costs {price}, you have {balance}."
 strings id:
   "buy.ok": "Membeli {item} seharga {price} gold. Saldo: {balance}."
-  "buy.poor": "Gold tidak cukup — {item} harganya {price}, kamu punya {balance}."
+  "buy.poor": "Gold tidak cukup - {item} harganya {price}, kamu punya {balance}."
 
 store economy:
   table balances (user: str, balance: int)
   ledger true
 
-# price_of lives in shop_items.newr (pub fn — §11): shop_items.price_of(item).
+# price_of lives in shop_items.newr (pub fn - §11): shop_items.price_of(item).
 command ping:
   description: "Answer with pong"
   reply: "Pong! Hello {user}"
@@ -1866,7 +1866,7 @@ task every 1h:
 ### 21.5 A small cross-platform CLI (the v1 domain: argv, enum, match, pipeline)
 
 ```newr
-# cli.newr — a small cross-platform CLI: argv, enum, match, pipeline.
+# cli.newr - a small cross-platform CLI: argv, enum, match, pipeline.
 enum Mode:
   Count
   Shout(text: str)
@@ -1896,34 +1896,34 @@ match mode:
 is exhaustiveness-checked (§9.6); the pipeline passes the list as the
 first argument (§9.2); the ternary picks the default word (§9.2).
 
-## 23. What newr takes from other languages — the design philosophy
+## 23. What newr takes from other languages - the design philosophy
 
 newr is not a copy of one language. It is a systematic collection of the
-best ideas from all major languages — each taken for a stated reason, each
+best ideas from all major languages - each taken for a stated reason, each
 weighed against what it costs. The table is the philosophy; the rest of
 this spec is the execution. **This chapter records the features taken.
-It is NOT a claim that newr is "best of all"** — see §1 (the honest v1
+It is NOT a claim that newr is "best of all"** - see §1 (the honest v1
 story) and §23.2 (the Haxe precedent, addressed head-on).
 
 | Feature in newr | Source language(s) | Why it was taken | Status |
 |---|---|---|---|
 | Helpful compiler errors: "this is what you meant, this is the fix, this is why" | Rust, Elm | Rust proved a compiler can teach; Elm proved an error can explain the *why*, not just the *where*. newr's diagnostics (§16) are modelled on both. | v1 (§5, §16); `newr fix` in M4 |
-| `T?` / null safety without ceremony | Rust, Swift, Kotlin | Rust's `Option` killed the null-pointer crash; Swift/Kotlin proved it can be ergonomic instead of bureaucratic. newr takes `T?` + `or` + `.unwrap()` (§7.2) — the safety, not the ceremony. | v1 |
+| `T?` / null safety without ceremony | Rust, Swift, Kotlin | Rust's `Option` killed the null-pointer crash; Swift/Kotlin proved it can be ergonomic instead of bureaucratic. newr takes `T?` + `or` + `.unwrap()` (§7.2) - the safety, not the ceremony. | v1 |
 | Fast compile, one obvious way, readable code | Go, Python | Go proved a compiler can be fast and a language can be small; Python proved indentation + readability scale from beginners to experts. newr's shape is Python's, its compile-speed ambition is Go's. | v1 (§4, §6) |
 | Type inference: annotate where it adds clarity, not everywhere | TypeScript, Haskell | TypeScript proved inference + annotations can coexist; Haskell proved inference can be principled. newr infers from literals and signatures (§7.4) and demands an annotation only where inference is impossible. | v1 |
-| String interpolation everywhere | Swift, Kotlin, C#, Ruby | Every modern language interpolates; newr makes it the *only* string mechanism (§9.3) — no `format()` vs `%` vs `+` confusion. | v1 |
+| String interpolation everywhere | Swift, Kotlin, C#, Ruby | Every modern language interpolates; newr makes it the *only* string mechanism (§9.3) - no `format()` vs `%` vs `+` confusion. | v1 |
 | Unicode-correct strings by default | Swift, Rust | Strings are Unicode in newr, always (§6, §7.1). No byte-string vs text-string split, no encoding footgun. | v1 |
 | One toolchain, zero config to start | Go, Rust (cargo), Dart | `gofmt` + `go build`, `cargo`, `dart` proved one binary can carry fmt/lint/test/docs. newr's CLI is one binary with build/check/fix/fmt/test/docs (§19). | v1: build/check; M4–M6: fmt/fix/test/docs/init |
-| No dependency hell: reproducible builds by default | Rust (Cargo.lock), Go (go.sum) | Lockfiles made builds reproducible. newr's answer is stronger in v1: **no external dependencies at all** (stdlib-only compiler, no module registry yet) — dependency hell cannot happen before the registry exists. The lockfile arrives *with* the registry, not after it. | v1 (no deps); lockfile with the module registry, post-v1 (§23.1) |
+| No dependency hell: reproducible builds by default | Rust (Cargo.lock), Go (go.sum) | Lockfiles made builds reproducible. newr's answer is stronger in v1: **no external dependencies at all** (stdlib-only compiler, no module registry yet) - dependency hell cannot happen before the registry exists. The lockfile arrives *with* the registry, not after it. | v1 (no deps); lockfile with the module registry, post-v1 (§23.1) |
 | Batteries-included stdlib, versioned with the language | Python, Go | Python's stdlib is why people reach for it; Go's is why they stay. newr's stdlib ships with the compiler, one version (§12). | v1 (core); HTTP/JSON/dates in v1.1 (§12.3) |
 | Cross-platform from day one, no `#ifdef` hell | Dart/Flutter, Java | Dart proved one codebase can ship everywhere; Java proved "write once, run anywhere" as a philosophy. newr's version: the language is portable by construction (§3) and the *compiler* proves it on three OSes in CI. | v1 (§3) |
-| Readable generated code | — (newr's own rule) | No language takes credit for this; it is newr's own non-negotiable (§1.1.6). Generated code must read like code a human would write. | v1 principle; proven at M2+ |
+| Readable generated code | - (newr's own rule) | No language takes credit for this; it is newr's own non-negotiable (§1.1.6). Generated code must read like code a human would write. | v1 principle; proven at M2+ |
 | One language → many targets, same behavior | Java ("write once, run anywhere"), Kotlin Multiplatform | Java's promise was one bytecode everywhere; newr's is one source, N native programs, behavior-identical by conformance corpus (§18.1). | v1 architecture; emitters M2–M5 |
-| First-class i18n, not a bolted-on library | — (newr's own) | No mainstream language makes i18n part of the language. newr does (§15): `strings` blocks + `t()` are syntax, checked at build time — in the discord module, where locale-aware replies live. | v1 (discord module, §15) |
+| First-class i18n, not a bolted-on library | - (newr's own) | No mainstream language makes i18n part of the language. newr does (§15): `strings` blocks + `t()` are syntax, checked at build time - in the discord module, where locale-aware replies live. | v1 (discord module, §15) |
 | No silent behavior / no hidden control flow | Zig, Rust | Zig's "no hidden control flow" is the clearest statement of the rule; Rust's explicitness is the practice. newr: nothing happens behind the user's back (§1.1.4). | v1 |
-| Docs generated from code comments | C# (`///`), Rust (rustdoc), Java (javadoc) | Every mature toolchain generates docs from comments. newr will too — once the doc-comment syntax is frozen. | M6 (§24, idea 14) |
+| Docs generated from code comments | C# (`///`), Rust (rustdoc), Java (javadoc) | Every mature toolchain generates docs from comments. newr will too - once the doc-comment syntax is frozen. | M6 (§24, idea 14) |
 | Small for beginners, scalable for experts | Python, Go | The hello program is one line; the same language builds a shop bot with economy, i18n, and components (§21). | v1 (§1.1.1) |
-| Errors as values, propagated ergonomically | Rust (`?`), Go (explicit errors) — minus Go's repetition | Rust's `?` proved errors-as-values can be ergonomic; Go proved explicit errors are honest but verbose. newr takes try/catch (§10) as the primary model, plus `Result[T, E]` as a value form with a `try` expression and a statement-level `?` (§10) — no `if err != nil` repetition, no hidden returns. | v1 |
+| Errors as values, propagated ergonomically | Rust (`?`), Go (explicit errors) - minus Go's repetition | Rust's `?` proved errors-as-values can be ergonomic; Go proved explicit errors are honest but verbose. newr takes try/catch (§10) as the primary model, plus `Result[T, E]` as a value form with a `try` expression and a statement-level `?` (§10) - no `if err != nil` repetition, no hidden returns. | v1 |
 
 ### 23.1 What newr deliberately did NOT take
 
@@ -1931,22 +1931,22 @@ Taking the best of all languages also means saying no to the rest, in
 writing:
 
 - **From Rust:** not the borrow checker; not `Result` as the *primary*
-  error mechanism (§10 — `Result` exists as a value form); not the
-  ceremony around nullability (no `match` required to unwrap —
+  error mechanism (§10 - `Result` exists as a value form); not the
+  ceremony around nullability (no `match` required to unwrap -
   `.unwrap()` / `or` suffice in v1).
 - **From Go:** not the `if err != nil` repetition, not the lack of
   generics history (newr's `list[T]`/`dict[str, T]` are generic from day
-  one). (Ternary IS in v1 — §9.2; the old "we agree with Go" line was
+  one). (Ternary IS in v1 - §9.2; the old "we agree with Go" line was
   reversed with the general-purpose correction.)
-- **From Python:** not dynamic typing (newr is statically typed — §7),
+- **From Python:** not dynamic typing (newr is statically typed - §7),
   not the GIL-era concurrency story (see §24, idea 17).
 - **From C++/Java:** not the boilerplate (no `public static void main`,
-  no semicolons, no mandatory class wrapper — top-level statements *are*
+  no semicolons, no mandatory class wrapper - top-level statements *are*
   the program, §8).
 - **From JavaScript:** not the `==` vs `===` split, not the callback
-  legacy — newr has one equality (`==`, type-checked, §7.2) and no
+  legacy - newr has one equality (`==`, type-checked, §7.2) and no
   callbacks in v1.
-- **From Elixir/Erlang:** not "let it crash" as a philosophy — newr fails
+- **From Elixir/Erlang:** not "let it crash" as a philosophy - newr fails
   at *build* time instead of at runtime (§1.1.2). Pattern matching: core
   `match` is in v1 (§9.6); full exhaustiveness and custom matchers are
   v2, not taken half-way.
@@ -1955,14 +1955,14 @@ writing:
 
 "One language, compiles to all targets" has a 20-year precedent: Haxe
 (first appeared 14 Nov 2005) compiles one codebase to JavaScript, C++,
-Java, JVM, PHP, C#, Python, Lua and Node.js — and after 20 years it is
+Java, JVM, PHP, C#, Python, Lua and Node.js - and after 20 years it is
 still niche (described in a Nov 2026 survey as #68, "Cross-platform
 games"; 32nd as a first language to learn). Why it stayed niche: no
 tech-giant backing, a small team without resources for great tooling,
 ecosystem fragmentation across targets, hard debugging of generated code,
 and needing "externs" to use each target's native libraries. It
-*survived* — survival ≠ fame. **Verdict:** "compiles to all targets"
-has historically **lost to "one language, one great ecosystem"** —
+*survived* - survival ≠ fame. **Verdict:** "compiles to all targets"
+has historically **lost to "one language, one great ecosystem"** -
 developers adopt an *ecosystem* (libraries, jobs, answers, colleagues),
 not a language. A transpiler gives you *access* to seven ecosystems and
 *ownership* of none. That is why v1 names **one domain** (small
@@ -1971,7 +1971,7 @@ exists: newr must answer "who debugs the generated code?" in v1, or the
 migration story collapses. Haxe's exact TIOBE rank in 2025/2026 is
 UNVERIFIED (§25, U18).
 
-### 23.3 Fame timeline — planning horizon (G16)
+### 23.3 Fame timeline - planning horizon (G16)
 
 | Phase | Time | What "famous" means | Evidence it happened |
 |---|---|---|---|
@@ -1996,7 +1996,7 @@ wave to surf in 2026 is **AI-assisted coding**: a language that is easy
 for models to write correctly (explicit types, small spec, great errors,
 verifiable output) has a structural advantage GitHub itself now names.
 
-## 24. Wishlist — features people asked for, other languages said no (or "later")
+## 24. Wishlist - features people asked for, other languages said no (or "later")
 
 ### 24.1 How this chapter works
 
@@ -2008,41 +2008,41 @@ verifiable output) has a structural advantage GitHub itself now names.
 - **Research arrived.** The deep research pass (started 22:02 WIB,
   delivered 22:12 WIB 6 Nov 2026, `newr-deep-research.md` §7) surveyed
   features requested by many users but rejected or deferred by other
-  languages' developers — across Go, Python, Rust, JavaScript/TypeScript,
+  languages' developers - across Go, Python, Rust, JavaScript/TypeScript,
   Java, C#, Swift, Kotlin, Ruby, PHP, from issue trackers, RFCs, forums,
   and social media. Its findings are merged into §24.3 with a verdict, a
   source, and a date. Later research may add items, change a verdict
-  (with a written reason), or add a rejection — it never silently
+  (with a written reason), or add a rejection - it never silently
   deletes an item.
 - The verdicts below are chie's, from the spec work so far. The research
   findings may add items, change a verdict (with a written reason), or
-  add a rejection — they never silently delete an item.
+  add a rejection - they never silently delete an item.
 
-### 24.2 Chie's 19 ideas — evaluated
+### 24.2 Chie's 19 ideas - evaluated
 
 | # | Idea | Verdict | Reason |
 |---|---|---|---|
-| 1 | Errors that actually help (Rust/Elm style) + `newr fix` for safe fixes | **v1** (diagnostics); **M4** (`newr fix`) | Diagnostics with span + hint + machine `fix` field are in v1 (§5.1, §16). The `fix` command applies them in M4 (§5.2) — the command waits until the diagnostics are proven, the *data* does not. |
-| 2 | One toolchain, all built-in: fmt, lint, test, package manager, docs — one binary, zero config | **v1** (build/check); **M4–M6** (fmt/fix/test/init/docs) | `build` + `check` (which is also the linter — §5.1 warnings) ship in v1 (§19). `fmt`, `fix`, `test`, `init`, docs generation land M4–M6, in that order — each needs the layer below it to be stable first. The package-manager half (v0's `install`/`update`/`agents`) lands with the newr repo as `newr_cli/`, M4+. |
-| 3 | No dependency hell: lockfile + reproducible build as default | **v1** (by absence); **lockfile with the module registry** (post-v1) | v1 has no external dependencies at all — no registry, no versions to resolve, nothing to go wrong (§11, §23). A lockfile is meaningless before a registry exists; it is specified *with* the registry, not bolted on after. |
+| 1 | Errors that actually help (Rust/Elm style) + `newr fix` for safe fixes | **v1** (diagnostics); **M4** (`newr fix`) | Diagnostics with span + hint + machine `fix` field are in v1 (§5.1, §16). The `fix` command applies them in M4 (§5.2) - the command waits until the diagnostics are proven, the *data* does not. |
+| 2 | One toolchain, all built-in: fmt, lint, test, package manager, docs - one binary, zero config | **v1** (build/check); **M4–M6** (fmt/fix/test/init/docs) | `build` + `check` (which is also the linter - §5.1 warnings) ship in v1 (§19). `fmt`, `fix`, `test`, `init`, docs generation land M4–M6, in that order - each needs the layer below it to be stable first. The package-manager half (v0's `install`/`update`/`agents`) lands with the newr repo as `newr_cli/`, M4+. |
+| 3 | No dependency hell: lockfile + reproducible build as default | **v1** (by absence); **lockfile with the module registry** (post-v1) | v1 has no external dependencies at all - no registry, no versions to resolve, nothing to go wrong (§11, §23). A lockfile is meaningless before a registry exists; it is specified *with* the registry, not bolted on after. |
 | 4 | Type inference | **v1** | §7.4. Annotate where it adds clarity; the checker infers the rest; ambiguity is an error, never a guess. |
-| 5 | Null safety without verbosity (`T?`-style) | **v1** | `T?` + `or` + `.unwrap()` (§7.2). No `null`, no null-pointer crash, no Rust-length ceremony. The `option[T]` spelling is removed — exactly one absent value, spelled `T?` (G19). |
-| 6 | Errors as values with ergonomic propagation (no Go-style repetition) | **v1** | try/catch (§10) as the primary model, plus `Result[T, E]` with a `try` expression and a statement-level `?` (§10) — no `if err != nil` repetition, and no hidden returns (the Go objection is honoured: `?` is statement-level only, never nested). |
+| 5 | Null safety without verbosity (`T?`-style) | **v1** | `T?` + `or` + `.unwrap()` (§7.2). No `null`, no null-pointer crash, no Rust-length ceremony. The `option[T]` spelling is removed - exactly one absent value, spelled `T?` (G19). |
+| 6 | Errors as values with ergonomic propagation (no Go-style repetition) | **v1** | try/catch (§10) as the primary model, plus `Result[T, E]` with a `try` expression and a statement-level `?` (§10) - no `if err != nil` repetition, and no hidden returns (the Go objection is honoured: `?` is statement-level only, never nested). |
 | 7 | Unicode-correct strings + interpolation everywhere | **v1** | §6, §9.3. Strings are Unicode; interpolation is the only string mechanism. |
-| 8 | First-class i18n (`strings` + `t()`) | **v1** (discord module) | §15. Syntax, not a library; key sets validated at build time — in the discord module, where locale-aware replies live (G1). A general `i18n` module for non-bot programs is future work. |
+| 8 | First-class i18n (`strings` + `t()`) | **v1** (discord module) | §15. Syntax, not a library; key sets validated at build time - in the discord module, where locale-aware replies live (G1). A general `i18n` module for non-bot programs is future work. |
 | 9 | Cross-platform from day one, no `#ifdef` hell | **v1** | §3. Portable by construction; CI matrix is the proof. |
 | 10 | Human-readable generated code | **v1** | §1.1.6. Proven by golden files at M2+. |
-| 11 | Fast + incremental builds | **v1** (design); **M4** (cache) | §4.1. The cache design is frozen now; the simple form (rebuild everything — fast enough for small projects) ships in v1, the cache lands in M4. Benchmarks in M2. |
+| 11 | Fast + incremental builds | **v1** (design); **M4** (cache) | §4.1. The cache design is frozen now; the simple form (rebuild everything - fast enough for small projects) ships in v1, the cache lands in M4. Benchmarks in M2. |
 | 12 | One language → many targets, same behavior (conformance corpus) | **v1** (architecture); **M2–M5** (emitters) | §18.1. The corpus is the definition of correct behavior; emitters land one at a time against it. |
-| 13 | Built-in testing (`newr test`, same language) | **Deferred to M6 / v1.1** | A test framework needs the emitter interface stable first (otherwise tests would be written against a moving target). It also needs a test syntax decision (test blocks? `test` functions?). Both arrive after M3. Not forgotten — it is the first M6 item. |
+| 13 | Built-in testing (`newr test`, same language) | **Deferred to M6 / v1.1** | A test framework needs the emitter interface stable first (otherwise tests would be written against a moving target). It also needs a test syntax decision (test blocks? `test` functions?). Both arrive after M3. Not forgotten - it is the first M6 item. |
 | 14 | Docs generated from code comments | **Deferred to M6** | Needs a frozen doc-comment syntax (the `///` convention, from C#/Rust) and the docs site. v1 freezes the language; M6 builds the docs pipeline on top of it. |
 | 15 | No silent behavior | **v1** | §1.1.4. A non-negotiable, enforced by the checker (unknown lines are errors; no silent coercion). |
-| 16 | Truly complete stdlib (HTTP, JSON, dates, files), versioned with the language | **v1** (files, time, math, random, env); **v1.1** (HTTP, JSON, dates) | §12. Files/time/math/random/env ship in v1. HTTP needs a sandboxed `fetch` + allowlist (security review, §12.3); JSON needs a typed JSON value (no `any` in v1, §12.2); dates beyond `time.format` need a date type. All three are v1.1 with their reasons written — not dropped. The stdlib *is* versioned with the language from day one (it ships with the compiler). |
+| 16 | Truly complete stdlib (HTTP, JSON, dates, files), versioned with the language | **v1** (files, time, math, random, env); **v1.1** (HTTP, JSON, dates) | §12. Files/time/math/random/env ship in v1. HTTP needs a sandboxed `fetch` + allowlist (security review, §12.3); JSON needs a typed JSON value (no `any` in v1, §12.2); dates beyond `time.format` need a date type. All three are v1.1 with their reasons written - not dropped. The stdlib *is* versioned with the language from day one (it ships with the compiler). |
 | 17 | Safe-by-default concurrency (structured, no data races) | **Deferred to v1.1+** | v1 is single-threaded by default: `task` (discord module) is scheduled work, not concurrency; there are no threads and no shared mutable state (§8.4). Structured concurrency (async/await? actors? channels?) is a whole design decision: it touches the type system, the emitters (each target's concurrency model is different), and the "every path answers" check. It needs its own design document before a version is attached. It is the biggest open design question in this spec, and it is written here so it is not forgotten. |
 | 18 | Stability contract: stable language, adapting backends | **v1** | §2. The core has zero Discord dependencies; a target change touches only its emitter. |
 | 19 | Small for beginners, scalable for experts | **v1** | §1.1.1, §21. Hello is one line; the same language scales to a shop bot with economy, i18n, and components. |
 
-### 24.3 Features requested by many, rejected/deferred by other languages — RESEARCH FINDINGS (22:12 WIB 6 Nov 2026)
+### 24.3 Features requested by many, rejected/deferred by other languages - RESEARCH FINDINGS (22:12 WIB 6 Nov 2026)
 
 Source: `newr-deep-research.md` §7 (full agent report, sources accessed
 6 Nov 2026). Reaction/comment counts are given only where actually seen;
@@ -2051,92 +2051,92 @@ item has a verdict for newr.
 
 | Feature (source language) | What happened there | Verdict for newr |
 |---|---|---|
-| None-aware `?.` / `?[]` / `??` (Python, PEP 505 — Deferred, not formally rejected) | PEP 505 (2015) proposed all three; deferred during governance upheaval; co-author later doubted the syntax; 2024–25 revival stalled on whether `a?.b` should swallow a missing attribute, not just `None`. A stdlib scan found up to 678 snippets it could replace. | **v1 — flagship.** Settle the one rule Python could not: `?.` short-circuits on `none` ONLY; a missing attribute is still a compile error (§9.2). |
-| Pipeline `\|>` (JavaScript, TC39 Stage 2, stuck ~10 years) | Proposal since 2015, Stage 2, 7,917 stars; stuck on syntax bikeshed (F# vs Hack vs Smart-Mix), not semantics. State of JS 2020: pipe operator was the 4th most-missed feature. | **v1 — flagship.** Pick ONE syntax and freeze it: Elixir-style, piped value is the first argument (§9.2). Indecision, not difficulty, killed it at TC39. |
-| `try` blocks (Rust — accepted RFC, still unstable 10+ years) | RFC 243 / 2388; tracking issues #31436 and #154391 (2026). Not stabilised: whether the block Ok-wraps its value, inference gaps, async integration, `Try` trait design. | **v1.** Define what Rust could not agree on: yes, Ok-wrap; yes, explicit `Result[T, E]` annotation when ambiguous; no heterogeneous blocks in v1 (§10). |
+| None-aware `?.` / `?[]` / `??` (Python, PEP 505 - Deferred, not formally rejected) | PEP 505 (2015) proposed all three; deferred during governance upheaval; co-author later doubted the syntax; 2024–25 revival stalled on whether `a?.b` should swallow a missing attribute, not just `None`. A stdlib scan found up to 678 snippets it could replace. | **v1 - flagship.** Settle the one rule Python could not: `?.` short-circuits on `none` ONLY; a missing attribute is still a compile error (§9.2). |
+| Pipeline `\|>` (JavaScript, TC39 Stage 2, stuck ~10 years) | Proposal since 2015, Stage 2, 7,917 stars; stuck on syntax bikeshed (F# vs Hack vs Smart-Mix), not semantics. State of JS 2020: pipe operator was the 4th most-missed feature. | **v1 - flagship.** Pick ONE syntax and freeze it: Elixir-style, piped value is the first argument (§9.2). Indecision, not difficulty, killed it at TC39. |
+| `try` blocks (Rust - accepted RFC, still unstable 10+ years) | RFC 243 / 2388; tracking issues #31436 and #154391 (2026). Not stabilised: whether the block Ok-wraps its value, inference gaps, async integration, `Try` trait design. | **v1.** Define what Rust could not agree on: yes, Ok-wrap; yes, explicit `Result[T, E]` annotation when ambiguous; no heterogeneous blocks in v1 (§10). |
 | Typed enums (Go #19814, open since 2017, neither accepted nor declined) | "Being simple is, primarily, a function of orthogonality… enums do not fit as orthogonally into Go as they fit into C." Still open; lack of full enums is a top-three Go frustration (secondary). | **v1.** Every target has enums/sealed types; one `enum` with associated values + exhaustiveness (§8.6, §9.6). |
-| Multiline lambdas (Python — rejected by design) | Guido (2006): embedding an indentation-based block in the middle of an expression is unacceptable in Python. | **v1 (free differentiator vs Python).** Lambdas take a block body from day one (§9.5). |
-| Error-handling shorthand `?` (Go — `check`/`handle` → `try()` → `?`, ALL abandoned June 2025) | golang/go#32437, ~900 comments. Go team's own words: "`try` affected control flow by returning from the enclosing function… thus hiding this control flow from view. This made the proposal unpalatable to many…" For the foreseeable future Go stopped pursuing syntactic error-handling changes. | **v1, statement-only.** Grant `?` only as a visible early-return at statement level, never hidden inside a nested expression — that was the exact objection (§10). |
+| Multiline lambdas (Python - rejected by design) | Guido (2006): embedding an indentation-based block in the middle of an expression is unacceptable in Python. | **v1 (free differentiator vs Python).** Lambdas take a block body from day one (§9.5). |
+| Error-handling shorthand `?` (Go - `check`/`handle` → `try()` → `?`, ALL abandoned June 2025) | golang/go#32437, ~900 comments. Go team's own words: "`try` affected control flow by returning from the enclosing function… thus hiding this control flow from view. This made the proposal unpalatable to many…" For the foreseeable future Go stopped pursuing syntactic error-handling changes. | **v1, statement-only.** Grant `?` only as a visible early-return at statement level, never hidden inside a nested expression - that was the exact objection (§10). |
 | `match` / pattern matching (Python PEP 3103 rejected 2007, later `match` in 3.10; TC39 Stage 1 since May 2018) | PEP 3103: "no popular support" at PyCon 2007; semantic trap (optimised dispatch needs side-effect-free cases). TC39: scope is huge (custom matchers, exhaustiveness, guards); no Stage 2 consensus in 8 years. | **v1 core, v2 custom matchers.** Literal/struct/array/or-patterns + guards + exhaustiveness-as-error (§9.6). |
-| Records / Tuples / `value` types (TC39 withdrawn Apr 2025; Java Valhalla since 2014) | Records & Tuples withdrawn at Stage 2 (performance: changing `===` would slow every `===`). Valhalla: value objects with only `final` fields, no identity (JEP 401, preview; GA version UNVERIFIED — three secondary sources conflict). | **v1 semantics, perf later.** `struct`/`enum` are value types: copied on assignment, structural `==`, no identity, no field assignment (§7.8). Do NOT promise flattening/zero-allocation on all targets. |
-| Contracts `requires` / `ensures` (C++ — removed from C++20, still unresolved in C++26) | P1823R0 (2019): "This is a proposal nobody likes… the feature is not ready… We have no implementation experience." C++26 ballot-failure claim is UNVERIFIED against an ISO source. | **v1, runtime-only.** `requires`/`ensures` as runtime checks that throw, always evaluated in v1, no violation-handler / continuation / "assume" semantics (§9.7). |
-| Generics (Go — refused 2009–2021, shipped 1.18 Mar 2022) | Russ Cox, "The Generic Dilemma" (2009): every design picks a cost — no generics (slow programmers), templates (slow compilers), or boxing (slow execution). Four drafts abandoned; contracts draft "too complicated". | **Must grant; biggest spec decision.** Built-in generics in v1; semantic decided at M0 — erasure on Python/TS/Java/Kotlin, reification on C#/Rust/Dart, unobservable in v1 via three rules (§7.7). User-defined generics v2. |
-| Explicit TCO / `@tailrec` (Python — rejected by design, no PEP) | Guido (2009): eliminating stack frames for some calls but not others "would certainly confuse many users" and makes debugging harder. | **Deferred to v1.1, explicit-only, self-recursion first.** Never silent/implicit TCO. |
-| Decorators (TC39 — demoted Stage 3 → Stage 2.7, May 2026) | Spec finalised but zero native engine shipments in four years; parameter decorators were never in the proposal, breaking NestJS/Angular DI expectations. (Demotion reason is secondary; the Stage 2.7 listing itself was seen.) | **Deferred to v1.1, scoped.** Metadata + wrapping for methods/classes only; no parameter decorators until the spec settles. |
-| Static reflection (C++ P2996 — stalled a decade, now in C++26) | Value-based vs type-based reflection, code-injection scope, compile-time cost, 10+ years of competing proposals. | **Deferred — narrow subset only.** Field names, field types, constructor arity at compile time, via a small `reflect` API. No splicing/codegen in v1. |
-| Async closures / `async fn` in traits (Rust — long-deferred, now shipped) | RFC 3668; stabilised Rust 1.85 (Feb 2025). `async fn` in traits: RFC 3185 + 3425, stabilised 1.75 (Dec 2023). Remaining gap: Return Type Notation still unstable. | **Deferred to v1.1+.** Design the async model with traits/interfaces in mind, not bolted on. Do not promise `Send` bounds on the returned future until the spec has RTN-equivalent syntax. |
+| Records / Tuples / `value` types (TC39 withdrawn Apr 2025; Java Valhalla since 2014) | Records & Tuples withdrawn at Stage 2 (performance: changing `===` would slow every `===`). Valhalla: value objects with only `final` fields, no identity (JEP 401, preview; GA version UNVERIFIED - three secondary sources conflict). | **v1 semantics, perf later.** `struct`/`enum` are value types: copied on assignment, structural `==`, no identity, no field assignment (§7.8). Do NOT promise flattening/zero-allocation on all targets. |
+| Contracts `requires` / `ensures` (C++ - removed from C++20, still unresolved in C++26) | P1823R0 (2019): "This is a proposal nobody likes… the feature is not ready… We have no implementation experience." C++26 ballot-failure claim is UNVERIFIED against an ISO source. | **v1, runtime-only.** `requires`/`ensures` as runtime checks that throw, always evaluated in v1, no violation-handler / continuation / "assume" semantics (§9.7). |
+| Generics (Go - refused 2009–2021, shipped 1.18 Mar 2022) | Russ Cox, "The Generic Dilemma" (2009): every design picks a cost - no generics (slow programmers), templates (slow compilers), or boxing (slow execution). Four drafts abandoned; contracts draft "too complicated". | **Must grant; biggest spec decision.** Built-in generics in v1; semantic decided at M0 - erasure on Python/TS/Java/Kotlin, reification on C#/Rust/Dart, unobservable in v1 via three rules (§7.7). User-defined generics v2. |
+| Explicit TCO / `@tailrec` (Python - rejected by design, no PEP) | Guido (2009): eliminating stack frames for some calls but not others "would certainly confuse many users" and makes debugging harder. | **Deferred to v1.1, explicit-only, self-recursion first.** Never silent/implicit TCO. |
+| Decorators (TC39 - demoted Stage 3 → Stage 2.7, May 2026) | Spec finalised but zero native engine shipments in four years; parameter decorators were never in the proposal, breaking NestJS/Angular DI expectations. (Demotion reason is secondary; the Stage 2.7 listing itself was seen.) | **Deferred to v1.1, scoped.** Metadata + wrapping for methods/classes only; no parameter decorators until the spec settles. |
+| Static reflection (C++ P2996 - stalled a decade, now in C++26) | Value-based vs type-based reflection, code-injection scope, compile-time cost, 10+ years of competing proposals. | **Deferred - narrow subset only.** Field names, field types, constructor arity at compile time, via a small `reflect` API. No splicing/codegen in v1. |
+| Async closures / `async fn` in traits (Rust - long-deferred, now shipped) | RFC 3668; stabilised Rust 1.85 (Feb 2025). `async fn` in traits: RFC 3185 + 3425, stabilised 1.75 (Dec 2023). Remaining gap: Return Type Notation still unstable. | **Deferred to v1.1+.** Design the async model with traits/interfaces in mind, not bolted on. Do not promise `Send` bounds on the returned future until the spec has RTN-equivalent syntax. |
 
 ### 24.4 Already-known deferred/rejected items (from this spec's own work)
 
-These are not from the research pass — they are decisions this spec
+These are not from the research pass - they are decisions this spec
 already took, collected here so the wishlist chapter is the single place
 to look:
 
 | Item | Verdict | Reason (where in this spec) |
 |---|---|---|
-| Full pattern exhaustiveness / usefulness | **Deferred to v2** | Core `match` is in v1 (§9.6); full usefulness checking is Rust's `rustc_pattern_analysis` algorithm — do not reimplement in v1. |
-| Generics (user-defined) | **Deferred to v2** | `list[T]`/`dict[str, T]`/`set[T]`/`T?`/`Result[T, E]` are generic from day one (§7.1); *user-defined* generic functions/types wait — they need a generic checker, which is v2 work (§7.7). |
-| HTTP `fetch` | **Deferred to v1.1** | §12.3 — sandboxed `fetch` + allowlist, after a security review. |
-| `json` module | **Deferred to v1.1** | §12.2 — needs a typed JSON value. |
-| Regex | **Deferred (no version)** | §12.3 — injection/DoS vector in a bot language; revisit with a timeout. |
+| Full pattern exhaustiveness / usefulness | **Deferred to v2** | Core `match` is in v1 (§9.6); full usefulness checking is Rust's `rustc_pattern_analysis` algorithm - do not reimplement in v1. |
+| Generics (user-defined) | **Deferred to v2** | `list[T]`/`dict[str, T]`/`set[T]`/`T?`/`Result[T, E]` are generic from day one (§7.1); *user-defined* generic functions/types wait - they need a generic checker, which is v2 work (§7.7). |
+| HTTP `fetch` | **Deferred to v1.1** | §12.3 - sandboxed `fetch` + allowlist, after a security review. |
+| `json` module | **Deferred to v1.1** | §12.2 - needs a typed JSON value. |
+| Regex | **Deferred (no version)** | §12.3 - injection/DoS vector in a bot language; revisit with a timeout. |
 | Subcommands | **Deferred to v1.1** | §13.2. |
 | Command-name localization | **Deferred to v1.1** | §15. |
-| Components V2 | **Deferred (no version)** | §20 — classic components in v1; V2 needs its own verification per target. |
-| Cron expressions for `task` | **Deferred to v1.1** | §8.4 — durations only in v1; cron is a second language. |
-| Subprocess / shell | **Deferred (no version)** | §3.4 — the least portable surface; revisit with a portable `process` module if demanded. |
-| Voice | **Deferred (no version)** | §20 — DAVE minimums make it a project of its own. |
-| Prefix commands | **Rejected** | §20 — slash-only. Discord's own direction is slash commands; prefix commands are legacy in discord.py and do not exist in discord.js. |
-| `eval` | **Rejected, permanently** | §12.3 — it defeats the compiler. There is no version where `eval` arrives. |
-| Inline host-language blocks (escape hatch) | **Rejected for v1** | §1.1.5 — an escape hatch lets every hard mapping be dodged; generated code would stop being regenerable. Revisited only if a real program cannot be expressed — with evidence, not on principle. |
-| Classes / inheritance | **Rejected for v1** | §20 — structs (§8.5) cover the data case; inheritance is a v1.1+ discussion, not a v1 feature. |
-| Crypto builtins | **Rejected** | §12.3 — a program should never hand-roll hashing/signing; the host language's vetted libraries own it. |
-| Borrow / ownership checking | **Rejected (never)** | §7.4 deferred table — proves memory safety for one target (Rust); newr's other six targets are GC'd; cost is a MIR + dataflow engine. |
-| AI features in the compiler | **Rejected (never)** | §5.3 — probabilistic, hallucinates, needs a model/network; the compiler must stay deterministic and offline. |
-| Explicit TCO / `@tailrec` | **Deferred to v1.1** | §24.3 — explicit-only, self-recursion first; never silent/implicit TCO. |
-| Decorators | **Deferred to v1.1** | §24.3 — scoped: metadata + wrapping for methods/classes only; no parameter decorators until TC39 settles. |
-| Reflection splicing / codegen | **Deferred (later)** | §24.3 — narrow `reflect` API first (field names/types, constructor arity). |
-| Threads / shared mutability | **Deferred to v1.1+** | §8.4 — `task` (discord module) is the v1 primitive; no threads in v1. |
-| Async (closures / `async fn` in traits) | **Deferred to v1.1+** | §24.3 — design async + traits together from day one; no `Send` bounds until the spec has RTN-equivalent syntax. |
-| FFI / `extern` bindings | **v1.1 direction** | §20.1 — `extern` declarations with per-target bindings verified by the compiler; v1 interim answer is hand-extended readable generated code. |
-| LSP server | **M2+** | §5.3 — needs the checker as a reusable, incremental library. |
+| Components V2 | **Deferred (no version)** | §20 - classic components in v1; V2 needs its own verification per target. |
+| Cron expressions for `task` | **Deferred to v1.1** | §8.4 - durations only in v1; cron is a second language. |
+| Subprocess / shell | **Deferred (no version)** | §3.4 - the least portable surface; revisit with a portable `process` module if demanded. |
+| Voice | **Deferred (no version)** | §20 - DAVE minimums make it a project of its own. |
+| Prefix commands | **Rejected** | §20 - slash-only. Discord's own direction is slash commands; prefix commands are legacy in discord.py and do not exist in discord.js. |
+| `eval` | **Rejected, permanently** | §12.3 - it defeats the compiler. There is no version where `eval` arrives. |
+| Inline host-language blocks (escape hatch) | **Rejected for v1** | §1.1.5 - an escape hatch lets every hard mapping be dodged; generated code would stop being regenerable. Revisited only if a real program cannot be expressed - with evidence, not on principle. |
+| Classes / inheritance | **Rejected for v1** | §20 - structs (§8.5) cover the data case; inheritance is a v1.1+ discussion, not a v1 feature. |
+| Crypto builtins | **Rejected** | §12.3 - a program should never hand-roll hashing/signing; the host language's vetted libraries own it. |
+| Borrow / ownership checking | **Rejected (never)** | §7.4 deferred table - proves memory safety for one target (Rust); newr's other six targets are GC'd; cost is a MIR + dataflow engine. |
+| AI features in the compiler | **Rejected (never)** | §5.3 - probabilistic, hallucinates, needs a model/network; the compiler must stay deterministic and offline. |
+| Explicit TCO / `@tailrec` | **Deferred to v1.1** | §24.3 - explicit-only, self-recursion first; never silent/implicit TCO. |
+| Decorators | **Deferred to v1.1** | §24.3 - scoped: metadata + wrapping for methods/classes only; no parameter decorators until TC39 settles. |
+| Reflection splicing / codegen | **Deferred (later)** | §24.3 - narrow `reflect` API first (field names/types, constructor arity). |
+| Threads / shared mutability | **Deferred to v1.1+** | §8.4 - `task` (discord module) is the v1 primitive; no threads in v1. |
+| Async (closures / `async fn` in traits) | **Deferred to v1.1+** | §24.3 - design async + traits together from day one; no `Send` bounds until the spec has RTN-equivalent syntax. |
+| FFI / `extern` bindings | **v1.1 direction** | §20.1 - `extern` declarations with per-target bindings verified by the compiler; v1 interim answer is hand-extended readable generated code. |
+| LSP server | **M2+** | §5.3 - needs the checker as a reusable, incremental library. |
 
 ## 25. UNVERIFIED items (do not cite as fact)
 
-1. **Windows/macOS execution** of the compiler and of generated programs —
+1. **Windows/macOS execution** of the compiler and of generated programs -
    the CI matrix (§17.3) is the proof; this VM is Linux-only (§3.7).
-2. **Rust try/catch lowering** (§10) — the `Result`-helper approach is
+2. **Rust try/catch lowering** (§10) - the `Result`-helper approach is
    recorded, not proven; M5 proves it.
 3. **discord.js placeholder mappings** (`userMention()`, guild DM
-   nullability) — verify at M3 build time, not by analogy.
+   nullability) - verify at M3 build time, not by analogy.
 4. **Placeholder mappings for JDA / Discord.Net / serenity / Kord / nyxx**
-   — each emitter proves its own live.
+   - each emitter proves its own live.
 5. **Storage-driver semantics per target** (transactions under concurrent
-   handlers) — proven per emitter, not assumed from the Python pattern.
+   handlers) - proven per emitter, not assumed from the Python pattern.
 6. **Compile-time numbers** (§4.1) and **generated-code benchmark numbers**
-   (§4.2) — no measurements exist yet; M2 records them honestly.
-7. **Zipapp-from-`npx` behavior** and the exact `newr.json` schema — decided
+   (§4.2) - no measurements exist yet; M2 records them honestly.
+7. **Zipapp-from-`npx` behavior** and the exact `newr.json` schema - decided
    in M4/M6.
-8. **poise ↔ serenity pin for M5** — read poise's `Cargo.toml` before M5
+8. **poise ↔ serenity pin for M5** - read poise's `Cargo.toml` before M5
    codegen starts (poise 0.7.1 is the live-checked version, §18).
-9. **npm distribution — RESOLVED, dropped (G13).** The `@drewdestar` npm
+9. **npm distribution - RESOLVED, dropped (G13).** The `@drewdestar` npm
    scope question is moot: npm is not a v1 distribution route (no
    precedent for an npm `bin` pointing at a Python program).
 10. **Contradictions found between the v1 design doc and the v0 code
     (code wins, flagged here):**
     - The design doc §3.5 says functions "may read `store`" and §3.10 says
-      store mutations need idempotency keys — but v0 has no functions and
+      store mutations need idempotency keys - but v0 has no functions and
       no store, so there is no v0 behavior to contradict; the rule is new
       in this spec.
     - The design doc §3.13 example uses `economy.credit(user, -price, key:
-      "buy-{user.id}-{item}-{amount}")` — interpolation of `{user.id}`
+      "buy-{user.id}-{item}-{amount}")` - interpolation of `{user.id}`
       inside a named argument. v0 interpolation only allowed the four
       bare placeholders. This spec generalizes interpolation to arbitrary
       expressions (§9.3), which subsumes the v0 form.
     - The design doc §2.3(5) "No escape hatch in v1" and §3.12 "while,
       recursion" bans are **superseded** by the user's 21:49 WIB order
-      (general-purpose language) — recorded in §0, not silently dropped.
+      (general-purpose language) - recorded in §0, not silently dropped.
     - The design doc §3.11 says a `task` body may `send` to "a configured
-      channel" — no channel configuration syntax was ever defined. This
+      channel" - no channel configuration syntax was ever defined. This
       spec defines `send <expr> to <expr>` with an explicit channel
       expression instead (§13.8); there is no "configured channel".
     - The design doc §3.10 `store.get(table, key)` / `set` / `delete`
@@ -2145,20 +2145,20 @@ to look:
     - The design doc §3.11 embed syntax (`embed:` blocks +
       `embed.set_*`) was never specified. This spec defines the
       `embed:` block expression in §13.7.
-    - The design doc's "poise 0.6.x" is stale — poise is 0.7.1 (§18,
+    - The design doc's "poise 0.6.x" is stale - poise is 0.7.1 (§18,
       per the expansion doc's live check).
 
 11. **Research UNVERIFIED register U1–U23** (`newr-deep-research.md`
-    §12 — each item states what would settle it; re-verify every number
+    §12 - each item states what would settle it; re-verify every number
     against its primary source before quoting externally or writing it
     into this spec):
     - **U1** Topics 1–5 per-claim source lists (not persisted as files).
     - **U2** Gleam v0.26 rebuild 18.443 s → 140.8 ms (131×, 1,400
-      modules) — no source persisted; never cite the figure.
+      modules) - no source persisted; never cite the figure.
     - **U3** TS type-check ~95% of build time; mypy daemon 10×+.
     - **U4** Benchmarks Game ed. 25.03 figures; TechEmpower R23.
     - **U5** HM undecidability citations (Wells 1999 / Henglein 1993).
-    - **U6** Similar-name suggestion threshold — settled in this spec
+    - **U6** Similar-name suggestion threshold - settled in this spec
       by decision, not by a standard: difflib ratio ≥ 0.7 (§16). The
       v0 value was 0.6; 0.7 was decided during M1 because 0.6 admits
       false positives once builtins join the candidate pool. No claim
@@ -2166,9 +2166,9 @@ to look:
     - **U7** Go compiler-diagnostic philosophy ("deliberately minimal").
     - **U8** Elm "Compiler Errors for Humans" verbatim quotes (fetch
       timed out 6 Nov 2026).
-    - **U9** Integer-division lint as a standard practice — none found;
+    - **U9** Integer-division lint as a standard practice - none found;
       the newr check is labelled newr-specific (§5.1).
-    - **U10** LSP effort estimate (person-weeks) — no number in this
+    - **U10** LSP effort estimate (person-weeks) - no number in this
       spec.
     - **U11** PEP 823/824 (PEP 505 split) as drafts.
     - **U12** Valhalla GA version (JDK 25 vs 26 vs 27 vs 28).
@@ -2184,12 +2184,12 @@ to look:
     - **U20** PYPL Python % in 2026 (29.7% vs ~35.8%).
     - **U21** RustConf founding year / attendance; Go "25 keywords";
       Go SO 2025 usage %.
-    - **U22** npm `bin` → Python program precedent — moot, npm dropped
+    - **U22** npm `bin` → Python program precedent - moot, npm dropped
       (item 9 above).
-    - **U23** PyPI `newr-lang` free-ness — settled by the expansion doc
+    - **U23** PyPI `newr-lang` free-ness - settled by the expansion doc
       (JSON API 404, 6 Nov 2026); re-check at publish time, not now.
     - **Conflicts noted honestly:** Gleam described as both HM and
-      bidirectional — do not cite it as a clean example of either; Rust
+      bidirectional - do not cite it as a clean example of either; Rust
       "did you mean" is folk usage (the style guide discourages it);
       Elm examples are reported, not compiler-verified; SO 2026 survey
       contradictory (Rust 67.4% vs Elm 94.1%); TIOBE Nov 2025 #2–#5
