@@ -343,7 +343,7 @@ jobs:
           python newr build --target js examples/hello.newr -o hello_out.js
           node hello_out.js
           python newr build --target js examples/shop.newr -o shop_out.js
-          node --check shop_out.js shop_items.js shop_deploy.js newr_rt.js
+          node --check shop_out.js shop_items.js shop_out_deploy.js newr_rt.js
           if node shop_out.js 2>&1 | grep -q DISCORD_TOKEN; then
             echo "shop: token guard reached (expected, no token set)"
           else
@@ -369,3 +369,192 @@ jobs:
       # now (compare-only; regeneration needs --bless, never by hand).
       - name: Golden comparison (JS)
         run: python -m unittest tests.test_goldens.TestGoldensJs -v
+
+  # M4: the Java emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # Java 21 is the floor (Temurin 21 LTS; the emitted code uses no
+  # feature newer than Java 17, K1). Python is still needed — the
+  # compiler itself is Python, and the full suite includes the
+  # Python emitter tests too. JDA + sqlite-jdbc are downloaded from
+  # Maven Central (the jars are NOT vendored in the repo).
+  java-emitter:
+    name: java emitter (${{ matrix.os }}, Java 21)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      # JDA 6.7.0 + sqlite-jdbc 3.54.1.0, the exact versions the
+      # emitter was verified against (javap + Maven Central).
+      # slf4j-api + trove4j are JDA runtime dependencies: the
+      # emitted bot's COMMANDS initializer runs at class-load time
+      # (before main's token check), and JDA's CommandDataImpl
+      # needs both to load — without them the run dies with
+      # NoClassDefFoundError instead of reaching the token guard.
+      - name: Download JDA + sqlite-jdbc + JDA runtime deps
+        shell: bash
+        run: |
+          mkdir -p "${{ runner.temp }}/jars"
+          curl -sSL -o "${{ runner.temp }}/jars/jda.jar" https://repo1.maven.org/maven2/net/dv8tion/JDA/6.7.0/JDA-6.7.0.jar
+          curl -sSL -o "${{ runner.temp }}/jars/sqlite-jdbc.jar" https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.54.1.0/sqlite-jdbc-3.54.1.0.jar
+          curl -sSL -o "${{ runner.temp }}/jars/slf4j-api.jar" https://repo1.maven.org/maven2/org/slf4j/slf4j-api/2.0.19/slf4j-api-2.0.19.jar
+          curl -sSL -o "${{ runner.temp }}/jars/trove4j.jar" https://repo1.maven.org/maven2/net/sf/trove4j/core/3.1.0/core-3.1.0.jar
+
+      - name: Full test suite (incl. Java emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target java`, compiles the emitted Java with javac, runs
+      # it, and requires a PASS verdict from each.
+      - name: Conformance corpus (Java)
+        run: python conformance/run.py --target java
+
+      # Build every example, compile the emitted Java, and run it.
+      # The bots (hello_bot, showcase, shop) stop at the
+      # DISCORD_TOKEN guard when no token is set: exit 1 with the
+      # token message — that is the expected behaviour here, and it
+      # proves the emitted bot got far enough to run its main().
+      - name: Build + run the examples (Java)
+        shell: bash
+        env:
+          JARS: ${{ runner.temp }}/jars/jda.jar:${{ runner.temp }}/jars/sqlite-jdbc.jar:${{ runner.temp }}/jars/slf4j-api.jar:${{ runner.temp }}/jars/trove4j.jar
+        run: |
+          python newr build --target java examples/hello.newr -o hello_out.java
+          javac hello_out.java && java hello_out
+          python newr build --target java examples/shop.newr -o shop_out.java
+          javac -cp "$JARS" shop_out.java shop_items.java shop_out_deploy.java NewrRt.java
+          if java -cp ".:$JARS" shop_out 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target java examples/hello_bot.newr -o hello_bot_out.java
+          javac -cp "$JARS" hello_bot_out.java hello_bot_out_deploy.java
+          if java -cp ".:$JARS" hello_bot_out 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target java examples/showcase.newr -o showcase_out.java
+          javac -cp "$JARS" showcase_out.java showcase_out_deploy.java
+          if java -cp ".:$JARS" showcase_out 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M4 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (Java)
+        run: python -m unittest tests.test_goldens.TestGoldensJava -v
+
+  # M4: the C# emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # .NET 8 is the floor (LTS; the emitted code uses no feature newer
+  # than C# 12). Python is still needed — the compiler itself is
+  # Python, and the full suite includes the Python emitter tests
+  # too. Discord.Net + Microsoft.Data.Sqlite come from NuGet at
+  # restore time (the packages are NOT vendored in the repo).
+  cs-emitter:
+    name: cs emitter (${{ matrix.os }}, .NET 8)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. C# emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+      # The conformance harness builds every ok program with
+      # `--target cs`, builds the emitted C# with dotnet, runs it,
+      # and requires a PASS verdict from each.
+      - name: Conformance corpus (C#)
+        run: python conformance/run.py --target cs
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+      # Build every example, build the emitted C#, and run it. The
+      # bots (hello_bot, showcase, shop) stop at the DISCORD_TOKEN
+      # guard when no token is set: exit 1 with the token message —
+      # that is the expected behaviour here, and it proves the
+      # emitted bot got far enough to run its Main().
+      - name: Build + run the examples (C#)
+        shell: bash
+        env:
+          DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+        run: |
+          python newr build --target cs examples/hello.newr -o hello_out.cs
+          dotnet run --project hello_out.csproj
+          python newr build --target cs examples/shop.newr -o shop_out.cs
+          dotnet build shop_out.csproj
+          if dotnet run --project shop_out.csproj --no-build 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target cs examples/hello_bot.newr -o hello_bot_out.cs
+          dotnet build hello_bot_out.csproj
+          if dotnet run --project hello_bot_out.csproj --no-build 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target cs examples/showcase.newr -o showcase_out.cs
+          dotnet build showcase_out.csproj
+          if dotnet run --project showcase_out.csproj --no-build 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M4 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (C#)
+        run: python -m unittest tests.test_goldens.TestGoldensCs -v

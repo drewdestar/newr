@@ -42,9 +42,10 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
 
   check <file> [--fast]  verify a .newr program (parse, resolve, check);
                          writes nothing
-  build <file> [--target py|js] [-o <out>] [--line-comments] [--check] [--fast]
+  build <file> [--target py|js|java|cs] [-o <out>] [--line-comments] [--check] [--fast]
                          build a .newr program into runnable Python
-                         (default --target py) or JavaScript (--target js)
+                         (default --target py), JavaScript (--target js),
+                         Java (--target java) or C# (--target cs)
   help [command]         show this help, or help for one command
   version                print the newr version
   explain <code>         explain a diagnostic code (also: --explain <code>)
@@ -75,7 +76,7 @@ the program has no errors (warnings are fine), 4 when it has errors,
            all Discord validation. The result is not verified — say so
            in the output.
 """,
-    "build": """Usage: newr build <file> [--target py|js] [-o <out>] [--line-comments] [--check] [--fast]
+    "build": """Usage: newr build <file> [--target py|js|java|cs] [-o <out>] [--line-comments] [--check] [--fast]
 
 Build a .newr program into runnable code for one target (Python and
 TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2).
@@ -86,7 +87,15 @@ copy of the runtime module `newr_rt.py` when the program uses a
 runtime helper. M3: `--target js` emits JavaScript (CommonJS, one
 `.js` per `.newr` file) the same way, plus `newr_rt.js` when used —
 and a standalone `<stem>_deploy.js` for bot programs (run it once to
-register the slash commands, then `node <stem>.js`). `--check` runs
+register the slash commands, then `node <stem>.js`). M4: `--target
+java` emits Java (one `.java` per `.newr` file, one public class per
+file named after the file stem, plus `NewrRt.java` when used — the
+runtime source is `newr_rt.java`, renamed on copy because javac
+requires the file name to match the public class; run with
+`javac *.java && java <Stem>`) and `--target cs` emits C# (one `.cs`
+per `.newr` file plus `newr_rt.cs` when used, run with
+`dotnet run --project <stem>.csproj`); bot programs also get a
+standalone `<stem>_deploy.java` / `<stem>_deploy.cs`. `--check` runs
 the same pipeline as `newr check` and writes nothing.
 `--line-comments` adds `# newr:<file>:<line>` comments to the emitted
 code. `--fast` parses + resolves only, skipping the full type check
@@ -563,9 +572,9 @@ def _cmd_build(args: list[str], *, json_mode: bool,
         else:
             rest.append(arg)
             i += 1
-    if target not in ("py", "js"):
+    if target not in ("py", "js", "java", "cs"):
         raise _UsageError(
-            f"unknown target `{target}` (targets: py, js)")
+            f"unknown target `{target}` (targets: py, js, java, cs)")
     fast = "--fast" in rest
     rest = [a for a in rest if a != "--fast"]
     if "--check" in rest:
@@ -589,8 +598,8 @@ def _build_emit(args: list[str], *, output: str | None,
                 line_comments: bool, target: str = "py",
                 json_mode: bool,
                 error_format_json: bool) -> int:
-    """`newr build <file>` — verify, then emit Python (M2) or
-    JavaScript (M3)."""
+    """`newr build <file>` — verify, then emit Python (M2),
+    JavaScript (M3), Java (M4) or C# (M4)."""
     unknown = [a for a in args if a.startswith("-")]
     if unknown:
         raise _UsageError("unknown flag(s) for `newr build`: "
@@ -624,15 +633,38 @@ def _build_emit(args: list[str], *, output: str | None,
         from .emitter_js import EmitterError, emit_program
         suffix = ".js"
         rt_name = "newr_rt.js"
+        rt_copy_name = rt_name
+    elif target == "java":
+        from .emitter_java import EmitterError, emit_program
+        suffix = ".java"
+        rt_name = "newr_rt.java"
+        # javac requires the file name to match the public class, so
+        # the runtime is copied as NewrRt.java (K1).
+        rt_copy_name = "NewrRt.java"
+    elif target == "cs":
+        from .emitter_cs import EmitterError, emit_program
+        suffix = ".cs"
+        rt_name = "newr_rt.cs"
+        rt_copy_name = rt_name
     else:
         from .emitter import EmitterError, emit_program
         suffix = ".py"
         rt_name = "newr_rt.py"
+        rt_copy_name = rt_name
     try:
         sources = {f: get_source(f) for f in program.files}
-        result = emit_program(program, main_path=str(path),
-                              sources=sources,
-                              line_comments=line_comments)
+        if target in ("java", "cs"):
+            # The output stem is the public class name (Java) / the
+            # project name (C#); it comes from -o when given.
+            output_stem = Path(output).stem if output else None
+            result = emit_program(program, main_path=str(path),
+                                  sources=sources,
+                                  line_comments=line_comments,
+                                  output_stem=output_stem)
+        else:
+            result = emit_program(program, main_path=str(path),
+                                  sources=sources,
+                                  line_comments=line_comments)
     except EmitterError as exc:
         # §20: the emitter attaches the span of the expression it
         # could not emit when it knows it (its `_fail` calls pass
@@ -653,6 +685,11 @@ def _build_emit(args: list[str], *, output: str | None,
     out_dir.mkdir(parents=True, exist_ok=True)
     main_out = (Path(output) if output
                 else path.with_suffix(suffix))
+    if target == "java" and output:
+        # The Java main file MUST be named after its public class
+        # (K1) — the -o path controls the directory, but the file
+        # name comes from the emitter (the sanitized stem).
+        main_out = main_out.parent / result.main_file
     for name, text in result.files.items():
         if output and name == result.main_file:
             dest = main_out
@@ -660,9 +697,9 @@ def _build_emit(args: list[str], *, output: str | None,
             dest = main_out.parent / name
         dest.write_text(text, encoding="utf-8")
     if result.uses_rt:
-        # Copy compiler/newr_rt.py (or newr_rt.js) next to the
-        # output (D4) — read via the package so the zipapp build
-        # keeps working.
+        # Copy compiler/newr_rt.py (or newr_rt.js / newr_rt.java /
+        # newr_rt.cs) next to the output (D4) — read via the package
+        # so the zipapp build keeps working.
         import importlib.resources as _res
         try:
             rt_text = (_res.files("compiler") / rt_name
@@ -670,7 +707,7 @@ def _build_emit(args: list[str], *, output: str | None,
         except Exception:
             rt_text = (Path(__file__).parent / rt_name
                        ).read_text(encoding="utf-8")
-        (main_out.parent / rt_name).write_text(
+        (main_out.parent / rt_copy_name).write_text(
             rt_text, encoding="utf-8")
     if json_mode:
         data = {"file": str(path),
@@ -690,7 +727,7 @@ def _build_emit(args: list[str], *, output: str | None,
         else:
             dests.append(str(main_out.parent / name))
     if result.uses_rt:
-        dests.append(str(main_out.parent / rt_name))
+        dests.append(str(main_out.parent / rt_copy_name))
     names = ", ".join(dests)
     if warnings:
         print(f"{path}: ok, {len(warnings)} warning(s) — "

@@ -1,0 +1,156 @@
+"""Tests for the Java emitter (compiler/emitter_java.py, M4).
+
+TDD RED first: written before the emitter existed. The
+`emit_java_src` helper runs the full front-end pipeline (resolve +
+core check + discord check) and emits Java; `run_java_src` also
+compiles and executes the emitted program with javac/java and
+returns its stdout.
+
+Every test pins a decision from BUILD_REPORT.md §21 (decisions
+K1–K13) or a SPEC rule the emitter must preserve — including the
+Java-specific traps (long ints with the L suffix and the
+Long.MIN_VALUE literal, checked int64 via Math.addExact, Python-repr
+float rendering via NewrRt.floatStr, capture-by-value via snapshot
+locals, `var` is never used because `var x = null` is illegal).
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from compiler.checker import check_program
+from compiler.discord_check import check_discord, discord_providers
+from compiler.resolver import resolve_file, resolve_source
+
+ROOT = Path(__file__).resolve().parent.parent
+RT_JAVA_SRC = ROOT / "compiler" / "newr_rt.java"
+
+# The JDK lives in ~/jdk-21 (installed for M4); fall back to the
+# PATH when it is not there (e.g. CI, where setup-java provides it).
+_JAVA_HOME = Path(os.environ["JAVA_HOME"]) \
+    if os.environ.get("JAVA_HOME") else (Path.home() / "jdk-21")
+_JAVA_BIN = _JAVA_HOME / "bin"
+JAVA = shutil.which("java", path=str(_JAVA_BIN)) or shutil.which("java")
+JAVAC = shutil.which("javac", path=str(_JAVA_BIN)) or shutil.which("javac")
+
+try:
+    from compiler.emitter_java import EmitterError, emit_program as emit_java
+    HAS_JAVA_EMITTER = True
+except ImportError:
+    HAS_JAVA_EMITTER = False
+
+
+def full_program(src, filename="<test>.newr"):
+    """Resolve + check a source string; assert it is clean."""
+    resolved = resolve_source(src, filename)
+    diags = list(resolved.diagnostics)
+    diags += check_program(
+        resolved.program,
+        providers=discord_providers(resolved.program)).diagnostics
+    diags += check_discord(resolved.program)
+    errs = [d for d in diags if d.is_error()]
+    assert not errs, [f"{d.code}: {d.message}" for d in errs]
+    return resolved.program
+
+
+def emit_java_src(src, filename="<test>.newr", stem="Main"):
+    """Emit a checked program to Java; returns the EmitResult."""
+    program = full_program(src, filename)
+    return emit_java(program, main_path=filename,
+                     sources={filename: src}, output_stem=stem)
+
+
+def emit_java_main_text(src, filename="<test>.newr", stem="Main"):
+    """The emitted text of the main output file."""
+    result = emit_java_src(src, filename, stem)
+    return result.files[result.main_file]
+
+
+def run_java_src(src, filename="<test>.newr", stem="Main",
+                 argv=None, env=None, files=None):
+    """Emit to a temp dir, copy NewrRt.java if needed, compile with
+    javac and run with java.
+
+    Returns (stdout, stderr, returncode). `files` maps extra
+    .newr filenames to sources (for file imports).
+    """
+    result = emit_java_src(src, filename, stem)
+    with tempfile.TemporaryDirectory() as d:
+        for name, text in result.files.items():
+            (Path(d) / name).write_text(text, encoding="utf-8")
+        if result.uses_rt:
+            (Path(d) / "NewrRt.java").write_text(
+                RT_JAVA_SRC.read_text(encoding="utf-8"), encoding="utf-8")
+        java_files = [str(p) for p in Path(d).glob("*.java")]
+        proc = subprocess.run(
+            [JAVAC, *java_files], capture_output=True, text=True, cwd=d)
+        if proc.returncode != 0:
+            return "", proc.stderr, proc.returncode
+        proc = subprocess.run(
+            [JAVA, stem, *(argv or [])],
+            capture_output=True, text=True, cwd=d, env=env)
+        return proc.stdout, proc.stderr, proc.returncode
+
+
+def run_java_ok(src, filename="<test>.newr", stem="Main",
+                argv=None, env=None):
+    stdout, stderr, code = run_java_src(src, filename, stem, argv, env)
+    assert code == 0, f"exit {code}\nstdout: {stdout}\nstderr: {stderr}"
+    return stdout
+
+
+@unittest.skipUnless(JAVA and JAVAC, "a JDK is not installed")
+@unittest.skipUnless(HAS_JAVA_EMITTER, "compiler/emitter_java.py is missing")
+class TestHelloAndHeader(unittest.TestCase):
+    def test_hello_emits_and_runs(self):
+        text = emit_java_main_text('print "Hello, world!"\n',
+                                   "examples/hello.newr", "Hello")
+        self.assertIn('System.out.println("Hello, world!")', text)
+        self.assertEqual(run_java_ok('print "Hello, world!"\n',
+                                     "examples/hello.newr", "Hello"),
+                         "Hello, world!\n")
+
+    def test_header_names_the_source_file(self):
+        text = emit_java_main_text('print "x"\n', "examples/hello.newr",
+                                   "Hello")
+        self.assertTrue(
+            text.startswith(
+                "// Generated by newr from examples/hello.newr "
+                "— do not edit by hand.\n"
+                "// Edit the .newr file and rebuild with: "
+                "newr build examples/hello.newr\n"),
+            text[:200])
+
+    def test_no_rt_import_when_unused(self):
+        result = emit_java_src('print "Hello, world!"\n',
+                               "examples/hello.newr", "Hello")
+        self.assertFalse(result.uses_rt)
+        self.assertNotIn("NewrRt", result.files[result.main_file])
+
+    def test_class_name_is_the_stem(self):
+        text = emit_java_main_text('print "x"\n', "examples/hello.newr",
+                                   "Hello")
+        self.assertIn("public class Hello {", text)
+        self.assertIn("public static void main(String[] args) {", text)
+
+    def test_arithmetic_emits_and_runs(self):
+        self.assertEqual(
+            run_java_ok('let x = 1 + 2 * 3\nprint x\n'), "7\n")
+        self.assertEqual(
+            run_java_ok('print 2 ** 10\n'), "1024\n")
+        self.assertEqual(
+            run_java_ok('print 7 / 2\n'), "3\n")
+        self.assertEqual(
+            run_java_ok('print 7 % 3\n'), "1\n")
+        self.assertEqual(
+            run_java_ok('print -7 / 2\n'), "-3\n")
+        self.assertEqual(
+            run_java_ok('print -7 % 2\n'), "-1\n")
+
+
+if __name__ == "__main__":
+    unittest.main()

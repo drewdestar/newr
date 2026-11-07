@@ -11,8 +11,10 @@ import difflib
 import unittest
 from pathlib import Path
 
-from conformance.run import (GOLDENS, GOLDENS_JS, GOLDEN_DIR,
-                             GOLDEN_DIR_JS, ROOT, _build_to_temp)
+from conformance.run import (GOLDENS, GOLDENS_JS, GOLDENS_JAVA,
+                             GOLDENS_CS, GOLDEN_DIR, GOLDEN_DIR_JS,
+                             GOLDEN_DIR_JAVA, GOLDEN_DIR_CS, ROOT,
+                             _build_to_temp)
 
 
 class TestGoldens(unittest.TestCase):
@@ -90,3 +92,61 @@ class TestGoldensJs(unittest.TestCase):
         for i in diffs:
             self.assertIn("hello", v0_lines[i])
             self.assertIn("hello_bot", g_lines[i])
+
+
+class TestGoldensJava(unittest.TestCase):
+    """The Java twins (M4): same sources, `.java` outputs,
+    compare-only. Regeneration needs an explicit
+    `python3 conformance/run.py --bless --target java [--only <name>]`;
+    never hand-edit a golden.
+    """
+
+    def test_goldens_java_match_emitted_output(self):
+        for name in sorted(GOLDENS_JAVA):
+            with self.subTest(golden=name):
+                source, outputs = GOLDENS_JAVA[name]
+                built = _build_to_temp(Path(source), target="java")
+                for out in outputs:
+                    golden = GOLDEN_DIR_JAVA / out
+                    self.assertTrue(golden.is_file(),
+                                    f"golden {golden} is missing — "
+                                    f"run `python3 conformance/run.py "
+                                    f"--bless --target java --only {name}`")
+                    expected = golden.read_text(encoding="utf-8")
+                    actual = built[out]
+                    if actual != expected:
+                        diff = "".join(difflib.unified_diff(
+                            expected.splitlines(keepends=True),
+                            actual.splitlines(keepends=True),
+                            fromfile=f"golden {out}",
+                            tofile=f"emitted {out}"))
+                        self.fail(f"golden {out} is stale:\n{diff}")
+
+
+class TestGoldensCs(unittest.TestCase):
+    """The C# twins (M4): same sources, `.cs` outputs,
+    compare-only. Regeneration needs an explicit
+    `python3 conformance/run.py --bless --target cs [--only <name>]`;
+    never hand-edit a golden.
+    """
+
+    def test_goldens_cs_match_emitted_output(self):
+        for name in sorted(GOLDENS_CS):
+            with self.subTest(golden=name):
+                source, outputs = GOLDENS_CS[name]
+                built = _build_to_temp(Path(source), target="cs")
+                for out in outputs:
+                    golden = GOLDEN_DIR_CS / out
+                    self.assertTrue(golden.is_file(),
+                                    f"golden {golden} is missing — "
+                                    f"run `python3 conformance/run.py "
+                                    f"--bless --target cs --only {name}`")
+                    expected = golden.read_text(encoding="utf-8")
+                    actual = built[out]
+                    if actual != expected:
+                        diff = "".join(difflib.unified_diff(
+                            expected.splitlines(keepends=True),
+                            actual.splitlines(keepends=True),
+                            fromfile=f"golden {out}",
+                            tofile=f"emitted {out}"))
+                        self.fail(f"golden {out} is stale:\n{diff}")

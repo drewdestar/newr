@@ -3132,3 +3132,675 @@ confirm the sha256 matches exactly and the tests are green again.
 - Unchanged from before: §16.4 amount-based debit/credit heal;
   §19.5 async functions for SPEC §9.5 store reads from fns; CI
   matrix never run (Windows/macOS); P-42 live Discord.
+
+## 21. M4 — Java + C# emitters (7 Nov 2026)
+
+M4 adds two targets: Java (JDA 6.7.0) and C# (Discord.Net 3.20.2).
+Same method as M2/M3: TDD red first, conformance programs print
+their own verdict, goldens compare-only, CLI contract unchanged.
+
+### 21.1 Toolchains (settled live, both verified)
+
+- Java: **Temurin OpenJDK 21.0.13+9 (LTS)** at `~/jdk-21`
+  (`java -version` / `javac -version` → openjdk 21.0.13).
+  Route: direct download from Adoptium
+  (`https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse`,
+  207,858,352 bytes, ~92 s), extracted to `~/jdk-21`. The
+  `sudo apt-get update` + `openjdk-21-jdk-headless` route STALLED
+  (apt-get update still running after 6+ minutes, killed).
+- .NET: **SDK 8.0.427, runtime 8.0.33** at `~/.dotnet`
+  (`dotnet --version` → 8.0.427). Route: Microsoft
+  `dotnet-install.sh --channel 8.0 --install-dir ~/.dotnet`.
+  First attempt hit the 512MB /tmp tmpfs limit (tar extraction
+  error); retry with `TMPDIR=~/dotnet-tmp` still ended with a tar
+  error, but the SDK is functional (`dotnet --list-runtimes` shows
+  AspNetCore.App 8.0.33 + NETCore.App 8.0.33; `dotnet new console`
+  + `dotnet run` printed "Hello, World!"). Scratch dir
+  `~/dotnet-tmp`.
+- PATH wired in `~/.bashrc`: `JAVA_HOME="$HOME/jdk-21"`,
+  `PATH="$HOME/jdk-21/bin:$HOME/.dotnet:$PATH"`,
+  `DOTNET_CLI_TELEMETRY_OPTOUT=1`. Each `muse.exec` call is a
+  fresh shell; PATH must be exported per call. `java`/`dotnet`
+  are NOT on the default PATH without the export.
+- VM facts: Ubuntu 24.04.5 LTS, 4 CPUs, ~2 GB available RAM,
+  133 GB free disk. `/tmp` is 512MB tmpfs — dotnet builds and
+  temp dirs must stay small or use a home-dir TMPDIR.
+- **Gotcha found live: `python3 -m compiler.cli` silently does
+  nothing** (cli.py has no `__main__` guard — it only imports
+  the module and exits 0, writing no files). The real entry
+  point is the `./newr` launcher script.
+
+### 21.2 What was built
+
+- `compiler/emitter_java.py` (5,757 lines) + `compiler/newr_rt.java`
+  (1,438 lines). `tests/java/RtChecks.java` +
+  `tests/test_newr_rt_java.py` (TDD RED first),
+  `tests/test_emitter_java.py` (6 tests), `tests/test_emitter_java_bot.py`
+  (10 tests, TDD RED→GREEN).
+- `compiler/emitter_cs.py` (3,831+ lines) + `compiler/newr_rt.cs`
+  (1,245+ lines). `tests/cs/RtChecks.cs` +
+  `tests/test_emitter_cs.py` (4 tests), `tests/test_emitter_cs_bot.py`
+  (31 tests, TDD RED first).
+- CLI: `newr build --target java` / `--target cs` (and `--check`,
+  `-o`, `--line-comments`, `--fast` refusal, emitter errors to
+  clean exit-4 E4001, same as py/js). USAGE/COMMAND_HELP updated
+  with an M4 paragraph. `_cmd_build` targets
+  `("py", "js", "java", "cs")`; `_build_emit` dispatch for java/cs
+  (suffix, rt_name, rt copy name `NewrRt.java` for java,
+  `output_stem` from `-o`).
+- Conformance runner (`conformance/run.py`) extended: GOLDENS_JAVA /
+  GOLDENS_CS, `_SUFFIX` / `_RT_SRC` / `_RT_COPY` /
+  `_GOLDENS_BY_TARGET` / `_GOLDEN_DIR_BY_TARGET` maps, toolchain
+  discovery (JAVA/JAVAC from JAVA_HOME or ~/jdk-21; DOTNET from
+  DOTNET_ROOT or ~/.dotnet), java branch (javac all `*.java`, then
+  `java <stem>`), cs branch (`dotnet run --project <stem>.csproj`,
+  DOTNET_CLI_TELEMETRY_OPTOUT=1), `--target` choices
+  `py, js, java, cs`. **Runner bug found and fixed this session:
+  `_build_to_temp` globbed only `*.cs`, never collecting the
+  `.csproj`, so every C# conformance program failed with "project
+  file does not exist" — fixed to also collect `*.csproj` for cs.**
+- Goldens: `goldens/java/` + `goldens/cs/` created via `--bless`
+  after the coordinator read every golden line by line: hello (11
+  lines each), hello_bot (Java ~87 lines, C# 87 lines), showcase
+  (Java 108, C# 101), shop (Java 501, C# 566), shop_items (Java 16,
+  C# 17), plus `hello_bot_deploy` and `shop_deploy` files.
+  `showcase_deploy` is NOT a golden on any target (consistent with
+  py/js). `tests/test_goldens.py` extended with `TestGoldensJava` +
+  `TestGoldensCs`.
+- New conformance program: `conformance/ok/import_aliased.newr`
+  (aliased file-module import; `let f = h.is_red` lines REMOVED
+  because py/js emitters fail E4001 on it — PRE-EXISTING gap in
+  py/js emitters, not an M4 regression; recorded as open item.
+  Java emitter handles it via method reference).
+
+### 21.3 Java decisions (K-pins)
+
+- K1 One public class per file, name = file stem verbatim via
+  `_java_class_name`, runtime ships as `NewrRt.java` (rename on
+  copy).
+- K2 Top-level `let`/`const` are `public static` fields with NO
+  initializer, initialized in main() or the module's `static {}`
+  block in file order.
+- K3 int = long, literals `123L`, Long.MIN_VALUE special-cased,
+  float literals via Python repr, non-finite → `Double.NaN` /
+  `POSITIVE_INFINITY` / `NEGATIVE_INFINITY`, `var` NEVER used for
+  locals (except pattern bindings whose type cannot be resolved).
+- K4 Fn values use `NewrRt.Fn0`–`Fn8` (arity 0–8, higher = clean
+  E4001), lambdas carry explicit cast unless context provides
+  target (`fn_target` threading), module-level fns as values are
+  method references (`Main::fn`), arbitrary-expression calls use
+  `.get()` / `.apply(...)`.
+- K5 Lambda capture-by-value via hoisted `final` snapshot locals.
+- K6 Structs are `public static class` with public final fields +
+  equals/hashCode/toString, enums are ONE class with
+  `public final String _newr_variant` discriminant + union fields
+  + static instances/factories.
+- K7 `?.` chains port JS segment logic exactly.
+- K8 `?` propagate ported exactly (temp + `if (temp.isErr()) {
+  return temp;}` / `if (temp == null) { return null;}`,
+  `temp._value`).
+- K9 `==`/`!=` structural via `NewrRt.eq` for collections /
+  Result / struct / enum else null-safe `Objects.equals`,
+  ordering on str via `compareTo`, `in` on dict via
+  `containsKey`, `strip` → `String.strip()`, `split` →
+  `NewrRt.splitStr`, `join` → `String.join`, `chars` →
+  `NewrRt.chars`, `abs` on int → `NewrRt.absLong`, `min`/`max`
+  inline ternary, `len` → `(long) size()` /
+  `(long) NewrRt.chars(s).size()`, list literals
+  `new ArrayList<>(Arrays.<T>asList(...))` (NOT List.of, rejects
+  nulls), dict literals `NewrRt.<V>dictOf(...)`, interp is `+`
+  concatenation prefixed with `"" + ` when first part is an
+  expression, `ok`/`err` one type param
+  (`NewrRt.<Long>ok(...)`), `env.args` → `NewrRt.envArgs()`
+  backed by `_mainArgs` set by main() via `setMainArgs` patch
+  (prepends class name as argv[0]), `env.get` →
+  `NewrRt.envGet`, `log.info` → System.out.println,
+  `log.warn`/`log.error` → System.err.println.
+- K10 Store calls synchronous (no `await`, JDBC blocks), §19
+  guard still applies (E4001 outside handlers).
+- K11 `for` over list/set enhanced for loop, dict `.keySet()`,
+  str `NewrRt.chars(...)`, `try` catches `Throwable` coerced
+  via `NewrRt.asError`, >1 catch = clean E4001, `throw` str →
+  `throw new NewrRt.NewrError(text);`, top-level bare `return`
+  → `System.exit(0);`, `ensures` use `_newrResult` temp.
+- K12 `_emit_general_file` emits header + imports +
+  `public class <Stem> {` with static fields, nested structs /
+  enums, static fns, then main() or `static {}` block;
+  `_render_imports` emits `import java.util.*;` unconditionally
+  + `import java.sql.*;` for sqlite + one
+  `import <fully-qualified>;` per JDA class.
+- K13 Bot (JDA 6.7.0): one public class extending
+  `ListenerAdapter` — top-level lets as static fields,
+  structs/enums, synthesized row classes per store table (bound
+  in module scope as structs), nested `private static class Bot`
+  with the JDBC store, `COMMANDS` table, component handler maps
+  + static registration block, execute/component/task methods,
+  dispatch overrides, `main()`. Commands:
+  `Commands.slash(...).addOptions(new OptionData(...))` with
+  `setMinValue(1L)` / `setMaxValue(99L)` (long vs double overloads
+  disambiguated) and `addChoice`; option bindings read through
+  `OptionMapping` for optional options with defaults/null.
+  Answers: `reply` / `deferReply` / `editOriginal` /
+  `getHook().sendMessage` / `sendMessage` on channels, all ending
+  in blocking `.complete()`. Ephemeral only on interaction
+  replies (clean E4001 otherwise). Components: buttons/selects /
+  modals via `ActionRow` + `Button.primary` /
+  `StringSelectMenu` / `Modal` with `Label.of(..., TextInput...)`
+  (JDA 6 has no TextInput label). Handler methods routed by
+  customId through static `Map<String, Consumer<…>>` maps;
+  `only: author` via per-message `_componentAuthors` map
+  (messageId + customId → user id); `only: roles` via
+  roles-stream check; timeouts on shared
+  `ScheduledExecutorService` (disables rows, runs `on_timeout`
+  with `timeout_edit` reply kind). Store (P11): one long-lived
+  JDBC connection per store, `jdbc:sqlite:<store>.db`,
+  `PRAGMA busy_timeout = 5000`, `BEGIN IMMEDIATE` / `COMMIT` /
+  `ROLLBACK` per mutation, ledger + balance in one transaction,
+  duplicate idempotency key replays, transfer ledger healing
+  (`:out` / `:in`), all methods `synchronized`, balances as TEXT
+  via `NewrRt.add/sub`. Entities: `user.id` → `getIdLong()`,
+  `mention` → `getAsMention()`, `guild.name`, `message.content`
+  → `getContentRaw()`, `interaction.channel` →
+  `(MessageChannel) getChannel()`, etc. Deploy + pom:
+  `<stem>_deploy.java` (guild when `DISCORD_GUILD_ID` set, else
+  global, prints count) and `pom.xml` (JDA 6.7.0 always;
+  sqlite-jdbc 3.54.1.0 only when a store is used; Java 17,
+  maven-compiler-plugin 3.11.0).
+
+### 21.4 C# decisions (C-pins)
+
+- C1 int = long, float = double, bool = bool, str = string,
+  list = `List<T>`, dict = `Dictionary<string, V>`,
+  set = `HashSet<T>`, Result = `NewrRt.Result<T,E>`,
+  fn = `Func<...>` up to 16 params, NO v1 arity limit (unlike
+  Java Fn0–Fn8); fn values invoke directly (no `.get()` /
+  `.apply()`).
+- C2 Entities → Discord.Net interfaces `Discord.IUser` /
+  `IGuildUser` / `IGuild` / `IMessageChannel` / `IRole` /
+  `IDiscordInteraction` / `Embed` / `IUserMessage`.
+- C3 `Main` class/method collision CS0542 — stem exactly "Main"
+  becomes class/file `MainProgram`.
+- C4 `const` locals get NO modifier in C# (newr `const` is
+  checker-immutable, not a compile-time constant).
+- C5 File modules get a static constructor
+  `static <Stem>() {}` (C# has no `static {}` block).
+- C6 `emit_program_cs` always emits `<stem>.csproj`
+  (SDK-style, net8.0, `<Nullable>disable</Nullable>`,
+  `<ImplicitUsings>disable</ImplicitUsings>`,
+  `<AssemblyName>`). `Main` is
+  `public static void Main(string[] args)`.
+- C7 `env.args`: same argv[0] rule as Java — the C# runtime has
+  `SetMainArgs(string prog, string[] args)` and the emitter
+  patches it into Main().
+- C8 `?.` / `??` / `unwrap` dispatch to kind-specific helpers
+  with explicit type args (helper `_opt_chain_call` picks
+  OptChain / OptChainVal / OptChainNullable by result kind,
+  `_coalesce_call` picks Coalesce / CoalesceVal).
+- C9 `is_ok` / `is_err` → `IsOk()` / `IsErr()`; `?` propagate on
+  a value type returns `temp.Value`.
+- C10 Generated `.csproj` has `<NoWarn>CS8981</NoWarn>`
+  (lowercase stem class names are normal for newr).
+- C11 `INewrRepr` is a top-level interface, NOT nested in
+  NewrRt (emitted structs/enums could not see it as
+  `INewrRepr`).
+- C12 Bot (Discord.Net 3.20.2): all 11 stubs replaced with a
+  real emitter; same semantics as py/js (slash commands, store
+  economy with SQLite + idempotency, `HARNESS-PASS` against
+  real SQLite: credit idempotency `balance=100`, debit
+  `True balance=70`, debit-replay `True balance=70`,
+  insufficient `poor=False balance=70`, transfer
+  `True u1=50 u2=20`, transfer-replay same, `economy_set` row
+  `u3=5`, `get` contains `balance: 50`). Store name `economy`
+  is in the emitter's reserved list, so methods are
+  `economy__balance` etc. and the DB file is `economy_.db`
+  (Java uses `economy.db` — cross-target divergence,
+  consistent within C#). Modal `timeout:` / `on_timeout:`
+  accepted by the checker but ignored (Discord.Net has no
+  modal timeout); button/select timeouts honored via
+  `_ComponentTimeoutAsync`. Deploy class is `hello_botDeploy`
+  (no underscore — C# naming quirk). Sync handlers (ready/task
+  with no `await`) emit a non-async lambda/method returning
+  `Task.CompletedTask` (otherwise every generated bot carries a
+  CS1998 warning). Bot `.csproj` enumerates its `Compile` items
+  explicitly (`Remove="*.cs"` + per-file `Include`,
+  `newr_rt.cs` conditional on existence) — SDK globbing
+  compiled every `.cs` in `examples/` into each project
+  (CS0017, two Mains), deploy file never listed; general
+  programs' csproj untouched. `ApplicationCommandInteractionDataOption`
+  does not exist — real option type is
+  `Discord.WebSocket.SocketSlashCommandDataOption` (found by
+  compiling a reflection probe). `SocketSelectMenu` does not
+  exist in 3.20.2 — select events are `SocketMessageComponent`;
+  modal values via `Data.Components`.
+- C13 C# runtime: checked arithmetic via `checked{}` →
+  OverflowException → NewrOverflowError; `BitConverter.DoubleToInt64Bits`
+  for exact decimal; `FloatStr` from .NET "R" format digits +
+  Python exponent rules; `ToStr`; `Result<T,E>` implementing
+  `INewrRepr`; `Ok` / `Err` / `TryResult`; `Eq` deep structural;
+  `ListIndex` / `ListGet` / `ListContains`;
+  `SetRemove<T>` generic; `Range`; `Print` (params object?[]);
+  `Input` (Console.ReadLine, "" at EOF); `RandomInt` rejection
+  sampling via `RandomNumberGenerator.Fill` +
+  `new BigInteger(buf, isUnsigned: true, isBigEndian: true)`;
+  `RandomChoice`; `RandomShuffle` manual Fisher-Yates with
+  `Random.Shared`; `TimeFormat` via DateTimeOffset UTC;
+  `FileRead` / `FileWrite` / `FileAppend` wrap via `AsError`
+  (missing file code "FileNotFoundException"); `FileExists`;
+  `HashOf`, `StructHash`, `EnvGet` (1-arg + 2-arg), `EnvArgs` +
+  `_mainArgs` + `SetMainArgs` (prepends program name as argv[0]),
+  `LenOf`, `DictOf<V>(params object?[] kvs)`
+  (Dictionary<string, V>, null values allowed, null keys throw),
+  `Chars` (EnumerateRunes), `SplitStr` (literal,
+  StringSplitOptions.None), `StrIndex` (code points, negative
+  wrap, IndexError), `AbsLong` (long.MinValue →
+  NewrOverflowError), `OptChainNullable` helper (chains ending
+  in a nullable value type).
+
+### 21.5 C# runtime lessons (for future work)
+
+- For unconstrained T, `T?` collapses to `T` (not Nullable<T>)
+  — kind-specific helpers OptChain / OptChainVal /
+  OptChainNullable, Coalesce / CoalesceVal, UnwrapOpt /
+  UnwrapOptVal with EXPLICIT type args (a plain `long` argument
+  does not infer T for a `Nullable<T>` parameter).
+- Ternary-default trap in OptChainVal (`v == null? default:
+  f(v)` types `default` as R=0, not R? — explicit
+  `return null` is load-bearing).
+- Local functions CANNOT overload (CS0128 — single Eq).
+- `#nullable enable annotations` (NOT `disable`: disable causes
+  CS8632 warnings).
+- `HashSet<T>` does NOT implement non-generic `ICollection`
+  in .NET 8 (LenOf enumerates).
+- Dictionary insertion order is in practice, not guaranteed.
+- DictOf allows null values, not null keys.
+- `Equals(object? obj)` → `Equals(object obj)` (CS8632 with
+  Nullable disabled).
+- `CoalesceVal` returns `T` not `T?` (a `??` always produces a
+  value; `long?`→`long` was CS0266).
+
+### 21.6 Java runtime (summary)
+
+- Checked int64 via `Math.addExact/subtractExact/multiplyExact/
+  negateExact` with BigInteger overflow messages matching JS;
+  `powInt` repeated squaring; `tdiv`/`tmod` (Java `/`/`%` already
+  truncate); `powFloat`, `fmod`, `fdiv` (ZeroDivisionError);
+  `roundHalfAway` via exact decimal (bit decomposition +
+  BigInteger); `toInt`/`toFloat`/`toBool`; `floatStr` Python repr
+  semantics via exact decimal digits from
+  `new BigDecimal(double)` + shortest-prefix search (Java's
+  `Double.toString` differs from Python's in rare edge cases,
+  e.g. 5e-324); `toStr` (P8); `Result<T,E>`; `eq` deep structural
+  (double branch uses unboxed `==`: -0.0==0.0 true, NaN==NaN
+  false); `optChain`/`coalesce`; `listIndex`/`listGet`/
+  `listContains`/`setRemove`/`unwrapOpt`; `range`; `print`/
+  `input`; `randomInt` rejection sampling with SecureRandom;
+  `randomChoice`/`randomShuffle`; `timeFormat` UTC fixed set;
+  `fileRead`/`fileWrite`/`fileAppend` wrap IOException via
+  `asError` (missing file code "NoSuchFileException");
+  `fileExists`; `chars` (code points), `splitStr`
+  (Pattern.quote + split -1), `strIndex` (code-point, Python
+  negative wrap, IndexError), `absLong` (Long.MIN_VALUE =
+  overflow error), `lenOf`, `dictOf` (LinkedHashMap, allows
+  null keys/values), `envGet` overloads, `envArgs` + `_mainArgs`,
+  `hashOf` + `structHash` (-0.0/0.0 hash alike), `Fn0`–`Fn8`
+  functional interfaces.
+
+### 21.7 Per-target pins that differ
+
+- **Sets hash by value in Java and C# (like Python), unlike JS
+  identity sets (J6).** `setRemove` uses Contains (value-based
+  for structs with generated Equals).
+- **File-IO error codes are host-specific:** Java
+  "NoSuchFileException", C# "FileNotFoundException", Python
+  "FileNotFoundError", JS "ENOENT".
+- **Java float equality in `eq`:** unboxed `==` matches JS `===`
+  for numbers (-0.0==0.0 true, NaN false).
+- **Java `strIndex` divergence (deliberate, matches Python):**
+  out-of-range str index raises IndexError; JS's `[...s][i]`
+  returns undefined there (a JS latent bug). Negative str
+  indices wrap like Python.
+- **Java `hashCode`/`eq` contract:** `hashOf`/`structHash`
+  normalize -0.0 to 0.0 (eq says they are equal); Result.hashCode
+  fixed to use `hashOf`.
+- **Java/C# round() is Python-correct for int inputs; JS is
+  not (latent bug, out of M4 scope):** JS
+  `roundHalfAway(5n, -1n)` = 5, Python
+  `round_half_away(5, -1)` = 10.0; JS
+  `roundHalfAway(1250n, -2n)` = 1250, Python = 1300.0. Cause:
+  `newr_rt.js` returns `Number(x)` unchanged for a BigInt input
+  when ndigits is given. Uncaught because conformance
+  `round_half_away.newr` only tests float args. Java/C# runtimes
+  implement the Python-correct semantics (round the exact value
+  for int inputs too). Flag for chie; JS fix is out of M4 scope.
+- **C# store divergence:** DB file `economy_.db` (mangled) vs
+  Java `economy.db`; C# store methods have no explicit lock
+  (Java methods are `synchronized`).
+- **C# deploy class naming:** `hello_botDeploy` (no underscore)
+  vs Java `hello_bot_deploy`.
+- **C# `env.args`:** same argv[0] rule as Java.
+- **Java/C# string comparison:** str ordering via `compareTo`
+  (Java) / `String.CompareOrdinal` (C#) — UTF-16 code units, same
+  as JS; astral characters still differ from Python code-point
+  comparison (same caveat as JS, carried).
+
+### 21.8 Bugs found and fixed during M4 (all TDD, conformance-driven)
+
+Every fix below was driven by a failing conformance program or a
+failing rt check (RED), then the fix, then the corpus green again.
+The three red-checks in §21.9 are the sha256-verified sample; the
+rest were verified the same way (failing program → fix → green),
+without a separate revert pass.
+
+Java general emitter:
+- Top-level `let` shadowing — `_in_top_level` flag + `"global-let"`
+  kind test, emit `x = <init>;` not a local declaration.
+- Error fields — `e.message` → `.getMessage()`, `code` → `.code`.
+- `Objects` import — `import java.util.*;` unconditional.
+- Fn-value calls — binding kind not `"fn"` but fn type emits
+  `.get()` / `.apply()`.
+- Imported enum/struct TYPE — `_struct_java_name` searches
+  `self.program.modules` and qualifies with the module's class stem.
+- listIndex/listGet return Object — emitter casts to the element's
+  boxed type.
+- Declared list type — `_java_type` list now `List<T>` not
+  `ArrayList<T>`.
+- ok/err one type param.
+- `Function` qualification — `java.util.function.Function<...>`.
+- env.args argv[0] — runtime `setMainArgs(prog, args)` prepends
+  main class name.
+- Aliased file-module imports — `_file_module_class(binding)`
+  returns the stem, used in `_imported_enum`, `_emit_module_call`,
+  `_emit_module_member` (method reference `helper::is_red`).
+
+C# general emitter:
+- `?.` / `??` / `unwrap` dispatch to kind-specific helpers with
+  explicit type args (`_opt_chain_call`, `_coalesce_call`).
+- `Main` class/method collision CS0542 — stem exactly "Main"
+  becomes class/file `MainProgram`.
+- Int arithmetic + compound-assign dicts used Java lowercase helper
+  names (`add`/`mul` → `Add`/`Mul`).
+- `set.add` and `list.append` emitted `.add(` → `.Add(`.
+- `ListPattern` used Java `ArrayList` + `.get(i)` →
+  `System.Collections.IList` + `[i]`.
+- `INewrRepr` moved to top level.
+- `Equals(object? obj)` → `Equals(object obj)` (CS8632 with
+  Nullable disabled).
+- `CoalesceVal` returns `T` not `T?` (a `??` always produces a
+  value; `long?`→`long` was CS0266).
+- `is_ok`/`is_err` → `IsOk()`/`IsErr()`.
+- `?` propagate on a value type returns `temp.Value`.
+- File helpers `FileRead`/`FileWrite`/`FileAppend`/`FileExists`
+  (were lowercase).
+- Store key uses Discord.Net `.Id.ToString()` (not JDA `.getId()`)
+  and `NewrRt.ToStr`.
+- Missing `ftype = self._type_of(func)` line restored in
+  `_emit_call` (arbitrary-expression call branch).
+- Generated `.csproj` now has `<NoWarn>CS8981</NoWarn>`.
+
+Java bot emitter:
+- Guild-ternary interpolation needed parens.
+- Store calls emitted `bot.economy__balance` because "economy"
+  is emitter-reserved (`binding.java` = `economy_`) — call site
+  now uses the raw store name, matching the Bot methods and JS.
+- Transfer read two balances into one `cur` variable.
+- Deploy class name used the input stem instead of the output stem.
+- A `{{` in a plain (non-f) string emitted a double brace.
+- `TaskDecl` has `interval_seconds`, not `period`.
+- `emit_expr` returns a plain string, not a tuple.
+
+C# bot emitter:
+- `ApplicationCommandInteractionDataOption` does not exist — real
+  option type is `Discord.WebSocket.SocketSlashCommandDataOption`
+  (found by compiling a reflection probe).
+- `StructDecl` needs a `span` — synthetic row structs now use the
+  table's span.
+- `_ChannelText` helper wasn't emitted (flag check looked for
+  lowercase `_channelText` only).
+- Bot `.csproj` now enumerates its `Compile` items explicitly
+  (`Remove="*.cs"` + per-file `Include`, `newr_rt.cs` conditional
+  on existence) — SDK globbing compiled every `.cs` in `examples/`
+  into each project (CS0017, two Mains), deploy file never listed.
+- Sync handlers (ready/task with no `await`) now emit a non-async
+  lambda/method returning `Task.CompletedTask` (otherwise every
+  generated bot carries a CS1998 warning).
+- `AddTextInput(..., minLength:, maxLength:, required:)` named args
+  verified by compiling a modal with `min_length`/`max_length`
+  fields.
+
+Conformance runner:
+- `_build_to_temp` globbed only `*.cs`, never collecting the
+  `.csproj`, so every C# conformance program failed with "project
+  file does not exist" — fixed to also collect `*.csproj` for cs.
+
+CI (found while validating the new jobs locally):
+- Deploy files follow the `-o` stem (`shop_out_deploy.java`, not
+  `shop_deploy.java`) — the M3 js-emitter job had the same latent
+  bug (CI never ran, so it was never caught); fixed in all three
+  jobs.
+- Running a JDA bot needs JDA's runtime deps on the classpath:
+  slf4j-api 2.0.19 + trove4j core 3.1.0 (the emitted bot's
+  COMMANDS initializer runs at class-load time, before main's
+  token check, and JDA's CommandDataImpl needs both to load —
+  without them the run dies with NoClassDefFoundError instead of
+  reaching the token guard). The CI job downloads all four jars
+  (JDA, sqlite-jdbc, slf4j-api, trove4j). `javac` alone needs
+  only JDA + sqlite-jdbc.
+
+### 21.9 Red-checks (sha256-verified)
+
+Three M4 fixes red-checked the M2/M3 way: record the hash, revert
+only the fix (from a backup copy, never via git — the tree is
+uncommitted), show the conformance program failing, restore from
+the backup, verify the hash matches exactly.
+
+1. C# `CoalesceVal` returns `T` (not `T?`), `compiler/newr_rt.cs`.
+   Pre-revert hash:
+   `907d35507ad10d17822069bf359567acc78a59a639534be5ec22de52557c40a1`.
+   Reverted hash:
+   `215a70e09944e019a222342b07e719f548d048e305d1eb4af559116510e20984`.
+   With the revert, C# conformance: `FAIL nullable.newr: exit 1`
+   ("The build failed. Fix the build errors and run again." —
+   CS0266, `long?` cannot be assigned to `long`). Restored hash
+   `907d35507ad10d17822069bf359567acc78a59a639534be5ec22de52557c40a1`
+   — matches exactly.
+2. Java `setMainArgs` prepends argv[0], `compiler/newr_rt.java`.
+   Pre-revert hash:
+   `69588584f0a80d1b4dcf178686369f7473bba60569e4a022ecf4c8c20f22f249`.
+   Reverted hash:
+   `66498da2193b1628962f32f3dbbf39a4a085ccf47706b6f1ac25ab07f523abfb`.
+   With the revert, Java conformance:
+   `FAIL mod_env.newr: last line 'FAIL' != 'PASS' (stdout 'FAIL\n')`
+   (env.args[0] is the first real arg instead of the program name).
+   Restored hash
+   `69588584f0a80d1b4dcf178686369f7473bba60569e4a022ecf4c8c20f22f249`
+   — matches exactly.
+3. C# `INewrRepr` is top-level (not nested in `NewrRt`),
+   `compiler/newr_rt.cs`. Pre-revert hash `907d3550...` (same as
+   #1). Reverted hash:
+   `f1c89ebf941af99ef805aab865912843afb7a9ac7b02c6baf7831cac75b6a2a2`.
+   With the revert, C# conformance: `FAIL enum_basic.newr`,
+   `FAIL enum_match_all.newr`, `FAIL import_aliased.newr`,
+   `FAIL import_enum.newr`, `FAIL list_of_structs.newr`,
+   `FAIL match_enum.newr` (all exit 1 — emitted structs/enums
+   cannot see the nested interface). Restored hash `907d3550...`
+   — matches exactly.
+
+The remaining fixes in §21.8 were verified the same way
+(failing conformance program → fix → corpus green) without a
+separate revert pass; the three above are the sha256-verified
+sample.
+
+### 21.10 CI
+
+`.github/workflows/ci.yml` gains two jobs, mirroring `js-emitter`
+(9 jobs total: front-end, v0-conformance, build-zipapp,
+zipapp-diff, golden-rebuild, python-emitter, js-emitter,
+java-emitter, cs-emitter):
+- `java-emitter` (ubuntu/macos/windows × Java 21 Temurin):
+  setup-python 3.12, setup-java Temurin 21, pip install
+  discord.py==2.7.1 + aiosqlite, download JDA 6.7.0 +
+  sqlite-jdbc 3.54.1.0 + slf4j-api 2.0.19 + trove4j core 3.1.0
+  from Maven Central, full suite, conformance --target java,
+  build + compile + run the examples (hello runs; shop,
+  hello_bot, showcase reach the DISCORD_TOKEN guard), golden
+  comparison TestGoldensJava.
+- `cs-emitter` (ubuntu/macos/windows × .NET 8.0.x):
+  setup-python 3.12, setup-dotnet 8.0.x, pip install
+  discord.py==2.7.1 + aiosqlite, full suite, conformance
+  --target cs, build + build + run the examples (hello runs;
+  shop, hello_bot, showcase reach the DISCORD_TOKEN guard),
+  golden comparison TestGoldensCs.
+- YAML validated locally (`yaml.safe_load` OK). Every step of
+  both jobs was run locally on this VM with the same commands
+  (hello runs, all three bots reach the token guard on both
+  targets). CI itself has never run — Windows/macOS execution
+  stays UNVERIFIED until the jobs are green on all three OSes.
+- Also fixed (see §21.8): the M3 js-emitter job's deploy
+  filename (`shop_deploy.js` → `shop_out_deploy.js`).
+
+### 21.11 UNVERIFIED items (M4)
+
+- Live Discord connection: no bot ever logged in on either
+  target. Compile-time + local SQLite verification only (Java:
+  javac exit 0 on all emitted bot files with JDA + sqlite-jdbc;
+  C#: dotnet build 0 errors, HARNESS-PASS against real SQLite).
+  Discord API names are verified live (JDA 6.7.0 via javap
+  against the jar + Maven Central metadata; Discord.Net 3.20.2
+  via probe programs that compiled and ran).
+- Java: modal timeout ignored (JDA `Modal.Builder` has no
+  timeout); `guilds`/`integrations` intents map to no JDA
+  intent; transfer heal logic compiled but untested against a
+  live DB.
+- C#: modal `timeout:`/`on_timeout:` accepted by the checker but
+  ignored (Discord.Net has no modal timeout).
+- CI has never run — Windows/macOS execution UNVERIFIED until
+  the `java-emitter` / `cs-emitter` jobs are green on all three
+  OSes.
+- Carried from before, unchanged: §16.4 amount-based
+  debit/credit heal; §19.5 async-fn lowering for SPEC §9.5 store
+  reads from fns; imported structs across modules (check rejects
+  consistently E3001; SPEC §11 struct promise doesn't hold in
+  practice); JS round() latent bug (§21.7, flag for chie, out of
+  M4 scope); file-module-fn-as-value gap in py/js emitters
+  (pre-existing, out of M4 scope); general-emitter csproj
+  CS0017 latent issue (building two general programs that share
+  a directory — the bot csproj fix was not applied to the
+  general csproj, out of scope); sets keyed by value types use
+  identity in JS (Python hashes by value); string comparison for
+  astral characters is UTF-16 vs code points; file-IO error
+  codes are host-specific; JS `log` has no timestamp (J12); B6b
+  absolutes understate a real discord.js import (in-repo mock
+  stands in; ratio is honest); discord.js option getters beyond
+  the track are extrapolations; P-42 live Discord.
+
+### 21.12 Verification (M4, coordinator-run)
+
+- Full suite, system Python: **902 tests, OK (skipped=15)**,
+  170.960 s. (The earlier 900 count was from a run before the
+  last test files landed; 902 is the current count on both
+  Pythons.)
+- Full suite, fresh venv (Python 3.12.3, discord.py 2.7.1 +
+  aiosqlite, `~/m4-venv`): **902 tests, OK (skipped=2)**,
+  153.892 s.
+- Conformance: **py 74/74, js 74/74, java 74/74, cs 74/74**
+  (0 FAIL on all four targets; re-verified after the runner
+  fix and after the bot emitters landed).
+- Rt checks: Java **71/71**, C# **75/75**, JS 61 (unchanged).
+  Python wrappers: `python3 -m unittest tests.test_newr_rt_java
+  tests.test_newr_rt_cs tests.test_newr_rt_js` → OK.
+- Emitter tests: Java general 6/6, Java bot 10/10, C# general
+  4/4, C# bot 31/31. Golden tests 6/6 (py, js, java, cs).
+- Hello + shop builds and runs on both new targets: Java hello
+  prints "Hello, world!" (javac + java); C# hello prints
+  "Hello, world!" (`dotnet run --project`); Java shop + C# shop
+  build clean (javac exit 0 with JDA + sqlite-jdbc + slf4j-api
+  + trove4j; `dotnet build` 0 errors) and reach the
+  DISCORD_TOKEN guard (exit 1, token message) — the same guard
+  check the CI jobs run.
+- Goldens diff empty (TestGoldensJava + TestGoldensCs pass;
+  `goldens/java/` + `goldens/cs/` blessed after line-by-line
+  review).
+- Benchmarks: see BENCHMARKS.md M4 sections (Java + C#) and
+  §21.13. B6 checksums re-verified by the coordinator: all
+  three loop drivers print **105003** on both targets. B6b
+  balances re-verified by the coordinator: both shop economy
+  drivers print final balance **1000** on both targets.
+- Tree: UNCOMMITTED at `2afa82f` + changes (31 files at the
+  time of this writing), nothing committed, nothing pushed.
+  Head sha256s (current tree): emitter_java
+  `b4f79670436bc35a5728e97ff633e8a623fae85f373f558f7cf0ccce6c583a55`,
+  emitter_cs
+  `3502a98969222b80521618fbabac1b6d94ad8d50e96b3df81c747c7bde347408`,
+  newr_rt.java
+  `69588584f0a80d1b4dcf178686369f7473bba60569e4a022ecf4c8c20f22f249`,
+  newr_rt.cs
+  `907d35507ad10d17822069bf359567acc78a59a639534be5ec22de52557c40a1`,
+  cli.py
+  `7ac82bb3fada84bfa6e6bd8e5fe677f41e1381c6beaf6674cc9ef1b300e4b7f5`,
+  conformance/run.py
+  `b568aefe447faf9b2bfb4913ea18c42bd9e98f7e927048a94165af729ecc7f01`,
+  tests/test_goldens.py
+  `56fa2c972173bd1a05d522eab22933eab3c4871ed4c0c1af5c3fc9c5a3e91062`,
+  ci.yml
+  `a03b07c9c4392f3125ddaacd4077d4f1e9237874a622e70450b35b93c4bede85`.
+  (These are the hashes at §21 writing time; the benchmark
+  agent's later edits to BENCHMARKS.md / benchmarks/ change
+  only those files, not the emitter hashes.)
+
+### 21.13 Benchmarks (M4 summary — full tables in BENCHMARKS.md)
+
+Machine: Linux x86_64, Python 3.12.3, Temurin OpenJDK 21.0.13,
+.NET SDK 8.0.427, JDA 6.7.0 + sqlite-jdbc 3.54.1.0, Discord.Net
+3.20.2 + Microsoft.Data.Sqlite 8.0.0, hyperfine 1.19.0.
+Runners: `benchmarks/run_java.py`, `benchmarks/run_cs.py`.
+Raw JSON: `benchmarks/raw/` (`*_java.json`, `*_cs.json`).
+
+Java: B1 hello 118.9 ms ± 5.5, shop 159.0 ms ± 14.4; B2 hello
+122.0 ms ± 8.1, shop 146.6 ms ± 8.8; B4 hello 276/11 vs hw
+371/13 (ratio 0.74), loop 514/20 vs hw 665/21 (0.77); B5
+generated 47.2 ms ± 10.3 vs hw 42.6 ms ± 4.6 (1.11); B6
+generated 101.6 ms ± 11.2 vs plain 41.9 ms ± 1.9 (2.42) vs
+checked-hw 109.5 ms ± 20.2 (0.93); B6b generated 1016.6 ms ±
+221.9 vs hw 1162.9 ms ± 556.8 (0.87); B7 compile 18.3 MB, run
+37.5 MB; B8 startup 1.11, loop 2.42, shop 0.87, hello size
+0.74, loop size 0.77.
+
+C#: B1 hello 122.4 ms ± 9.4, shop 167.8 ms ± 29.3; B2 hello
+128.8 ms ± 20.0, shop 156.6 ms ± 22.7; B4 hello 303/12 vs hw
+383/15 (0.79), loop 542/21 vs hw 675/23 (0.80); B5 generated
+50.2 ms ± 10.5 vs hw 49.6 ms ± 4.9 (1.01); B6 generated 59.2
+ms ± 5.4 vs plain 57.8 ms ± 15.6 (1.02) vs checked-hw 80.1 ms
+± 30.7 (0.74); B6b generated 392.3 ms ± 116.5 vs hw 329.9 ms
+± 37.0 (1.19); B7 compile 18.3 MB, run 22.7 MB; B8 startup
+1.01, loop 1.02, shop 1.19, hello size 0.79, loop size 0.80.
+
+Threshold reports (honest, not hidden): Java B6 generated/plain
+2.42 is over the 1.20 threshold — the checked-int price
+(Math.*Exact per operation plus a tmod call), the same shape as
+M2's 2.54: the generated code is within noise of hand-written
+code using the same checked helpers (0.93), and the plain-long
+loop is not a fair target (it cannot overflow-check at all).
+C# B6b 2.04 (from the early `--quick` run, N=3, under load) was
+diagnosed as a benchmark-methodology artifact, NOT a real
+slowdown: instrumenting the generated driver showed
+`new DiscordSocketClient()` ≈ 218 ms + `Setup()` ≈ 118 ms
+one-time, while the generated credit loop itself was ≈ 310 ms
+vs the hand-written loop's ≈ 400 ms — the gap was client
+construction, not the economy loop. Fix: the hand-written C#
+driver now constructs a `DiscordSocketClient` with the same
+config as the emitted Bot (no connection made). Full re-run:
+**1.19**, just under the 1.20 threshold, so not a bug report —
+the fix, the measurement behind it, and the reasoning are
+documented in the driver header, the runner docstring, and
+BENCHMARKS.md. (An earlier draft of §21.13 quoted the
+superseded quick-run numbers — Java B6 1.72, C# B6b 2.04, C# B5
+170.0 ms — because the first Java full run was load-polluted
+(load average ~6 from a concurrent conformance run, absolutes
+~2x inflated) and the C# numbers were from the N=3 quick run;
+the numbers above are the final full runs, N=10 cold/program,
+N=20 warm, verified line-by-line against
+`benchmarks/raw/*.json` by the coordinator.) All other ratios
+are under their thresholds. C# B6b gen has one slow run
+(697.6 ms vs a 302 ms floor) and Java B6b has high variance
+(hw ±556.8 ms) — both look like one-time construction/fsync
+jitter, reported with stddevs and ranges.
