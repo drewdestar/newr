@@ -36,6 +36,9 @@ GOLDEN_DIR = ROOT / "goldens" / "py"
 GOLDEN_DIR_JS = ROOT / "goldens" / "js"
 GOLDEN_DIR_JAVA = ROOT / "goldens" / "java"
 GOLDEN_DIR_CS = ROOT / "goldens" / "cs"
+GOLDEN_DIR_RS = ROOT / "goldens" / "rs"
+GOLDEN_DIR_KT = ROOT / "goldens" / "kt"
+GOLDEN_DIR_DART = ROOT / "goldens" / "dart"
 
 # Toolchains (M4): the JDK lives in ~/jdk-21 on the build VM (or
 # JAVA_HOME / the PATH, e.g. CI's setup-java); dotnet lives in
@@ -49,6 +52,25 @@ _DOTNET_ROOT = Path(os.environ["DOTNET_ROOT"]) \
     if os.environ.get("DOTNET_ROOT") else (Path.home() / ".dotnet")
 DOTNET = shutil.which("dotnet", path=str(_DOTNET_ROOT)) \
     or shutil.which("dotnet")
+
+# Toolchains (M5): rustc/cargo live in ~/.cargo/bin (rustup) or the
+# PATH (CI's rust toolchain); kotlinc in ~/kotlin/kotlinc/bin or
+# the PATH; dart in ~/dart-sdk/dart-sdk/bin or the PATH.
+_CARGO_HOME = Path(os.environ["CARGO_HOME"]) \
+    if os.environ.get("CARGO_HOME") else (Path.home() / ".cargo")
+CARGO = shutil.which("cargo", path=str(_CARGO_HOME / "bin")) \
+    or shutil.which("cargo")
+RUSTC = shutil.which("rustc", path=str(_CARGO_HOME / "bin")) \
+    or shutil.which("rustc")
+_KOTLIN_HOME = Path(os.environ["KOTLIN_HOME"]) \
+    if os.environ.get("KOTLIN_HOME") else (Path.home() / "kotlin")
+KOTLINC = shutil.which("kotlinc", path=str(_KOTLIN_HOME / "kotlinc"
+                                           / "bin")) \
+    or shutil.which("kotlinc")
+_DART_HOME = Path(os.environ["DART_HOME"]) \
+    if os.environ.get("DART_HOME") else (Path.home() / "dart-sdk")
+DART = shutil.which("dart", path=str(_DART_HOME / "dart-sdk" / "bin")) \
+    or shutil.which("dart")
 
 # name -> (source file, output files the build produces)
 GOLDENS = {
@@ -95,17 +117,69 @@ GOLDENS_CS = {
     "shop_items": ("examples/shop_items.newr", ["shop_items.cs"]),
 }
 
-_SUFFIX = {"py": ".py", "js": ".js", "java": ".java", "cs": ".cs"}
+# The Rust twin of GOLDENS (M5): the same sources, `.rs` outputs.
+# Bot programs also produce their standalone `<stem>_deploy.rs`
+# registration script. The Cargo.toml is build scaffolding, not a
+# golden (bless() ignores it; the conformance runner needs it in
+# the temp dir to `cargo run` a bot program).
+GOLDENS_RS = {
+    "hello": ("examples/hello.newr", ["hello.rs"]),
+    "hello_bot": ("examples/hello_bot.newr",
+                  ["hello_bot.rs", "hello_bot_deploy.rs"]),
+    "showcase": ("examples/showcase.newr", ["showcase.rs"]),
+    "shop": ("examples/shop.newr",
+             ["shop.rs", "shop_deploy.rs"]),
+    "shop_items": ("examples/shop_items.newr", ["shop_items.rs"]),
+}
+
+# The Kotlin twin of GOLDENS (M5): the same sources, `.kt` outputs.
+# Bot programs also produce their standalone `<stem>_deploy.kt`
+# registration script.
+GOLDENS_KT = {
+    "hello": ("examples/hello.newr", ["hello.kt"]),
+    "hello_bot": ("examples/hello_bot.newr",
+                  ["hello_bot.kt", "hello_bot_deploy.kt"]),
+    "showcase": ("examples/showcase.newr", ["showcase.kt"]),
+    "shop": ("examples/shop.newr",
+             ["shop.kt", "shop_deploy.kt"]),
+    "shop_items": ("examples/shop_items.newr", ["shop_items.kt"]),
+}
+
+# The Dart twin of GOLDENS (M5): the same sources, `.dart` outputs.
+# Bot programs also produce their standalone `<stem>_deploy.dart`
+# registration script. The pubspec.yaml is build scaffolding, not a
+# golden (bless() ignores it; the conformance runner needs it in
+# the temp dir to `dart pub get` a bot program).
+GOLDENS_DART = {
+    "hello": ("examples/hello.newr", ["hello.dart"]),
+    "hello_bot": ("examples/hello_bot.newr",
+                  ["hello_bot.dart", "hello_bot_deploy.dart"]),
+    "showcase": ("examples/showcase.newr", ["showcase.dart"]),
+    "shop": ("examples/shop.newr",
+             ["shop.dart", "shop_items.dart", "shop_deploy.dart"]),
+    "shop_items": ("examples/shop_items.newr", ["shop_items.dart"]),
+}
+
+_SUFFIX = {"py": ".py", "js": ".js", "java": ".java", "cs": ".cs",
+           "rs": ".rs", "kt": ".kt", "dart": ".dart"}
 _RT_SRC = {"py": "newr_rt.py", "js": "newr_rt.js",
-           "java": "newr_rt.java", "cs": "newr_rt.cs"}
+           "java": "newr_rt.java", "cs": "newr_rt.cs",
+           "rs": "newr_rt.rs", "kt": "newr_rt.kt",
+           "dart": "newr_rt.dart"}
 # The runtime's file name next to the output (Java renames on copy,
 # K1; the others keep their name).
 _RT_COPY = {"py": "newr_rt.py", "js": "newr_rt.js",
-            "java": "NewrRt.java", "cs": "newr_rt.cs"}
+            "java": "NewrRt.java", "cs": "newr_rt.cs",
+            "rs": "newr_rt.rs", "kt": "newr_rt.kt",
+            "dart": "newr_rt.dart"}
 _GOLDENS_BY_TARGET = {"py": GOLDENS, "js": GOLDENS_JS,
-                      "java": GOLDENS_JAVA, "cs": GOLDENS_CS}
+                      "java": GOLDENS_JAVA, "cs": GOLDENS_CS,
+                      "rs": GOLDENS_RS, "kt": GOLDENS_KT,
+                      "dart": GOLDENS_DART}
 _GOLDEN_DIR_BY_TARGET = {"py": GOLDEN_DIR, "js": GOLDEN_DIR_JS,
-                         "java": GOLDEN_DIR_JAVA, "cs": GOLDEN_DIR_CS}
+                         "java": GOLDEN_DIR_JAVA, "cs": GOLDEN_DIR_CS,
+                         "rs": GOLDEN_DIR_RS, "kt": GOLDEN_DIR_KT,
+                         "dart": GOLDEN_DIR_DART}
 
 
 def _build_to_temp(source: Path, target: str = "py") -> dict[str, str]:
@@ -128,7 +202,8 @@ def _build_to_temp(source: Path, target: str = "py") -> dict[str, str]:
         files = {}
         for p in Path(d).rglob(f"*{suffix}"):
             if p.name in ("newr_rt.py", "newr_rt.js", "newr_rt.java",
-                          "NewrRt.java", "newr_rt.cs"):
+                          "NewrRt.java", "newr_rt.cs", "newr_rt.rs",
+                          "newr_rt.kt", "newr_rt.dart"):
                 continue
             files[p.name] = p.read_text(encoding="utf-8")
         if target == "cs":
@@ -137,6 +212,20 @@ def _build_to_temp(source: Path, target: str = "py") -> dict[str, str]:
             # `dotnet run` the program (the glob above only matches
             # *.cs). bless() ignores it: GOLDENS_CS lists only .cs.
             for p in Path(d).rglob("*.csproj"):
+                files[p.name] = p.read_text(encoding="utf-8")
+        if target == "rs":
+            # The Cargo.toml is build scaffolding, not a golden —
+            # the conformance runner needs it in the temp dir to
+            # `cargo run` a bot program (plain programs compile
+            # with plain rustc and need no Cargo.toml).
+            for p in Path(d).rglob("Cargo.toml"):
+                files[p.name] = p.read_text(encoding="utf-8")
+        if target == "dart":
+            # The pubspec.yaml is build scaffolding, not a golden —
+            # the conformance runner needs it in the temp dir to
+            # `dart pub get` a bot program (plain programs run with
+            # plain `dart` and need no pubspec).
+            for p in Path(d).rglob("pubspec.yaml"):
                 files[p.name] = p.read_text(encoding="utf-8")
         return files
 
@@ -208,6 +297,77 @@ def run_conformance(target: str = "py") -> int:
                     continue
                 r = subprocess.run([JAVA, path.stem],
                                    capture_output=True, text=True, cwd=d)
+            elif target == "rs":
+                if RUSTC is None:
+                    print("SKIP rs: no rustc found "
+                          "(CARGO_HOME / ~/.cargo/bin / PATH)")
+                    return 0
+                if "Cargo.toml" in files:
+                    # A bot program (or a store program): the crate
+                    # needs cargo (serenity/poise, rusqlite).
+                    if CARGO is None:
+                        print("SKIP rs: no cargo found "
+                              "(CARGO_HOME / ~/.cargo/bin / PATH)")
+                        return 0
+                    r = subprocess.run(
+                        [CARGO, "run", "--quiet"],
+                        capture_output=True, text=True, cwd=d)
+                else:
+                    # Plain program: rustc compiles the bin
+                    # directly; `mod newr_rt;` resolves from the
+                    # same directory.
+                    c = subprocess.run(
+                        [RUSTC, str(Path(d) / main), "-o",
+                         str(Path(d) / path.stem)],
+                        capture_output=True, text=True, cwd=d)
+                    if c.returncode != 0:
+                        print(f"FAIL {path.name}: rustc exit "
+                              f"{c.returncode}\n{c.stderr}")
+                        failures += 1
+                        continue
+                    r = subprocess.run([str(Path(d) / path.stem)],
+                                       capture_output=True, text=True,
+                                       cwd=d)
+            elif target == "kt":
+                if KOTLINC is None or JAVA is None:
+                    print("SKIP kt: no kotlinc/java found "
+                          "(KOTLIN_HOME / ~/kotlin / PATH)")
+                    return 0
+                kt_files = [str(p) for p in Path(d).glob("*.kt")]
+                c = subprocess.run(
+                    [KOTLINC, *kt_files, "-include-runtime",
+                     "-d", str(Path(d) / "app.jar")],
+                    capture_output=True, text=True, cwd=d)
+                if c.returncode != 0:
+                    print(f"FAIL {path.name}: kotlinc exit "
+                          f"{c.returncode}\n{c.stderr}")
+                    failures += 1
+                    continue
+                r = subprocess.run([JAVA, "-jar",
+                                    str(Path(d) / "app.jar")],
+                                   capture_output=True, text=True, cwd=d)
+            elif target == "dart":
+                if DART is None:
+                    print("SKIP dart: no dart found "
+                          "(DART_HOME / ~/dart-sdk / PATH)")
+                    return 0
+                if "pubspec.yaml" in files:
+                    # A bot program (nyxx): resolve packages first.
+                    g = subprocess.run(
+                        [DART, "pub", "get"],
+                        capture_output=True, text=True, cwd=d)
+                    if g.returncode != 0:
+                        print(f"FAIL {path.name}: dart pub get exit "
+                              f"{g.returncode}\n{g.stderr}")
+                        failures += 1
+                        continue
+                    r = subprocess.run([DART, "run", str(Path(d) / main)],
+                                       capture_output=True, text=True,
+                                       cwd=d)
+                else:
+                    r = subprocess.run([DART, str(Path(d) / main)],
+                                       capture_output=True, text=True,
+                                       cwd=d)
             else:  # cs
                 if DOTNET is None:
                     print("SKIP cs: no dotnet found "
@@ -237,7 +397,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--bless", action="store_true",
                         help="regenerate goldens for the target")
     parser.add_argument("--target", default="py",
-                        choices=("py", "js", "java", "cs"),
+                        choices=("py", "js", "java", "cs", "rs", "kt",
+                                 "dart"),
                         help="target to build/run (default py)")
     parser.add_argument("--only", metavar="NAME",
                         help="with --bless, regenerate one golden")

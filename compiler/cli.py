@@ -42,10 +42,12 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
 
   check <file> [--fast]  verify a .newr program (parse, resolve, check);
                          writes nothing
-  build <file> [--target py|js|java|cs] [-o <out>] [--line-comments] [--check] [--fast]
+  build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast]
                          build a .newr program into runnable Python
                          (default --target py), JavaScript (--target js),
-                         Java (--target java) or C# (--target cs)
+                         Java (--target java), C# (--target cs),
+                         Rust (--target rs), Kotlin (--target kt) or
+                         Dart (--target dart)
   help [command]         show this help, or help for one command
   version                print the newr version
   explain <code>         explain a diagnostic code (also: --explain <code>)
@@ -76,7 +78,7 @@ the program has no errors (warnings are fine), 4 when it has errors,
            all Discord validation. The result is not verified — say so
            in the output.
 """,
-    "build": """Usage: newr build <file> [--target py|js|java|cs] [-o <out>] [--line-comments] [--check] [--fast]
+    "build": """Usage: newr build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast]
 
 Build a .newr program into runnable code for one target (Python and
 TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2).
@@ -95,8 +97,18 @@ requires the file name to match the public class; run with
 `javac *.java && java <Stem>`) and `--target cs` emits C# (one `.cs`
 per `.newr` file plus `newr_rt.cs` when used, run with
 `dotnet run --project <stem>.csproj`); bot programs also get a
-standalone `<stem>_deploy.java` / `<stem>_deploy.cs`. `--check` runs
-the same pipeline as `newr check` and writes nothing.
+standalone `<stem>_deploy.java` / `<stem>_deploy.cs`. M5: `--target
+rs` emits Rust (one `.rs` per `.newr` file plus `newr_rt.rs` when
+used, a `Cargo.toml` rides along so the program runs with
+`cargo run`; bot programs also get a standalone `<stem>_deploy.rs`),
+`--target kt` emits Kotlin (one `.kt` per `.newr` file plus
+`newr_rt.kt` when used, run with `kotlinc *.kt -include-runtime
+-d <stem>.jar && java -jar <stem>.jar`; bot programs also get a
+standalone `<stem>_deploy.kt`), and `--target dart` emits Dart (one
+`.dart` per `.newr` file plus `newr_rt.dart` when used, run with
+`dart <stem>.dart`; bot programs also get a standalone
+`<stem>_deploy.dart`). `--check` runs the same pipeline as
+`newr check` and writes nothing.
 `--line-comments` adds `# newr:<file>:<line>` comments to the emitted
 code. `--fast` parses + resolves only, skipping the full type check
 AND all Discord validation — it cannot be combined with emission
@@ -572,9 +584,10 @@ def _cmd_build(args: list[str], *, json_mode: bool,
         else:
             rest.append(arg)
             i += 1
-    if target not in ("py", "js", "java", "cs"):
+    if target not in ("py", "js", "java", "cs", "rs", "kt", "dart"):
         raise _UsageError(
-            f"unknown target `{target}` (targets: py, js, java, cs)")
+            f"unknown target `{target}` (targets: py, js, java, cs, "
+            f"rs, kt, dart)")
     fast = "--fast" in rest
     rest = [a for a in rest if a != "--fast"]
     if "--check" in rest:
@@ -599,7 +612,8 @@ def _build_emit(args: list[str], *, output: str | None,
                 json_mode: bool,
                 error_format_json: bool) -> int:
     """`newr build <file>` — verify, then emit Python (M2),
-    JavaScript (M3), Java (M4) or C# (M4)."""
+    JavaScript (M3), Java (M4), C# (M4), Rust (M5), Kotlin (M5) or
+    Dart (M5)."""
     unknown = [a for a in args if a.startswith("-")]
     if unknown:
         raise _UsageError("unknown flag(s) for `newr build`: "
@@ -646,6 +660,21 @@ def _build_emit(args: list[str], *, output: str | None,
         suffix = ".cs"
         rt_name = "newr_rt.cs"
         rt_copy_name = rt_name
+    elif target == "rs":
+        from .emitter_rs import EmitterError, emit_program
+        suffix = ".rs"
+        rt_name = "newr_rt.rs"
+        rt_copy_name = rt_name
+    elif target == "kt":
+        from .emitter_kt import EmitterError, emit_program
+        suffix = ".kt"
+        rt_name = "newr_rt.kt"
+        rt_copy_name = rt_name
+    elif target == "dart":
+        from .emitter_dart import EmitterError, emit_program
+        suffix = ".dart"
+        rt_name = "newr_rt.dart"
+        rt_copy_name = rt_name
     else:
         from .emitter import EmitterError, emit_program
         suffix = ".py"
@@ -653,9 +682,10 @@ def _build_emit(args: list[str], *, output: str | None,
         rt_copy_name = rt_name
     try:
         sources = {f: get_source(f) for f in program.files}
-        if target in ("java", "cs"):
+        if target in ("java", "cs", "rs", "kt", "dart"):
             # The output stem is the public class name (Java) / the
-            # project name (C#); it comes from -o when given.
+            # project name (C#) / the binary name (Rust) / the main
+            # file stem (Kotlin, Dart); it comes from -o when given.
             output_stem = Path(output).stem if output else None
             result = emit_program(program, main_path=str(path),
                                   sources=sources,
@@ -685,10 +715,12 @@ def _build_emit(args: list[str], *, output: str | None,
     out_dir.mkdir(parents=True, exist_ok=True)
     main_out = (Path(output) if output
                 else path.with_suffix(suffix))
-    if target == "java" and output:
+    if target in ("java", "rs", "kt", "dart") and output:
         # The Java main file MUST be named after its public class
         # (K1) — the -o path controls the directory, but the file
-        # name comes from the emitter (the sanitized stem).
+        # name comes from the emitter (the sanitized stem). Same for
+        # Rust/Kotlin/Dart: the main file is stem-named, so -o only
+        # picks the directory.
         main_out = main_out.parent / result.main_file
     for name, text in result.files.items():
         if output and name == result.main_file:

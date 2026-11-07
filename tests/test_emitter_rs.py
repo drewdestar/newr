@@ -1,0 +1,617 @@
+"""Tests for the Rust emitter (compiler/emitter_rs.py, M5).
+
+TDD RED first: written before the emitter existed. The
+`emit_rs_src` helper runs the full front-end pipeline (resolve +
+core check + discord check) and emits Rust; `run_rs_src` also
+compiles and executes the emitted program with rustc and returns
+its stdout.
+
+Every test pins a decision from the M5 decision list (R1–Rn) or a
+SPEC rule the emitter must preserve — including the Rust-specific
+traps (top-level lets as `static Mutex<Option<T>>` read through
+`gget`/`gset`, owned values cloned only at `Name`/`Member`
+lvalues, `?.` chains as `.map`/`.and_then`, `??` as a `match`,
+`ok`/`err` widened with `Some` when the expected type is
+nullable, `as` casts parenthesized so `<` is not read as a
+generic argument, and `mod newr_rt;` patched in when only a
+module uses the runtime).
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+from compiler.checker import check_program
+from compiler.discord_check import check_discord, discord_providers
+from compiler.resolver import resolve_file, resolve_source
+
+ROOT = Path(__file__).resolve().parent.parent
+RT_RS_SRC = ROOT / "compiler" / "newr_rt.rs"
+
+# rustc/cargo live in ~/.cargo/bin (rustup); fall back to the PATH
+# when they are not there (e.g. CI, where rustup provides them).
+_CARGO_HOME = Path(os.environ.get("CARGO_HOME", "")) \
+    if os.environ.get("CARGO_HOME") else (Path.home() / ".cargo")
+_CARGO_BIN = _CARGO_HOME / "bin"
+RUSTC = shutil.which("rustc", path=str(_CARGO_BIN)) \
+    or shutil.which("rustc")
+CARGO = shutil.which("cargo", path=str(_CARGO_BIN)) \
+    or shutil.which("cargo")
+
+try:
+    from compiler.emitter_rs import EmitterError, emit_program as emit_rs
+    HAS_RS_EMITTER = True
+except ImportError:
+    HAS_RS_EMITTER = False
+
+
+def full_program(src, filename="<test>.newr"):
+    """Resolve + check a source string; assert it is clean."""
+    resolved = resolve_source(src, filename)
+    diags = list(resolved.diagnostics)
+    diags += check_program(
+        resolved.program,
+        providers=discord_providers(resolved.program)).diagnostics
+    diags += check_discord(resolved.program)
+    errs = [d for d in diags if d.is_error()]
+    assert not errs, [f"{d.code}: {d.message}" for d in errs]
+    return resolved.program
+
+
+def emit_rs_src(src, filename="<test>.newr", stem="Main"):
+    """Emit a checked program to Rust; returns the EmitResult."""
+    program = full_program(src, filename)
+    return emit_rs(program, main_path=filename,
+                   sources={filename: src}, output_stem=stem)
+
+
+def emit_rs_main_text(src, filename="<test>.newr", stem="Main"):
+    """The emitted text of the main output file."""
+    result = emit_rs_src(src, filename, stem)
+    return result.files[result.main_file]
+
+
+def run_rs_src(src, filename="<test>.newr", stem="Main",
+               argv=None, env=None, files=None):
+    """Emit to a temp dir, copy newr_rt.rs if needed, compile with
+    rustc and run.
+
+    Returns (stdout, stderr, returncode). `files` maps extra
+    .newr filenames to sources (for file imports).
+    """
+    result = emit_rs_src(src, filename, stem)
+    with tempfile.TemporaryDirectory() as d:
+        for name, text in result.files.items():
+            (Path(d) / name).write_text(text, encoding="utf-8")
+        if result.uses_rt:
+            (Path(d) / "newr_rt.rs").write_text(
+                RT_RS_SRC.read_text(encoding="utf-8"), encoding="utf-8")
+        proc = subprocess.run(
+            [RUSTC, result.main_file, "-o", stem],
+            capture_output=True, text=True, cwd=d)
+        if proc.returncode != 0:
+            return "", proc.stderr, proc.returncode
+        proc = subprocess.run(
+            [f"./{stem}", *(argv or [])],
+            capture_output=True, text=True, cwd=d, env=env)
+        return proc.stdout, proc.stderr, proc.returncode
+
+
+def run_rs_ok(src, filename="<test>.newr", stem="Main",
+              argv=None, env=None):
+    stdout, stderr, code = run_rs_src(src, filename, stem, argv, env)
+    assert code == 0, f"exit {code}\nstdout: {stdout}\nstderr: {stderr}"
+    return stdout
+
+
+@unittest.skipUnless(RUSTC, "rustc is not installed")
+@unittest.skipUnless(HAS_RS_EMITTER, "compiler/emitter_rs.py is missing")
+class TestHelloAndHeader(unittest.TestCase):
+    def test_hello_emits_and_runs(self):
+        text = emit_rs_main_text('print "Hello, world!"\n',
+                                 "examples/hello.newr", "hello")
+        self.assertIn('println!("{}", "Hello, world!".to_string())',
+                      text)
+        self.assertEqual(run_rs_ok('print "Hello, world!"\n',
+                                   "examples/hello.newr", "hello"),
+                         "Hello, world!\n")
+
+    def test_header_names_the_source_file(self):
+        text = emit_rs_main_text('print "x"\n', "examples/hello.newr",
+                                 "hello")
+        self.assertTrue(
+            text.startswith(
+                "// Generated by newr from examples/hello.newr "
+                "— do not edit by hand.\n"
+                "// Edit the .newr file and rebuild with: "
+                "newr build examples/hello.newr\n"),
+            text[:200])
+
+    def test_no_rt_when_unused(self):
+        result = emit_rs_src('print "Hello, world!"\n',
+                             "examples/hello.newr", "hello")
+        self.assertFalse(result.uses_rt)
+        self.assertNotIn("newr_rt", result.files[result.main_file])
+
+    def test_main_fn_is_present(self):
+        text = emit_rs_main_text('print "x"\n', "examples/hello.newr",
+                                 "hello")
+        self.assertIn("fn main() {", text)
+
+    def test_arithmetic_emits_and_runs(self):
+        self.assertEqual(
+            run_rs_ok('let x = 1 + 2 * 3\nprint x\n'), "7\n")
+        self.assertEqual(
+            run_rs_ok('print 2 ** 10\n'), "1024\n")
+        self.assertEqual(
+            run_rs_ok('print 7 / 2\n'), "3\n")
+        self.assertEqual(
+            run_rs_ok('print 7 % 3\n'), "1\n")
+        self.assertEqual(
+            run_rs_ok('print -7 / 2\n'), "-3\n")
+        self.assertEqual(
+            run_rs_ok('print -7 % 2\n'), "-1\n")
+
+    def test_overflow_is_a_runtime_error(self):
+        # Checked arithmetic (R: int is i64, overflow is a runtime
+        # error, not a wrap) — the program panics (non-zero exit).
+        # Known gap: the panic payload prints as `Box<dyn Any>`
+        # instead of the error message (the default hook only
+        # displays &str/String payloads).
+        _stdout, _stderr, code = run_rs_src(
+            'print 9223372036854775807 + 1\n')
+        self.assertNotEqual(code, 0)
+
+    def test_top_level_let_is_a_static(self):
+        text = emit_rs_main_text(
+            'let x = 1\nprint x\n', "<test>.newr", "Main")
+        self.assertIn(
+            "static x: std::sync::Mutex<Option<i64>>", text)
+        self.assertIn("newr_rt::gset(&x, 1);", text)
+        self.assertIn("newr_rt::gget(&x)", text)
+
+    def test_nullable_widening_ok(self):
+        # `ok(none)` for a `Result[str?, error]?` target widens
+        # with `Some` (the checker unifies ok's type with the
+        # annotation, but the emitted `Ok` is never an `Option`).
+        self.assertEqual(
+            run_rs_ok('let r: Result[str?, error]? = ok(none)\n'
+                      'print r.is_some()\n'), "true\n")
+        self.assertEqual(
+            run_rs_ok('let r: Result[str?, error]? = ok("hi")\n'
+                      'print r.unwrap().unwrap()\n'), "hi\n")
+
+    def test_chain_unwrap_applies_to_the_option(self):
+        # A later `.unwrap()` unwraps the chain's `Option`
+        # result, it is not a no-op inside the closure.
+        src = ('struct Inner:\n  name: str\n'
+               'struct Outer:\n  inner: Inner?\n'
+               'let a: Outer? = Outer(inner: Inner(name: "n"))\n'
+               'print a?.inner.name.unwrap()\n')
+        self.assertEqual(run_rs_ok(src), "n\n")
+
+    def test_len_cast_parenthesized(self):
+        # `xs.len() as i64 < 1` must not parse `i64<1>` as a
+        # generic argument.
+        self.assertEqual(
+            run_rs_ok('let xs = [1, 2]\n'
+                      'if xs.len() < 1:\n  print "small"\n'
+                      'else:\n  print "big"\n'), "big\n")
+
+    def test_fn_value_in_a_top_level_let(self):
+        # A fn held in a top-level let is called through `gget`.
+        src = ('let f = fn(x: int) -> int: x * 2\n'
+               'print f(21)\n')
+        self.assertEqual(run_rs_ok(src), "42\n")
+
+    def test_local_shadowing_a_global(self):
+        # A local named like a top-level let is renamed (a `let`
+        # may not shadow a static, E0530).
+        src = ('let x = 100\n'
+               'fn get() -> int:\n  let x = 5\n  return x\n'
+               'print get()\nprint x\n')
+        self.assertEqual(run_rs_ok(src), "5\n100\n")
+
+
+# ---------------------------------------------------------------- bot (M5)
+# TDD RED first: the bot emitter does not exist yet — every test
+# below fails with AttributeError until _emit_bot_file and friends
+# land. The bot is serenity 0.12.5 + poise 0.7.1 (SPEC.md §18),
+# rusqlite 0.32.1 for stores; the same HELLO_BOT / SHOP programs
+# as tests/test_emitter_java_bot.py, so the semantics must match
+# the Java twins (slash commands, store economy with SQLite +
+# idempotency, buttons/selects/modals, reply/defer/edit/followup/
+# send, a standalone `<stem>_deploy.rs`, Cargo.toml scaffolding).
+# Compile + token-guard tests build with cargo; /tmp is a 512MB
+# tmpfs, so every cargo invocation sets CARGO_TARGET_DIR to a
+# persistent path ($HOME/.cargo-target).
+
+HELLO_BOT = """bot "HelloBot":
+  description: "A friendly bot that answers in plain words"
+
+command ping:
+  description: "Answer with pong"
+  reply: "Pong! Hello {user}"
+
+command greet:
+  description: "Greet someone in this server"
+  reply: "Hello {user}, welcome to {guild}!"
+  ephemeral: true
+
+event ready:
+  log: "{bot} is online"
+
+event member_join:
+  reply: "Welcome to {guild}, {user}!"
+"""
+
+SHOP = """import "shop_items.newr"
+
+bot "ShopBot":
+  description: "A tiny shop"
+  intents: [guilds, members]
+
+strings en:
+  "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
+  "buy.poor": "Not enough gold — {item} costs {price}, you have {balance}."
+strings id:
+  "buy.ok": "Membeli {item} seharga {price} gold. Saldo: {balance}."
+  "buy.poor": "Gold tidak cukup — {item} harganya {price}, kamu punya {balance}."
+
+store economy:
+  table balances (user: str, balance: int)
+  ledger true
+
+command ping:
+  description: "Answer with pong"
+  reply: "Pong! Hello {user}"
+
+command buy:
+  description: "Buy an item from the shop"
+  option item: str (required, choices: ["brick", "potion"])
+  option amount: int (default: 1, min: 1, max: 99)
+  do:
+    let price: int = shop_items.price_of(item) * amount
+    let bal: int = economy.balance(user)
+    if bal < price:
+      reply t("buy.poor", price: price, balance: bal) ephemeral
+    else:
+      economy.credit(user, -price, key: "buy-{user.id}-{item}-{amount}")
+      reply t("buy.ok", item: item, price: price, balance: bal - price)
+      button "Buy again" (style: primary, id: "buy-again", timeout: 60s):
+        only: author
+        do:
+          reply "Use /buy again, {user}!"
+        on_timeout:
+          reply "Offer expired."
+
+command balance:
+  description: "Show your balance"
+  do:
+    reply "Balance: {economy.balance(user)} gold."
+
+event ready:
+  log: "{bot} is online"
+
+event member_join:
+  reply: "Welcome to {guild}, {user}!"
+
+task every 1h:
+  do:
+    log "Hourly shop check ran"
+"""
+
+
+def _emit_shop_result():
+    """Emit SHOP from a real temp dir so its `import
+    "shop_items.newr"` resolves (the shop_items source is copied
+    from examples/). Returns the full EmitResult."""
+    from compiler.resolver import resolve_file
+    items = (ROOT / "examples" / "shop_items.newr").read_text(
+        encoding="utf-8")
+    with tempfile.TemporaryDirectory() as d:
+        (Path(d) / "shop_items.newr").write_text(items, encoding="utf-8")
+        main = Path(d) / "shop.newr"
+        main.write_text(SHOP, encoding="utf-8")
+        resolved = resolve_file(main)
+        diags = list(resolved.diagnostics)
+        diags += check_program(
+            resolved.program,
+            providers=discord_providers(resolved.program)).diagnostics
+        diags += check_discord(resolved.program)
+        errs = [x for x in diags if x.is_error()]
+        assert not errs, [f"{x.code}: {x.message}" for x in errs]
+        sources = {
+            str(main): SHOP,
+            str(Path(d) / "shop_items.newr"): items,
+        }
+        return emit_rs(resolved.program, main_path=str(main),
+                       sources=sources, output_stem="shop")
+
+
+def emit_shop_text():
+    """Emit SHOP from a real temp dir; the main file's text."""
+    result = _emit_shop_result()
+    return result.files[result.main_file]
+
+
+def _cargo_env():
+    """Env for cargo: a persistent target dir (never /tmp)."""
+    env = dict(os.environ)
+    env["CARGO_TARGET_DIR"] = str(Path.home() / ".cargo-target")
+    return env
+
+
+def cargo_build_result(result, timeout=900):
+    """Write an EmitResult (+ newr_rt.rs when used) to a temp dir
+    and `cargo build --offline` it. Returns (proc, temp dir path)
+    — the caller must keep the dir alive while running the binary.
+    The temp dir is NOT deleted here (the caller removes it)."""
+    d = tempfile.mkdtemp(prefix="newr-rs-bot-")
+    for name, text in result.files.items():
+        (Path(d) / name).write_text(text, encoding="utf-8")
+    if result.uses_rt:
+        (Path(d) / "newr_rt.rs").write_text(
+            RT_RS_SRC.read_text(encoding="utf-8"), encoding="utf-8")
+    proc = subprocess.run(
+        [CARGO, "build", "--offline"], capture_output=True, text=True,
+        cwd=d, env=_cargo_env(), timeout=timeout)
+    return proc, d
+
+
+def _run_to_token_guard(result, binary):
+    """Build the result with cargo, run the named binary with
+    DISCORD_TOKEN unset, and assert it stops at the token guard
+    (non-zero exit, DISCORD_TOKEN named on stderr) without ever
+    touching Discord. Returns the run's CompletedProcess."""
+    proc, d = cargo_build_result(result)
+    try:
+        assert proc.returncode == 0, \
+            f"cargo build failed:\n{proc.stdout}\n{proc.stderr}"
+        env = _cargo_env()
+        env.pop("DISCORD_TOKEN", None)
+        target = Path(_cargo_env()["CARGO_TARGET_DIR"]) / "debug" / binary
+        run = subprocess.run([str(target)], capture_output=True,
+                             text=True, cwd=d, env=env, timeout=60)
+        assert run.returncode != 0, \
+            f"{binary} exited 0 without a token — it should stop " \
+            f"at the DISCORD_TOKEN guard\nstdout: {run.stdout}\n" \
+            f"stderr: {run.stderr}"
+        assert "DISCORD_TOKEN" in run.stderr, \
+            f"{binary} failed without naming DISCORD_TOKEN\n" \
+            f"stdout: {run.stdout}\nstderr: {run.stderr}"
+        return run
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+@unittest.skipUnless(RUSTC, "rustc is not installed")
+@unittest.skipUnless(HAS_RS_EMITTER, "compiler/emitter_rs.py is missing")
+class TestHelloBot(unittest.TestCase):
+    def test_hello_bot_shape(self):
+        text = emit_rs_main_text(HELLO_BOT, "hello_bot.newr", "hello_bot")
+        # poise slash commands (the macro registers them; the
+        # command fn name IS the slash name).
+        self.assertIn("#[poise::command(slash_command)]", text)
+        self.assertIn("pub async fn ping(", text)
+        self.assertIn("pub async fn greet(", text)
+        self.assertIn('/// Answer with pong', text)
+        # Replies go through the interaction (serenity), ephemeral
+        # on the greet reply only.
+        self.assertIn("create_response", text)
+        self.assertIn(".ephemeral(true)", text)
+        self.assertIn("interaction.user.mention()", text)
+        # Events arrive through poise's event_handler (FullEvent);
+        # the member-join reply goes to the system channel.
+        self.assertIn("FullEvent::GuildMemberAddition", text)
+        self.assertIn("FullEvent::Ready", text)
+        self.assertIn("system_channel_id", text)
+        # Startup: the token guard, then poise + serenity.
+        self.assertIn("DISCORD_TOKEN", text)
+        self.assertIn("poise::Framework::builder()", text)
+        self.assertIn("GatewayIntents::GUILD_MEMBERS", text)
+        result = emit_rs_src(HELLO_BOT, "hello_bot.newr", "hello_bot")
+        self.assertIn("hello_bot_deploy.rs", result.files)
+        self.assertIn("Cargo.toml", result.files)
+        self.assertIn('serenity = { version = "=0.12.5"',
+                      result.files["Cargo.toml"])
+        self.assertIn('poise = "=0.7.1"', result.files["Cargo.toml"])
+        self.assertNotIn("rusqlite", result.files["Cargo.toml"])
+
+    def test_hello_bot_deploy_shape(self):
+        result = emit_rs_src(HELLO_BOT, "hello_bot.newr", "hello_bot")
+        deploy = result.files["hello_bot_deploy.rs"]
+        self.assertIn("DISCORD_TOKEN", deploy)
+        self.assertIn("DISCORD_CLIENT_ID", deploy)
+        self.assertIn("DISCORD_GUILD_ID", deploy)
+        self.assertIn("register_globally", deploy)
+        self.assertIn("register_in_guild", deploy)
+        # An empty DISCORD_GUILD_ID counts as unset (global
+        # registration), it must not panic parsing "" as a number.
+        self.assertIn("!guild_id.is_empty()", deploy)
+        self.assertIn("hello_bot::ping()", deploy)
+
+    @unittest.skipUnless(CARGO, "cargo is not installed")
+    def test_hello_bot_builds_and_stops_at_token_guard(self):
+        result = emit_rs_src(HELLO_BOT, "hello_bot.newr", "hello_bot")
+        _run_to_token_guard(result, "hello_bot")
+
+
+@unittest.skipUnless(RUSTC, "rustc is not installed")
+@unittest.skipUnless(HAS_RS_EMITTER, "compiler/emitter_rs.py is missing")
+class TestShop(unittest.TestCase):
+    def test_shop_shape(self):
+        text = emit_shop_text()
+        # Commands + options (poise attrs, not JDA builders).
+        self.assertIn("pub async fn buy(", text)
+        self.assertIn('#[choices("brick", "potion")]', text)
+        self.assertIn("#[min = 1]", text)
+        self.assertIn("#[max = 99]", text)
+        self.assertIn("Option<i64>", text)
+        self.assertIn("unwrap_or(1)", text)
+        # Strings + _t (D16).
+        self.assertIn("_DEFAULT_LOCALE", text)
+        self.assertIn('"buy.ok"', text)
+        self.assertIn("fn _t(", text)
+        # Store: rusqlite, one long-lived connection, explicit
+        # transactions, ledger + idempotency (P11).
+        self.assertIn("rusqlite::Connection::open", text)
+        # The store opens an IMMEDIATE transaction through
+        # rusqlite's transaction API (exactly `BEGIN IMMEDIATE`
+        # under the hood) and commits it; a duplicate ledger key
+        # replays, a refused debit rolls back.
+        self.assertIn("TransactionBehavior::Immediate", text)
+        self.assertIn(".commit()", text)
+        self.assertIn("INSERT INTO ledger", text)
+        self.assertIn("economy_balance", text)
+        self.assertIn("economy_credit", text)
+        self.assertIn("bot.economy_balance(", text)
+        self.assertIn("bot.economy_credit(", text)
+        # Button: CreateButton + ActionRow, author gate, timeout.
+        self.assertIn('CreateButton::new("buy-again")', text)
+        self.assertIn("CreateActionRow::Buttons", text)
+        self.assertIn("buy_again_handler", text)
+        self.assertIn("This button is not for you.", text)
+        self.assertIn("Offer expired.", text)
+        # Task: spawned on a timer, not setInterval.
+        self.assertIn("_every_1h", text)
+        self.assertIn("tokio::spawn", text)
+        self.assertIn("Duration::from_secs(3600)", text)
+        # Deploy + Cargo.toml.
+        result = _emit_shop_result()
+        self.assertIn("shop_deploy.rs", result.files)
+        self.assertIn("Cargo.toml", result.files)
+        self.assertIn("rusqlite", result.files["Cargo.toml"])
+
+    @unittest.skipUnless(CARGO, "cargo is not installed")
+    def test_shop_builds_and_stops_at_token_guard(self):
+        _run_to_token_guard(_emit_shop_result(), "shop")
+
+
+class TestBotStatements(unittest.TestCase):
+    def test_store_call_outside_handler_is_rejected(self):
+        # §19: a store call lowers to `bot.<store>_<op>`, which only
+        # exists inside a handler. At the top level, inside a (sync)
+        # top-level fn, or inside a lambda there is no handler
+        # context — a clean E4001, never uncompilable code.
+        store = (
+            "store economy:\n"
+            "  table balances (user: str, balance: int)\n"
+            "  ledger true\n\n"
+        )
+        bot = (
+            'bot "B":\n'
+            '  description: "B"\n\n'
+            'command ping:\n'
+            '  description: "Ping"\n'
+            '  do:\n'
+            '    reply "pong"\n'
+        )
+        # Top-level statement.
+        with self.assertRaises(EmitterError):
+            emit_rs_src(store + 'let b: int = economy.balance("alice")\n\n'
+                        + bot, "<test>.newr", "Main")
+        # Top-level fn.
+        with self.assertRaises(EmitterError):
+            emit_rs_src(store +
+                        "fn bal() -> int:\n"
+                        '  return economy.balance("alice")\n\n' + bot,
+                        "<test>.newr", "Main")
+        # Lambda inside a handler.
+        lam = (
+            'bot "B":\n'
+            '  description: "B"\n\n'
+            'command ping:\n'
+            '  description: "Ping"\n'
+            '  do:\n'
+            '    let f = fn() -> int:\n'
+            '      return economy.balance("alice")\n'
+            '    reply "done"\n'
+        )
+        with self.assertRaises(EmitterError):
+            emit_rs_src(store + lam, "<test>.newr", "Main")
+
+    def test_reply_defer_edit_followup_send(self):
+        # `send` is only allowed in a message event or a task body
+        # (E2008), so the send form is tested in a message event.
+        src = (
+            "bot \"B\":\n  description: \"b\"\n"
+            "  intents: [message_content]\n"
+            "command x:\n  do:\n"
+            "    defer\n"
+            "    reply \"first\"\n"
+            "    edit \"second\"\n"
+            "    followup \"third\"\n"
+            "event message:\n  do:\n"
+            "    send \"hello\" to message.channel\n")
+        text = emit_rs_main_text(src, "<test>.newr", "Main")
+        self.assertIn("interaction.defer(", text)
+        self.assertIn('CreateInteractionResponseMessage::new()', text)
+        self.assertIn("edit_response(", text)
+        self.assertIn("create_followup(", text)
+        self.assertIn("send_message(", text)
+
+    def test_select_and_modal_emit(self):
+        src = (
+            "bot \"B\":\n  description: \"b\"\n\n"
+            "command pick:\n  description: \"p\"\n  do:\n"
+            "    reply \"choose\"\n"
+            "    select \"Pick one\" (options: [\"a\", \"b\"], timeout: 30s):\n"
+            "      only: author\n"
+            "      do:\n"
+            "        reply \"you picked {\", \".join(values)}\"\n"
+            "    modal \"Feedback\" (timeout: 120s):\n"
+            "      text_input \"name\" (style: short, required):\n"
+            "      text_input \"notes\" (style: paragraph):\n"
+            "      do:\n"
+            "        reply \"thanks {name}\"\n")
+        text = emit_rs_main_text(src, "<test>.newr", "Main")
+        self.assertIn("CreateSelectMenu::new(", text)
+        self.assertIn('CreateSelectMenuOption::new("a", "a")', text)
+        # `values` comes from the select payload kind (there is no
+        # `.values` field on `ComponentInteractionData` in
+        # serenity 0.12.5 — the values live in
+        # `ComponentInteractionDataKind::StringSelect`).
+        self.assertIn("ComponentInteractionDataKind::StringSelect",
+                      text)
+        self.assertIn("CreateModal::new(", text)
+        self.assertIn("CreateInputText::new(", text)
+        self.assertIn("InputTextStyle::Paragraph", text)
+        self.assertIn("CreateInteractionResponse::Modal(", text)
+        self.assertIn("_modal_value(", text)
+
+    def test_store_get_row(self):
+        # A `get` returns the table's row type (a struct-like type
+        # named after the table); field access on it must work.
+        src = (
+            "bot \"B\":\n  description: \"b\"\n"
+            "store economy:\n"
+            "  table balances (user: str, balance: int)\n"
+            "  ledger true\n\n"
+            "command c:\n  description: \"c\"\n  do:\n"
+            "    let v = economy.get(\"balances\", \"u1\")?\n"
+            "    let b: int = v.balance\n"
+            "    reply \"bal {b}\"\n")
+        result = emit_rs_src(src, "<test>.newr", "Main")
+        text = result.files[result.main_file]
+        self.assertIn("pub struct balances", text)
+        self.assertIn("economy_get_balances(", text)
+
+    def test_ephemeral_only_on_interaction_reply(self):
+        # `ephemeral` on a member-join reply is a clean E4001 (the
+        # checker allows it; the emitter refuses — only an
+        # interaction reply can be ephemeral).
+        src = (
+            "bot \"B\":\n  description: \"b\"\n\n"
+            "event member_join:\n  do:\n"
+            "    reply \"hi {user}\" ephemeral\n")
+        with self.assertRaises(EmitterError):
+            emit_rs_src(src, "<test>.newr", "Main")
+
+
+if __name__ == "__main__":
+    unittest.main()

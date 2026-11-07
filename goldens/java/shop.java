@@ -248,7 +248,7 @@ public class shop extends ListenerAdapter {
               }
             }
             long toBalance = curTo;
-            long nextTo = healed ? NewrRt.add(toBalance, amount) : toBalance;
+            long nextTo = NewrRt.add(toBalance, amount);
             if (!healed) {
               try (PreparedStatement ps = economy_db.prepareStatement("INSERT INTO ledger (user, amount, key, created_at) VALUES (?, ?, ?, ?)")) {
                 ps.setString(1, to);

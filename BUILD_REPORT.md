@@ -3804,3 +3804,558 @@ are under their thresholds. C# B6b gen has one slow run
 (697.6 ms vs a 302 ms floor) and Java B6b has high variance
 (hw ±556.8 ms) — both look like one-time construction/fsync
 jitter, reported with stddevs and ranges.
+## 22. M5 — Rust + Kotlin + Dart emitters (7 Nov 2026)
+
+M5 adds three targets: Rust (serenity 0.12.5 + poise 0.7.1),
+Kotlin (Kord 0.18.1), Dart (nyxx 6.9.1 + nyxx_commands 6.1.0).
+Same method as M2/M3/M4: TDD red first, conformance programs print
+their own verdict, goldens compare-only, CLI contract unchanged.
+One target per builder agent (Rust, Kotlin, Dart in parallel, same
+tree), parent did the scaffolding (CLI + conformance wiring), the
+shared-file edits, the integration, and the live verification.
+
+The headline finding of M5 is a bug in the SHIPPED M4 Java emitter
+(and the same line in Dart): `transfer` on a fresh transfer debited
+the sender and never credited the receiver — money destroyed on
+every transfer. Found independently by the Kotlin and Rust builders,
+proven live by the parent against the emitted Java shop, fixed in
+both emitters (one line each), goldens re-blessed, live proof after
+the fix. See §22.6.
+
+### 22.1 Toolchains (settled live, all verified)
+
+- Rust: **rustc/cargo 1.99.1** (`5f94df478 2026-08-27`) in
+  `~/.cargo/bin` (rustup, `--profile minimal`, stable channel).
+  `/tmp` is a 512MB tmpfs: EVERY cargo build must use a persistent
+  `CARGO_TARGET_DIR` (here `$HOME/.cargo-target`); the CI jobs pin
+  it under `runner.temp` for the same reason.
+- Kotlin: **kotlinc-jvm 2.2.0** in `~/kotlin/kotlinc/bin` (needs
+  `java` on PATH: `export PATH="$HOME/jdk-21/bin:$PATH"`; JDK is
+  Temurin 21.0.13+9). Gradle 8.12 downloaded but its live path is
+  NOT proven on this VM (see §22.9).
+- Dart: **3.13.7** stable in `~/dart-sdk/dart-sdk/bin`.
+- Gotcha: Python `zipfile` extraction drops exec bits — both the
+  Kotlin and Dart installs needed `chmod +x` on their bin dirs
+  before they ran.
+- Library pins verified live, not guessed: Rust serenity 0.12.5 +
+  poise 0.7.1 + rusqlite 0.32.1 (`cargo fetch` exit 0, `cargo tree`
+  confirmed; crates.io API returned 403 via curl but the cargo
+  sparse index works — the curl 403 is not a pin failure). Kotlin
+  Kord 0.18.1 (Maven Central `maven-metadata.xml`:
+  `<latest>0.18.1</latest>`). Dart nyxx 6.9.1 + nyxx_commands
+  6.1.0 + sqlite3 3.9.0 (pub.dev API latest versions match).
+- VM facts: Ubuntu 24.04.5 LTS, 4 CPUs, ~2 GB available RAM,
+  `/tmp` 512MB tmpfs. The VM was REPLACED once mid-M5 (uptime
+  ~37 min when noticed; the Dart full benchmark run had to restart
+  from zero).
+
+### 22.2 What was built
+
+- `compiler/emitter_rs.py` (6,918 lines) + `compiler/newr_rt.rs`
+  (1,711 lines). `tests/rs/RtChecks.rs` (32 checks) +
+  `tests/test_newr_rt_rs.py` (1 test),
+  `tests/test_emitter_rs.py` (22 tests). Goldens `goldens/rs/`
+  (7 files), `benchmarks/run_rs.py` (B1–B8).
+- `compiler/emitter_kt.py` (6,083 lines) + `compiler/newr_rt.kt`
+  (1,361 lines). `tests/kt/RtChecks.kt` (71 checks) +
+  `tests/test_newr_rt_kt.py` (1 test),
+  `tests/test_emitter_kt.py` (5 tests). Goldens `goldens/kt/`
+  (7 files), `benchmarks/run_kt.py` (B1–B8).
+- `compiler/emitter_dart.py` (5,810 lines) + `compiler/newr_rt.dart`
+  (1,245 lines). `tests/dart/RtChecks.dart` (71 checks) +
+  `tests/test_newr_rt_dart.py` (1 test),
+  `tests/test_emitter_dart.py` (28 tests: 16 general + 12 bot).
+  Goldens `goldens/dart/` (7 files), `benchmarks/run_dart.py`
+  (B1–B8).
+- CLI: `newr build --target rs|kt|dart` (plus `--check`, `-o`,
+  `--line-comments` like the other targets). USAGE /
+  `COMMAND_HELP["build"]` updated with an M5 paragraph; target
+  validation tuple now
+  `("py", "js", "java", "cs", "rs", "kt", "dart")`; `_build_emit`
+  dispatch branches (suffix .rs/.kt/.dart, rt_name
+  `newr_rt.rs`/`.kt`/`.dart`, no rename, `output_stem` passed like
+  java/cs, main file is stem-named).
+- Conformance runner (`conformance/run.py`) extended: toolchain
+  detection (CARGO/RUSTC from CARGO_HOME or ~/.cargo/bin; KOTLINC
+  from KOTLIN_HOME or ~/kotlin/kotlinc/bin; DART from DART_HOME or
+  ~/dart-sdk/dart-sdk/bin); GOLDENS_RS / GOLDENS_KT / GOLDENS_DART
+  (same shape as GOLDENS_JAVA/CS); `_SUFFIX` / `_RT_SRC` /
+  `_RT_COPY` / `_GOLDENS_BY_TARGET` / `_GOLDEN_DIR_BY_TARGET`
+  extended; `_build_to_temp` collects Cargo.toml (rs) and
+  pubspec.yaml (dart) as build scaffolding (like .csproj for cs);
+  run branches: rs plain `rustc <main>.rs -o <stem>`,
+  Cargo.toml present = `cargo run --quiet`; kt
+  `kotlinc *.kt -include-runtime -d app.jar && java -jar app.jar`;
+  dart plain `dart <main>.dart`, pubspec.yaml present =
+  `dart pub get` then `dart run`; argparse `--target` choices now
+  include rs/kt/dart.
+- Goldens test classes added by the parent:
+  `TestGoldensRs`, `TestGoldensKt`, `TestGoldensDart` in
+  `tests/test_goldens.py` (mirror `TestGoldensCs`).
+- **Golden contract fix (parent, verified live):** the "shop"
+  entries in GOLDENS_KT and GOLDENS_RS do NOT list
+  `shop_items.kt` / `shop_items.rs`. The module copy emitted as
+  part of shop.newr differs from the standalone copy on purpose
+  (kt: module form has no top-level `main`, standalone has a
+  `fun main` wrapper; rs: module form has
+  `pub fn __newr_init`, standalone has `fn main`), so the two
+  cannot share one golden. Java/C# MATCH (module == standalone)
+  and Dart MATCHes, so only kt/rs drop the file from the shop
+  entry. The standalone form is still pinned by the "shop_items"
+  entry; the module form is exercised at runtime by the shop
+  conformance program and the B6b drivers.
+- `tests/test_conformance.py`: NO edit (M4 precedent — no
+  java/cs method exists either; CI runs
+  `python conformance/run.py --target <t>` directly).
+- CI: `rs-emitter`, `kt-emitter`, `dart-emitter` jobs added
+  (see §22.8). YAML valid, 12 jobs total (was 9).
+
+### 22.3 Rust decisions (R-pins, from the emitter code)
+
+- R1: checked arithmetic through `newr_rt::add(...)` etc.
+- R2: top-level `let`s become `static Mutex<Option<T>>` statics
+  (one per file); access via `gget`/`gset`. This is also the
+  honest cause of the B6 30.64 flag (§22.11): every `total`/`i`
+  access in the generated loop is a Mutex lock/unlock, while the
+  hand-written loops use plain locals. A `let` inside a fn does
+  not pay it.
+- R4: panics do not cross the `catch_unwind` boundary
+  (overflow raises a catchable error instead).
+- R4b: widening a value to a nullable expected type (`T` to `T?`).
+- R6: fn types carry any signature.
+- R7: bot-only constructs reachable only in bot files.
+- Transfer follows the JS emitter's semantics (NOT Java's — the
+  Rust docstring records that Java's transfer healing is a dead
+  branch: it logs the out leg under the plain key on the SENDER,
+  then looks for `:out` keys on the RECEIVER, so it can never
+  fire, and a normal transfer never credits the receiver at
+  all): legs logged as `key:":out"` / `key:":in"` and upserted,
+  partial transfer healed leg by leg, replay (both legs done)
+  returns `true`.
+- Bot build shape: Cargo.toml emitted per bot (serenity
+  `default-features = false` with client/gateway/rustls_backend/
+  model, poise 0.7.1, tokio 1, rusqlite 0.32 bundled);
+  `CARGO_TARGET_DIR` persistent (see §22.1). Poise default
+  features enable `serenity/cache` via feature unification, so
+  `ctx.cache()`/`ctx.guild()` are available (proven at first bot
+  compile).
+
+### 22.4 Kotlin decisions (N-pins, builder report)
+
+- N1: one `object` per file, named after the file stem verbatim;
+  entry file also gets top-level
+  `fun main(args: Array<String>) { <Stem>.main(args) }`.
+- N2: top-level lets/consts as object properties
+  (`var`/`lateinit var` by type).
+- Types: int→Long, float→Double, bool→Boolean, str→String,
+  list→MutableList, dict→LinkedHashMap, set→MutableSet,
+  nullable→`T?`, fn→`(A,B)->R` (max arity 22), none→Unit?,
+  error→`NewrRt.NewrError`, duration→Long, conflicting enum
+  union→`Any?`.
+- N6: structs→data class (val fields, toString via
+  `NewrRt.toStr`); enums: all-fieldless→enum class, else sealed
+  class with nullable open val union fields on base, fielded
+  variants as nested data class, fieldless as nested object;
+  toString `Shape.Circle(radius: 1.5)`.
+- Lambdas: explicit typed params; block-body lambdas hoisted to
+  anonymous `fun` so bare `return` behaves correctly.
+- Strings: `$` escaped `\$`, `\f` → `\u000c`; floats via Python
+  repr + Double.NaN/POSITIVE_INFINITY/NEGATIVE_INFINITY.
+- Error message: `({obj}.message?: "")`
+  (Throwable.message is `String?`).
+- N-bot-1..16: Kord 0.18.1 bot shape (object + private Bot with
+  JDBC store, suspend handlers via `kord.on<T>` receiver
+  lambdas, guild/channel prologue locals, intents at login +
+  `@OptIn(PrivilegedIntent)`, register funs, builder-lambda
+  replies, ActionRowBuilder components + timeout edit removing
+  components, modal label DSL + allowedLength, JDBC store port,
+  ResolvedChannel via `_newrMessageChannel` helper, explicit
+  `this.` in embed fields, Gradle build file, Kord entity
+  fields, deduped imports, component handler maps + author/roles
+  gates, store key `.id.value.toString()`, store get cast).
+- N-bot-17: transfer always credits the receiver (the §22.6 fix).
+- Bot build shape: Gradle files emitted (primary documented
+  path) AND proven live via kotlinc + resolved Kord jars on the
+  classpath. NOTE: the jars must be the **-jvm** artifacts
+  (`kord-core-jvm-0.18.1.jar`, `~/.m5-kt/kord-jars-jvm/`,
+  classpath `~/.m5-kt/kord-cp-jvm.txt`) — the plain
+  `kord-core-0.18.1.jar` is the multiplatform metadata artifact
+  and contains no `Kord.class`; the parent burned one compile
+  round on exactly this mistake before finding it (no emitter
+  bug, parent error, recorded here so nobody repeats it).
+
+### 22.5 Dart decisions (D-pins, builder report, D1–D35)
+
+- D1: lambdas always carry explicit typed params (no Java-style
+  fn cast; Dart has none). D2: structs are classes, `final`
+  fields, named required ctor, `==`/`hashCode`/`toString`.
+  D3: enums are one class + `_newrVariant` discriminant, bare
+  variants `static final`, fielded variants factory `static`;
+  a union field missing from some variants is nullable.
+  D4: Result is a top-level class, private fields + methods;
+  `?` becomes `.unwrap()`. D5: file modules — top-level `let`
+  becomes `late var`; statements run in `main()` or public
+  `newrInit()`. D6: file-module imports use a bound alias
+  (`import '<stem>.dart' as <bound>`). D7: dict literals are
+  Dart map literals (no `dictOf` helper). D8: `round` is two
+  methods, `roundHalfAway(Object)` → int and
+  `roundHalfAwayN(Object, int)` → double (no overloading).
+  D9: `print` takes `List`; `input`/`envGet`/`range` use
+  optional params. D10: store lives in class `Bot` in the bot
+  file via `package:sqlite3` (sync API), snake_case methods,
+  balance TEXT, ledger + idempotency, one transaction per op.
+  D11: interpolation renders via `NewrRt.toStr` with
+  concatenation (no `${}` in interp bindings). D12: `%=` →
+  `tmod`/`fmod`. D13: `_dart_str` escapes `$` → `\$`,
+  `\b`→`\x08`, `\f`→`\x0c`. D14: fn type
+  `R Function(A, B)`, no arity cap. D15: type mapping
+  (int/float/bool/str/none as `Null` value / `void` fn return /
+  object/error/list/dict as `Map<String, V>`/set/Result/duration
+  as int/entity: user→`User`, channel→`TextChannel`,
+  interaction→`Interaction<dynamic>`,
+  embed→`EmbedBuilder`). D16: entity getters verified live in
+  nyxx 6.9.1 — mentions built manually `<@id>`/`<#id>` (no
+  `User.mention`), guild member count via
+  `approximateMemberCount ?? 0`, channel name via
+  `_channelName` with `is GuildChannel` (covers guild text +
+  threads, which have names; DMs read `''`). D17: honest gap —
+  `member.guild` / `interaction.guild` have no sync nyxx
+  equivalent → clean E4001, use the `guild` binding.
+  D18: commands are `ChatCommand` +
+  `CommandOptions(type: CommandType.slashOnly)` + closure
+  `id(...)`; options are closure params (`@Choices`,
+  `CombineConverter`, top-level `_newrPassInt`/`_newrPassDouble`
+  helpers and `_newrMinMax<Cmd><Opt>` per option). D19: deploy
+  is `newrCommandBuilders()` public (the deploy file is a
+  separate library and cannot see privates) + REST
+  `bulkOverride`; pubspec names use underscore (hyphens are
+  rejected by `dart pub get`). D20: components use the nyxx
+  await model — `ComponentId.generate(expirationTime:,
+  allowedUser:)` carries the author gate + timeout; handlers
+  inline after `awaitButtonPress`/`awaitSelection`/`awaitModal`;
+  timeout disables the row first, then edits. D21: events —
+  listeners in `main()` after `connectGateway`; ready fetches
+  the bot user, member events fetch the guild and use
+  `systemChannel` (null-guarded). D22: bot main — top-level
+  statements, `DISCORD_TOKEN` guard, `CommandsPlugin(prefix:
+  null)`, `onCommandError` handler, `Timer.periodic` tasks.
+  D23: answers — `respond` (+ `level: ResponseLevel.hint` when
+  ephemeral), `interaction.updateOriginalResponse`,
+  `interaction.createFollowup`, channel `sendMessage`.
+  D24: host-error code is host-specific (missing file =
+  `PathNotFoundException`). D25: intent `guilds` maps to None
+  (mirrors Java exactly; no newr event needs the GUILDS bit).
+  D26: modal timeout is now passed to `awaitModal` even with no
+  `on_timeout` body (bug found while writing tests: a declared
+  120s timeout was silently dropped, the await could hang
+  forever). D27: alias `final client = _newrClient;` is only
+  emitted when an event listener exists (bug found via test: a
+  bot without events left an unused local → `dart analyze`
+  warning, exit 2). D28: sqlite3 native asset — `dart pub get`
+  does NOT run the build hook (verified online and offline: no
+  `native_assets.yaml`); plain `dart <file>` then fails
+  "Couldn't resolve native function 'sqlite3_initialize'". One
+  `dart run` per dir builds the asset; the benchmark runner
+  does this in setup (untimed), and the conformance runner
+  already uses `dart run` for pubspec programs, so no runner
+  change was needed. D29: no shared `.dart` fixtures in
+  `benchmarks/handwritten/` or `benchmarks/generated/`, so the
+  hand-written and shop-economy drivers live as string
+  constants in `run_dart.py`. D30: `loop_plain.dart` uses
+  `.remainder(...)` (Dart `%` is Euclidean; the checksum must
+  match). D31: `run_dart.py` prints the M5 section but does not
+  write BENCHMARKS.md (parent merges). D32: em dashes — the
+  Dart files still contain them (emitter 138 lines, runtime 19,
+  tests 8, RtChecks 4, runner 35, goldens 1–3 per file, mostly
+  comments inherited from the Java emitter plus the contract
+  header `— do not edit by hand.`). No sweep was done: the
+  header em dash is REQUIRED by the emitter contract and the
+  goldens/tests pin it; sweeping would break the contract.
+  The no-em-dash rule governs user-facing messages, not code.
+- Transfer fix (D-fix, parent): same one line as Java (§22.6).
+
+### 22.6 Bugs found and fixed during M5
+
+1. **Store transfer destroyed money (Java M4 + Dart M5) —
+   the M5 headline.** The Java line
+   (`emitter_java.py` ~4500, shipped in M4):
+   `long nextTo = healed ? NewrRt.add(toBalance, amount) : toBalance;`
+   On a FRESH transfer (`healed=false`) the receiver was never
+   credited: `nextTo = toBalance`, while the in-leg ledger row
+   WAS inserted. The Dart line (`emitter_dart.py` ~4531) was
+   identical. Found independently by the Kotlin builder (live
+   SQL repro: alice 100→70, bob 0→0 for a 30 transfer) and by
+   the Rust builder (documented in `emitter_rs.py` 5854–5863:
+   Java's healing is a dead branch — the out leg is logged
+   under the plain key on the SENDER, then the code looks for
+   `:out` keys on the RECEIVER, so it can never fire).
+   Parent proof live against the SHIPPED golden
+   (`goldens/java/shop.java`, reflection harness, sqlite-jdbc):
+   credit alice 100, transfer 30 to bob with key `k1` →
+   returned `true`, alice 70, **bob 0**; ledger showed alice
+   -30 (`k1`) and bob +30 (`k1:in`) — the ledger said +30 while
+   the balance said 0. The Python reference always credits
+   `in_left = amount - in_done`. JS and C# were verified
+   correct (per-leg `inLeft`, same shape as Python); Rust was
+   written correct from the start; Kotlin was fixed by its
+   builder (N-bot-17).
+   Fix (one line each, mirroring N-bot-17):
+   `long nextTo = NewrRt.add(toBalance, amount);` (Java),
+   `final nextTo = NewrRt.add(toBalance, amount);` (Dart).
+   Re-blessed `goldens/java/shop.java` (diff exactly one line)
+   and `goldens/dart/shop.dart`. Live proof after the fix —
+   Java: alice 100→70, **bob 0→30**, replay of key `k1` returns
+   true with balances unchanged (70/30, idempotent). Dart
+   (harness importing the emitted shop, `dart run`): same
+   numbers, alice 70, bob 30, replay idempotent.
+   NOT claimed fixed: the crash-between-legs replay gap (§16.4
+   carry-forward) — the dup-check `if (dup) return true` at the
+   top of transfer can return without crediting the receiver
+   when the out leg was logged but the in leg was not. The
+   Python reference heals per-leg; the Java/Dart/Kotlin port
+   heals only the common path. Still open, see §22.9.
+2. Kotlin `_emit_strings` `_t`: Kotlin does NOT smart-cast
+   `var out = template` after `if (template == null) return`
+   when `out` is reassigned in a loop (reproduced in isolation).
+   Fix: `val template = table?.get(key) ?: return key`.
+3. Kotlin `_attach_components` timeout edit: split-literal `}}`
+   bug — plain string `"mutableListOf() }}"` emitted a literal
+   extra `}`. Fix: `"mutableListOf() }"`. Same bug in the two
+   author-gate `respondEphemeral` lines (fixed).
+4. Kotlin bot `setup()` was `private fun` in a nested Bot
+   class — Kotlin private on a nested class member blocks the
+   enclosing object (unlike Java). Fix: public `fun setup()`
+   (the class itself is private).
+5. Kotlin conformance run 3 was 73/74 (`try_catch` failed on
+   the `String?` message). Fix: `({obj}.message?: "")`.
+6. Dart modal timeout silently dropped (D26) and unused-client
+   alias breaking `dart analyze` (D27) — see §22.5.
+7. Parent's own live-check mistake (not a code bug): the first
+   Kotlin shop compile used the multiplatform Kord jars
+   (`kord-cp.txt`) instead of the -jvm jars
+   (`kord-cp-jvm.txt`) and failed with a lambda-inference error
+   that looked like an emitter bug. The correct classpath
+   compiles clean and reaches the guard. Recorded in §22.4.
+
+### 22.7 Red-checks (sha256-verified)
+
+- Rust (parent-run): good `compiler/newr_rt.rs` sha256
+  `11d3bb6cbcc9c536ffc404c36694bdb17a128d3a5c35bfe160911e86563f353e`.
+  Reverted `mul` (`checked_mul` → `a.wrapping_mul(b)`), hash
+  `42f3bb8e1953fefc2023740837db0415e80431f238496332ea5e39d9d957a900`.
+  `arith_overflow_catch` printed `0` then `FAIL` (real failure).
+  Restored byte-identical, hash back to `11d3bb6c…`, program
+  prints `PASS` again.
+- Kotlin (builder-run): reverted `mul`
+  (`Math.multiplyExact(a, b)` → `a * b`); `arith_overflow_catch`
+  printed `0` then `FAIL`. Original sha256
+  `a0322b987c27d591e733ffcea3bc071aa92a77bf245c6b8ac6e7726ab407fdc0`;
+  reverted
+  `b67241cba50def68b72b345861f87471f14ea50f0c62876ed0bb47d1815b2512`;
+  restored `a0322b98…` (identical), `PASS` again.
+- Dart (builder-run): good `compiler/newr_rt.dart` sha256
+  `191b4ad495ef9d9ab5fc9e56ffa7530eeac3abfc88af5c6bc441cd52a9a6ec40`.
+  Reverted `mul` (BigInt overflow guard → `return a * b;`,
+  5 lines → 1), hash
+  `4e0fa4b3fea2eaa6151e31ff572542233cade865ad78282d774023f8205fa1c5`.
+  Reverted run: runner exit 1, **73 ok, 1 FAIL —
+  `FAIL arith_overflow_catch.newr: last line 'FAIL' != 'PASS'
+  (stdout '0\nFAIL\n')`** (the product wrapped
+  `4611686018427387904 * 4` = 0, no exception caught). Restored
+  byte-identical (diff empty, hash back to `191b4ad4…`),
+  conformance back to **74/74, 0 FAIL**.
+- Dart red-check gap found by the check itself: reverting
+  `tmod` to Euclidean `%` still passed 74/74 (revert hash
+  `bf70d9a4e2994bd980ffdc081fb894bac48da87c22107490b09f0dc8daf48127`).
+  No conformance program calls `tmod` with a negative dividend,
+  because `-7 % 3` parses as `-(7 % 3)` (verified in the emitted
+  `arith_int.dart`: `neg(tmod(7, 3))`). The runtime is correct;
+  the suite does not pin it. A conformance program with a
+  computed negative dividend (e.g. `let x = 0 - 7` then
+  `x % 2`) would pin it — suggested for the next round, not
+  added here (conformance/ok/ is outside the builders' file
+  sets). See §22.9.
+
+### 22.8 CI
+
+- Three jobs added (`rs-emitter`, `kt-emitter`,
+  `dart-emitter`), mirroring `java-emitter`/`cs-emitter`:
+  setup Python 3.12, install discord.py 2.7.1 + aiosqlite, full
+  suite, `python conformance/run.py --target <t>`, build + run
+  the examples (hello runs; shop/hello_bot/showcase must reach
+  the DISCORD_TOKEN guard), golden comparison
+  (`TestGoldensRs`/`Kt`/`Dart`).
+- rs job: `dtolnay/rust-toolchain@stable` 1.99.1,
+  `CARGO_TARGET_DIR` under `runner.temp`; hello via rustc,
+  bots via `cargo run --quiet` in `runner.temp` subdirs.
+- kt job: setup-java 21, kotlinc 2.2.0 from the official
+  JetBrains release zip, `gradle/actions/setup-gradle` 8.12;
+  hello via kotlinc, bots via the emitted Gradle project
+  (`gradle run`). NOTE: the Gradle path is unproven on the dev
+  VM (§22.9) — this job exercises it on the CI runners; if
+  `gradle run` fails there, fall back to the proven kotlinc +
+  resolved -jvm Kord jars path instead of weakening the guard.
+- dart job: `dart-lang/setup-dart@v1` sdk 3.13.7 (the child
+  notes this input is documented but unconfirmed on a live CI
+  run — verify on the first CI run); `dart pub get` resolves
+  nyxx/sqlite3; guard stops before any sqlite3 load, so plain
+  `dart` suffices for the guard runs.
+- YAML validates (`yaml.safe_load`), 12 jobs total (was 9).
+  CI has never run (same as M4).
+
+### 22.9 UNVERIFIED items (M5)
+
+- Windows/macOS execution: Linux-only on this VM; CI has never
+  run, so the matrix is unproven.
+- Gradle live path on this VM: Gradle 8.12 downloaded and
+  verified, daemon starts and listens, but the client-daemon
+  handshake fails 3x ("first result from the daemon was
+  empty", then a hang past 120s). Loopback TCP itself works
+  (Python probe). Emitted Gradle files verified by inspection
+  only; the proven bot path on the VM is kotlinc + resolved
+  -jvm Kord jars. The CI kt job exercises Gradle on runners.
+- P-42 live Discord verification still pending (needs test
+  guild + bot token from the user) — same as M4.
+- `tmod` negative-dividend conformance gap (§22.7).
+- Transfer crash-between-legs replay gap (§16.4 carry-forward,
+  §22.6 item 1).
+- Kotlin `trim()` vs Java `strip()` drift (Unicode whitespace).
+- Kotlin transfer heal branch is an approximation of the Python
+  reference (see §22.6 item 1).
+- C#/JS transfer structure not verified line-by-line (different
+  code shape from Java/Dart; read as correct from the per-leg
+  structure, not live-proven the way Java/Dart were).
+- Emitter comments/docstrings still carry "Java" port vocabulary
+  (lineage notes, harmless).
+- Carried forward, NOT claimed fixed: §16.4 amount-based
+  debit/credit heal, §19.5 async-fn lowering (SPEC §9.5),
+  imported structs across modules (check rejects consistently;
+  SPEC §11 promise does not hold in practice), J6 dict half
+  (SPEC §12 `dict[str, T]`, only set half live), JS `round()`
+  latent bug, csproj CS0017 and file-module-fn-as-value gaps
+  (§21.11).
+- Suite failure attribution (parent): the system-Python suite run shows
+  963 tests with ONE failure, and the failure is NOT M5: it is
+  `test_ok_programs_build_run_and_print_pass_js`, failing because
+  ANOTHER agent's uncommitted JS fix round (a set-semantics fix
+  in `compiler/emitter_js.py` + `compiler/newr_rt.js`, mtimes
+  17:33–17:34 WIB 7 Nov, during this session) added `setAdd`,
+  `setContains`, `toSet`, `strCmp`, `lenOf` functions to
+  `newr_rt.js` but did NOT add them to `module.exports`, so the
+  emitted programs destructure `undefined` and fail with
+  `TypeError: toSet is not a function` (reproduced by the parent:
+  `set_ops`, `control_for`, `str_concat_compare`,
+  `str_of_collections` fail on js). The parent did NOT fix this:
+  it is another agent's in-flight work, and the files may still
+  be changing. M5's own tests are all green inside the same
+  suite run (see §22.10).
+- The sys suite ran while the other agent's JS edits were
+  landing (files changed 17:33–17:34 WIB, the sys suite ran
+  17:31–17:47 WIB), so its 1-failure count reflects a mix of
+  pre- and post-edit states; the venv run (17:49–18:02 WIB,
+  entirely after the edits) shows all five JS failures. The
+  13 extra skips in the sys run are the discord.py-gated bot
+  tests (system Python has no discord.py/aiosqlite; the venv
+  has them).
+
+### 22.10 Verification (M5, parent-run)
+
+- Full suite, system Python: **963 tests in 930.9s, 962 pass,
+  1 failure, 15 skipped.** The single failure is the JS
+  conformance test (§22.9) — another agent's uncommitted JS
+  breakage, not M5. Every M5 test passes inside this run: rs
+  emitter + rt tests, kt emitter + rt tests, dart emitter + rt
+  tests, the three new golden tests, and the py/java/cs
+  conformance tests.
+- Full suite, fresh venv (discord.py 2.7.1 + aiosqlite, built
+  for this run at `~/m5-venv`): **963 tests in 743.7s, 958 pass,
+  5 failures, 2 skipped.** All 5 failures are the JS
+  set-exports breakage (§22.9) — the conformance js test plus
+  the four `TestCollections` js tests. The 13 discord.py-gated
+  bot tests that skipped in system Python ran and passed here.
+  No M5 failure in either environment.
+- Conformance, parent-run: **rs 74/74 ok, 0 FAIL** (run twice;
+  the second run is clean post-red-check-restore);
+  **dart 74/74 ok, 0 FAIL**; **kt 74/74 ok, 0 FAIL**
+  (parent-run, ~39 min; the builder's run 4 agreed). py/js/java/cs
+  conformance is unchanged from M4 except the JS breakage above
+  (js fails on the four set/string programs until the other
+  agent's exports land).
+- Goldens: `TestGoldensRs` + `TestGoldensKt` +
+  `TestGoldensDart` — **3/3 OK, diff empty** (parent-run).
+  `TestGoldensJava` re-run after the transfer-fix re-bless:
+  OK.
+- Hello live (parent-run): "Hello, world!" on all three new
+  targets (rustc-built rs binary, kotlinc-built kt jar,
+  `dart hello.dart`).
+- Shop + hello_bot guard live (parent-run, no token, no Discord
+  connection): rs `cargo run` prints
+  `set the DISCORD_TOKEN environment variable` for both shop and
+  hello_bot; kt `java -cp app.jar:<jvm Kord cp> Shop_outKt`
+  throws `IllegalStateException: set the DISCORD_TOKEN
+  environment variable`; dart `dart shop.dart` prints
+  `Bad state: set the DISCORD_TOKEN environment variable`
+  (exit 255).
+- RtChecks live: rs 32 checks passed (inside the 23 rs tests),
+  kt 71/71, dart 71/71 (inside their rt tests).
+- Transfer fix live proofs: Java harness (reflection into the
+  emitted shop `Bot`, sqlite-jdbc) — before fix alice 100→70,
+  bob 0→0 (money destroyed), after fix alice 70, bob 30,
+  replay idempotent. Dart harness (import of emitted shop,
+  `dart run`) — after fix alice 70, bob 30, replay idempotent.
+- Benchmarks: every mean in §22.11 recomputed by the parent
+  from the raw hyperfine JSON; all match the runners' printed
+  sections exactly (B1/B2/B5/B6/B6b spot-checked per target,
+  hello_gen sizes re-measured: rs 205 B / kt 294 B / dart 203 B,
+  matching the logs).
+- Red-checks: §22.7 (all three targets, hashes recorded).
+- The Rust builder's final report (full R1–Rn list, its own
+  red-check hashes) was never delivered to the parent — the
+  continuation agent shows completed but its handoff did not
+  arrive. The numbers in §22.3/§22.10/§22.11 for Rust are the
+  parent's own runs and log reads instead, and the R-decisions
+  cited are the ones visible in the emitter code. Same for the
+  Kotlin builder's final code-block edits (the parent
+  reconstructed the shared-file edits from the builder's
+  `~/.m5-kt/report-draft.md`, which survived on disk, and
+  verified each one live).
+
+### 22.11 Benchmarks (M5 summary — full tables in BENCHMARKS.md)
+
+All means below were recomputed by the parent from the raw
+hyperfine JSON in `benchmarks/raw/` (they match the runners'
+printed sections exactly). Checksums verified: loops 105003,
+shop balances 1000, all three targets.
+
+| | Rust | Kotlin | Dart |
+|---|---|---|---|
+| B1 hello / shop (cold) | 397.7 / 407.4 ms | 498.4 / 551.2 ms | 550.1 / 387.1 ms |
+| B2 hello / shop-change (warm) | 366.0 / 1777.1 ms (NOISY, range 279.8–5977.9) | 577.5 / 569.2 ms (NOISY) | 428.4 / 1345.2 ms (NOISY) |
+| B4 hello / loop size ratio | 0.68 / 1.17 | 0.98 / 0.90 | 0.67 / 0.64 |
+| B5 startup ratio | 0.61 | 1.86 (NOISY, quick run 1.22, ranges overlap) | 0.94 |
+| B6 gen/plain | **30.64** (FLAG) | **2.67** (FLAG) | **1.43** (FLAG) |
+| B6 gen/checked | 24.18 | 1.00 | 1.36 |
+| B6b shop ratio | **1.28** (FLAG) | 0.80 | 1.16 |
+| B7 compile / run RSS | 17.9 MB / 11.3 MB | 17.8 MB / 39.2 MB | 18.1 MB / 158.1 MB |
+
+Honest flags (threshold 1.20, same as M2/M4): B6 gen/plain is
+over on all three targets, worst on Rust (30.64) — the Rust
+cause is the R2 top-level-let Mutex design (§22.3), not the
+arithmetic (the checked helpers themselves are within noise of
+hand-written code using them only on Kotlin at 1.00; Rust
+gen/checked is 24.18 because the Mutex cost dominates both
+sides of that comparison too — the generated loop pays it on
+every access, the hand-written checked loop does not use
+globals at all). Kotlin (2.67) and Dart (1.43) are the
+checked-int price, same shape as M2's 2.54 and M4's 2.42:
+generated code is within noise of hand-written code using the
+same checked helpers (1.00 / 1.36), and the plain loop is not a
+fair target — it cannot overflow-check at all. B6b is over on
+Rust only (1.28). B5 Kotlin 1.86 is noisy (quick run gave 1.22
+with overlapping ranges). B6b Dart (1.16, under threshold) is
+dominated by startup: both drivers pay ~7s of Dart package load
+per run, so the mean measures startup more than the economy
+loop. Dart B6 ranges are wide (gen 1523–4310 ms) with large
+stddev — the VM was shared and loaded (sibling agents,
+including a Gradle benchmark, ran concurrently; the VM was
+replaced once mid-run).

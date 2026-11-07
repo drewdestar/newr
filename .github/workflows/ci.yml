@@ -558,3 +558,283 @@ jobs:
       # now (compare-only; regeneration needs --bless, never by hand).
       - name: Golden comparison (C#)
         run: python -m unittest tests.test_goldens.TestGoldensCs -v
+
+  # M5: the Rust emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # Rust 1.99.1 is the pinned toolchain (the emitter was verified
+  # against it); serenity 0.12.5 + poise 0.7.1 + rusqlite 0.32.1
+  # come from crates.io at cargo build time. Python is still
+  # needed — the compiler itself is Python, and the full suite
+  # includes the Python emitter tests too. CARGO_TARGET_DIR is
+  # pinned under runner.temp: /tmp is a 512MB tmpfs on the dev VM
+  # and cargo target dirs do not fit there.
+  rs-emitter:
+    name: rust emitter (${{ matrix.os }}, Rust 1.99.1)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust 1.99.1
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. Rust emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target rs`, compiles the emitted Rust with rustc (plain
+      # programs) or `cargo run` (bot/store programs), runs it, and
+      # requires a PASS verdict from each.
+      - name: Conformance corpus (Rust)
+        run: python conformance/run.py --target rs
+
+      # Build every example, compile the emitted Rust, and run it.
+      # The bots (hello_bot, showcase, shop) stop at the
+      # DISCORD_TOKEN guard when no token is set: exit 1 with the
+      # token message — that is the expected behaviour here, and it
+      # proves the emitted bot got far enough to run its main().
+      # The bot builds run in runner.temp so the repo stays clean.
+      - name: Build + run the examples (Rust)
+        shell: bash
+        run: |
+          python newr build --target rs examples/hello.newr -o hello_out.rs
+          rustc hello_out.rs -o hello_out
+          ./hello_out
+          mkdir -p "${{ runner.temp }}/rs-shop" "${{ runner.temp }}/rs-hello-bot" "${{ runner.temp }}/rs-showcase"
+          python newr build --target rs examples/shop.newr -o "${{ runner.temp }}/rs-shop/shop_out.rs"
+          if (cd "${{ runner.temp }}/rs-shop" && cargo run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target rs examples/hello_bot.newr -o "${{ runner.temp }}/rs-hello-bot/hello_bot_out.rs"
+          if (cd "${{ runner.temp }}/rs-hello-bot" && cargo run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target rs examples/showcase.newr -o "${{ runner.temp }}/rs-showcase/showcase_out.rs"
+          if (cd "${{ runner.temp }}/rs-showcase" && cargo run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M5 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (Rust)
+        run: python -m unittest tests.test_goldens.TestGoldensRs -v
+
+  # M5: the Kotlin emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # Kotlin 2.2.0 (kotlinc-jvm) is the pinned compiler and Java 21
+  # (Temurin) the runtime; Kord 0.18.1 + sqlite-jdbc 3.54.1.0 come
+  # from Maven Central at Gradle build time. Python is still
+  # needed — the compiler itself is Python, and the full suite
+  # includes the Python emitter tests too.
+  # NOTE (M5 known gap): the emitted Gradle path has NOT been
+  # proven live on the dev VM (Gradle 8.12 daemon handshake fails
+  # there); the proven path on the VM is kotlinc + resolved Kord
+  # jars on the classpath. This job exercises Gradle on the CI
+  # runners — if `gradle run` fails there, fall back to that
+  # kotlinc path instead of weakening the guard check.
+  kt-emitter:
+    name: kotlin emitter (${{ matrix.os }}, Kotlin 2.2.0)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # kotlinc is not on the runners by default: fetch the
+      # official 2.2.0 compiler zip from JetBrains.
+      - name: Install kotlinc 2.2.0
+        shell: bash
+        run: |
+          mkdir -p "${{ runner.temp }}/kotlin"
+          curl -sSL -o "${{ runner.temp }}/kotlin/kotlin-compiler.zip" https://github.com/JetBrains/kotlin/releases/download/v2.2.0/kotlin-compiler-2.2.0.zip
+          unzip -q "${{ runner.temp }}/kotlin/kotlin-compiler.zip" -d "${{ runner.temp }}/kotlin"
+          echo "${{ runner.temp }}/kotlin/kotlinc/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.12"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. Kotlin emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target kt`, compiles the emitted Kotlin with kotlinc,
+      # runs it, and requires a PASS verdict from each.
+      - name: Conformance corpus (Kotlin)
+        run: python conformance/run.py --target kt
+
+      # Build every example, compile the emitted Kotlin, and run
+      # it. The bots (hello_bot, showcase, shop) stop at the
+      # DISCORD_TOKEN guard when no token is set: exit 1 with the
+      # token message — that is the expected behaviour here, and it
+      # proves the emitted bot got far enough to run its main().
+      # Plain hello goes through kotlinc directly; the bots go
+      # through the emitted Gradle project (`gradle run`). The bot
+      # builds run in runner.temp so the repo stays clean.
+      - name: Build + run the examples (Kotlin)
+        shell: bash
+        run: |
+          python newr build --target kt examples/hello.newr -o hello_out.kt
+          kotlinc hello_out.kt -include-runtime -d hello_out.jar
+          java -jar hello_out.jar
+          mkdir -p "${{ runner.temp }}/kt-shop" "${{ runner.temp }}/kt-hello-bot" "${{ runner.temp }}/kt-showcase"
+          python newr build --target kt examples/shop.newr -o "${{ runner.temp }}/kt-shop/shop_out.kt"
+          if (cd "${{ runner.temp }}/kt-shop" && gradle run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target kt examples/hello_bot.newr -o "${{ runner.temp }}/kt-hello-bot/hello_bot_out.kt"
+          if (cd "${{ runner.temp }}/kt-hello-bot" && gradle run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target kt examples/showcase.newr -o "${{ runner.temp }}/kt-showcase/showcase_out.kt"
+          if (cd "${{ runner.temp }}/kt-showcase" && gradle run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M5 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (Kotlin)
+        run: python -m unittest tests.test_goldens.TestGoldensKt -v
+
+  # M5: the Dart emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # Dart 3.13.7 is the pinned SDK (the emitter was verified against
+  # it); nyxx 6.9.1 + nyxx_commands 6.1.0 + sqlite3 3.9.0 come from
+  # pub.dev at `dart pub get` time. Python is still needed — the
+  # compiler itself is Python, and the full suite includes the
+  # Python emitter tests too.
+  dart-emitter:
+    name: dart emitter (${{ matrix.os }}, Dart 3.13.7)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Dart 3.13.7
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: "3.13.7"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. Dart emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target dart`, runs the emitted Dart, and requires a PASS
+      # verdict from each.
+      - name: Conformance corpus (Dart)
+        run: python conformance/run.py --target dart
+
+      # Build every example and run it. The bots (hello_bot,
+      # showcase, shop) stop at the DISCORD_TOKEN guard when no
+      # token is set: exit 1 with the token message — that is the
+      # expected behaviour here, and it proves the emitted bot got
+      # far enough to run its main(). `dart analyze` is the compile
+      # proof for the bot files (Dart's javac equivalent); `dart
+      # pub get` resolves the nyxx/sqlite3 deps first. The guard
+      # stops before any sqlite3 load, so plain `dart` suffices
+      # here (no `dart run` native-asset build is needed).
+      - name: Build + run the examples (Dart)
+        shell: bash
+        run: |
+          python newr build --target dart examples/hello.newr -o hello_out.dart
+          dart hello_out.dart
+          python newr build --target dart examples/shop.newr -o shop_out.dart
+          dart pub get
+          dart analyze shop_out.dart shop_items.dart shop_out_deploy.dart
+          if dart shop_out.dart 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target dart examples/hello_bot.newr -o hello_bot_out.dart
+          dart analyze hello_bot_out.dart hello_bot_out_deploy.dart
+          if dart hello_bot_out.dart 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target dart examples/showcase.newr -o showcase_out.dart
+          dart analyze showcase_out.dart showcase_out_deploy.dart
+          if dart showcase_out.dart 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M5 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (Dart)
+        run: python -m unittest tests.test_goldens.TestGoldensDart -v

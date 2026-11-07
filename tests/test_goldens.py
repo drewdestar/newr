@@ -12,8 +12,11 @@ import unittest
 from pathlib import Path
 
 from conformance.run import (GOLDENS, GOLDENS_JS, GOLDENS_JAVA,
-                             GOLDENS_CS, GOLDEN_DIR, GOLDEN_DIR_JS,
-                             GOLDEN_DIR_JAVA, GOLDEN_DIR_CS, ROOT,
+                             GOLDENS_CS, GOLDENS_RS, GOLDENS_KT,
+                             GOLDENS_DART, GOLDEN_DIR, GOLDEN_DIR_JS,
+                             GOLDEN_DIR_JAVA, GOLDEN_DIR_CS,
+                             GOLDEN_DIR_RS, GOLDEN_DIR_KT,
+                             GOLDEN_DIR_DART, ROOT,
                              _build_to_temp)
 
 
@@ -141,6 +144,109 @@ class TestGoldensCs(unittest.TestCase):
                                     f"golden {golden} is missing — "
                                     f"run `python3 conformance/run.py "
                                     f"--bless --target cs --only {name}`")
+                    expected = golden.read_text(encoding="utf-8")
+                    actual = built[out]
+                    if actual != expected:
+                        diff = "".join(difflib.unified_diff(
+                            expected.splitlines(keepends=True),
+                            actual.splitlines(keepends=True),
+                            fromfile=f"golden {out}",
+                            tofile=f"emitted {out}"))
+                        self.fail(f"golden {out} is stale:\n{diff}")
+
+
+class TestGoldensRs(unittest.TestCase):
+    """The Rust twins (M5): same sources, `.rs` outputs,
+    compare-only. Regeneration needs an explicit
+    `python3 conformance/run.py --bless --target rs [--only <name>]`;
+    never hand-edit a golden.
+
+    M5 note: the "shop" entry does NOT list `shop_items.rs`. The
+    module copy emitted as part of shop.newr differs from the
+    standalone copy on purpose (module form has `pub fn
+    __newr_init`, standalone form has `fn main`), so the two
+    cannot share one golden; the standalone form is pinned by the
+    "shop_items" entry and the module form is exercised at runtime
+    by the shop conformance program.
+    """
+
+    def test_goldens_rs_match_emitted_output(self):
+        for name in sorted(GOLDENS_RS):
+            with self.subTest(golden=name):
+                source, outputs = GOLDENS_RS[name]
+                built = _build_to_temp(Path(source), target="rs")
+                for out in outputs:
+                    golden = GOLDEN_DIR_RS / out
+                    self.assertTrue(golden.is_file(),
+                                    f"golden {golden} is missing — "
+                                    f"run `python3 conformance/run.py "
+                                    f"--bless --target rs --only {name}`")
+                    expected = golden.read_text(encoding="utf-8")
+                    actual = built[out]
+                    if actual != expected:
+                        diff = "".join(difflib.unified_diff(
+                            expected.splitlines(keepends=True),
+                            actual.splitlines(keepends=True),
+                            fromfile=f"golden {out}",
+                            tofile=f"emitted {out}"))
+                        self.fail(f"golden {out} is stale:\n{diff}")
+
+
+class TestGoldensKt(unittest.TestCase):
+    """The Kotlin twins (M5): same sources, `.kt` outputs,
+    compare-only. Regeneration needs an explicit
+    `python3 conformance/run.py --bless --target kt [--only <name>]`;
+    never hand-edit a golden.
+
+    M5 note: the "shop" entry does NOT list `shop_items.kt`. The
+    module copy emitted as part of shop.newr differs from the
+    standalone copy on purpose (module form has no top-level
+    `main`, standalone form has a `fun main` wrapper), so the two
+    cannot share one golden; the standalone form is pinned by the
+    "shop_items" entry and the module form is exercised at runtime
+    by the shop conformance program.
+    """
+
+    def test_goldens_kt_match_emitted_output(self):
+        for name in sorted(GOLDENS_KT):
+            with self.subTest(golden=name):
+                source, outputs = GOLDENS_KT[name]
+                built = _build_to_temp(Path(source), target="kt")
+                for out in outputs:
+                    golden = GOLDEN_DIR_KT / out
+                    self.assertTrue(golden.is_file(),
+                                    f"golden {golden} is missing — "
+                                    f"run `python3 conformance/run.py "
+                                    f"--bless --target kt --only {name}`")
+                    expected = golden.read_text(encoding="utf-8")
+                    actual = built[out]
+                    if actual != expected:
+                        diff = "".join(difflib.unified_diff(
+                            expected.splitlines(keepends=True),
+                            actual.splitlines(keepends=True),
+                            fromfile=f"golden {out}",
+                            tofile=f"emitted {out}"))
+                        self.fail(f"golden {out} is stale:\n{diff}")
+
+
+class TestGoldensDart(unittest.TestCase):
+    """The Dart twins (M5): same sources, `.dart` outputs,
+    compare-only. Regeneration needs an explicit
+    `python3 conformance/run.py --bless --target dart [--only <name>]`;
+    never hand-edit a golden.
+    """
+
+    def test_goldens_dart_match_emitted_output(self):
+        for name in sorted(GOLDENS_DART):
+            with self.subTest(golden=name):
+                source, outputs = GOLDENS_DART[name]
+                built = _build_to_temp(Path(source), target="dart")
+                for out in outputs:
+                    golden = GOLDEN_DIR_DART / out
+                    self.assertTrue(golden.is_file(),
+                                    f"golden {golden} is missing — "
+                                    f"run `python3 conformance/run.py "
+                                    f"--bless --target dart --only {name}`")
                     expected = golden.read_text(encoding="utf-8")
                     actual = built[out]
                     if actual != expected:

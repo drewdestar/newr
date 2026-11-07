@@ -4497,8 +4497,7 @@ class _JavaEmitter:
         lines.extend(self._jdbc_read_balance(db, "to", "            ",
                                              var="curTo"))
         lines.append("            long toBalance = curTo;")
-        lines.append("            long nextTo = healed "
-                     "? NewrRt.add(toBalance, amount) : toBalance;")
+        lines.append("            long nextTo = NewrRt.add(toBalance, amount);")
         lines.append("            if (!healed) {")
         lines.extend(self._jdbc_insert_ledger(
             db, "to", "amount", "key != null ? key + \":in\" : null",
