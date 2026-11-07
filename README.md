@@ -31,11 +31,17 @@ newr check examples/hello.newr
 
 - M0: spec frozen (see [SPEC.md](SPEC.md)).
 - M1: front end COMPLETE — lexer, parser, AST, resolver, checker, and
-  the discord checker, with 411 tests green. `newr check` verifies
-  programs; `newr build --check` runs the same checks.
+  the discord checker. `newr check` verifies programs; `newr build --check`
+  runs the same checks.
+- M2: Python emitter COMPLETE.
+- M3: JavaScript emitter COMPLETE.
+- M4: Java + C# emitters COMPLETE — suite 902/902, conformance 74/74
+  on all four targets (py, js, java, cs), cold re-evaluation CLEAN.
+- M5: Rust + Kotlin + Dart emitters IN PROGRESS.
 
-The compiler currently does `build --check` / `check` only and emits
-nothing yet. Emitters land in M2+.
+`newr build --target py|js|java|cs <file.newr>` emits readable code
+for the chosen target. See [BUILD_REPORT.md](BUILD_REPORT.md) for
+per-milestone verification notes.
 
 ## Install
 
@@ -57,10 +63,11 @@ artifact yet.
 ```sh
 newr check <file.newr>        # parse + resolve + check, print errors and warnings
 newr build --check <file.newr> # same checks; writes nothing
+newr build --target py|js|java|cs <file.newr> # emit readable code for the target
 ```
 
-`newr build` without `--check` is an error in M1: there is no emitter
-yet. Exit codes: 0 success, 1 usage, 2 environment, 4 build error.
+`newr build` without `--check` or `--target` is a usage error.
+Exit codes: 0 success, 1 usage, 2 environment, 4 build error.
 (There is no exit code 3 in M1 — the spec reserves 3 for network errors,
 which no M1 command can produce.)
 
@@ -93,13 +100,13 @@ See [SPEC.md](SPEC.md) for the full specification.
 
 | Target | Library | Priority | Status |
 | --- | --- | --- | --- |
-| Python | discord.py 2.7.1 | P0 | emitter lands M2+ |
-| TypeScript | discord.js ^14.28.1 (Node 24 LTS) | P0 | emitter lands M2+ |
-| Java | JDA 6.7.0 | P1 | emitter lands M2+ |
-| C# | Discord.Net 3.20.2 | P1 | emitter lands M2+ |
-| Rust | serenity 0.12.5 + poise 0.7.1 | P1 | emitter lands M2+ |
-| Kotlin | Kord 0.18.1 | P2 | emitter lands M2+ |
-| Dart | nyxx 6.9.1 | P2 | emitter lands M2+ |
+| Python | discord.py 2.7.1 | P0 | done in M2 |
+| TypeScript | discord.js ^14.28.1 (Node 24 LTS) | P0 | done in M3 |
+| Java | JDA 6.7.0 | P1 | done in M4 |
+| C# | Discord.Net 3.20.2 | P1 | done in M4 |
+| Rust | serenity 0.12.5 + poise 0.7.1 | P1 | in progress in M5 |
+| Kotlin | Kord 0.18.1 | P2 | in progress in M5 |
+| Dart | nyxx 6.9.1 | P2 | in progress in M5 |
 
 ## Project layout
 
@@ -121,7 +128,9 @@ conformance/       the conformance corpus — seeded in M1 (a small set of
   developed on Linux only; Windows/macOS support will be proven by the
   CI matrix (ubuntu-latest / macos-latest / windows-latest) once it has
   run green on all three OSes — it has not run yet.
-- No performance numbers are claimed anywhere. None have been measured.
+- Performance numbers are measured on Linux only, per milestone, in
+  [BUILD_REPORT.md](BUILD_REPORT.md) (benchmarks B1–B7). Nothing is
+  claimed for other OSes.
 
 ## License
 
