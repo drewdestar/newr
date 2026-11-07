@@ -1,6 +1,6 @@
 ![newr, a general-purpose programming language. One readable source. Seven readable outputs.](docs/images/hero.svg)
 
-[![version 0.1.0](https://img.shields.io/badge/version-0.1.0-1a7f37)](BUILD_REPORT.md)
+[![version 0.1.0](https://img.shields.io/badge/version-0.1.0-1a7f37)](SPEC.md)
 [![python 3.10+](https://img.shields.io/badge/python-3.10%2B-1f2328)](SPEC.md)
 [![license MIT](https://img.shields.io/badge/license-MIT-1f2328)](LICENSE)
 
@@ -70,7 +70,7 @@ See [SPEC.md](SPEC.md) for the full specification.
 
 ## Verification
 
-Numbers from the M4 verification in [BUILD_REPORT.md](BUILD_REPORT.md), section 21.12:
+Numbers from the M4 verification (suite, conformance, goldens, runtime checks):
 
 - Full suite: 902 tests, passing in system Python and in a fresh virtual environment.
 - Conformance: 74/74 on each of Python, JavaScript, Java, and C#, with 0 failures.
@@ -108,7 +108,7 @@ Planned alongside the PyPI release: a pipx install, GitHub Releases, and a Power
 - M4: Java and C# emitters complete.
 - M5: Rust, Kotlin, and Dart emitters in progress.
 
-See [BUILD_REPORT.md](BUILD_REPORT.md) for per-milestone verification notes.
+Verification runs in CI on every pull request.
 
 ## Project layout
 
@@ -126,7 +126,7 @@ docs/              error index and diagrams
 ## Unverified
 
 - Windows and macOS execution is UNVERIFIED. This project is developed on Linux only; Windows and macOS support will be proven by the CI matrix (ubuntu-latest, macos-latest, windows-latest) once it has run green on all three OSes. It has not run yet.
-- Performance numbers are measured on Linux only, per milestone, in [BUILD_REPORT.md](BUILD_REPORT.md) (benchmarks B1-B7). Nothing is claimed for other OSes.
+- Performance numbers are measured on Linux only, per milestone (benchmarks B1-B7, see `benchmarks/`). Nothing is claimed for other OSes.
 
 ## License
 
