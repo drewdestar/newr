@@ -16,8 +16,8 @@ from compiler.ast_nodes import (  # noqa: E402
     Assign, BinOp, BotDecl, Break, Call, CommandDecl, Const, Continue,
     DictLit, EmbedExpr, EnumDecl, EventDecl, ExprStmt, FnDecl, For,
     If, Import, Interp, Let, ListLit, Lit, Log, Match, Member, Name,
-    Pass, Propagate, Reply, Return, StoreDecl, StringsDecl, StructDecl,
-    TaskDecl, TCall, Ternary, Throw, Try, TryExpr, UnaryOp, While,
+    Pass, Propagate, Reply, Require, Return, StoreDecl, StringsDecl, StructDecl,
+    TaskDecl, TCall, Ternary, TestBlock, Throw, Try, TryExpr, UnaryOp, While,
 )
 from compiler.errors import NewrError, Span, line_col  # noqa: E402
 from compiler.parser import parse  # noqa: E402
@@ -207,6 +207,73 @@ class TestTopLevel(unittest.TestCase):
         src = "fn f():\n  fn g():\n    pass\n"
         exc = err(src)
         self.assertEqual(span_line(src, exc), (2, 3))
+
+
+class TestTestBlocks(unittest.TestCase):
+    """`test "name":` blocks (SPEC.md section 8.7, M6 Phase 2c)."""
+
+    def test_block_parses_with_name_and_body(self):
+        prog = parse("test \"adds two numbers\":\n"
+                     "  requires 1 + 1 == 2\n")
+        self.assertEqual(len(prog.test_blocks), 1)
+        block = prog.test_blocks[0]
+        self.assertIsInstance(block, TestBlock)
+        self.assertEqual(block.name, "adds two numbers")
+        self.assertEqual(block.func_name, "_newr_test_0")
+        self.assertEqual(len(block.body), 1)
+        self.assertIsInstance(block.body[0], Require)
+
+    def test_block_lowers_to_a_synthetic_function(self):
+        # The synthetic fn shares the block's body list, so the
+        # resolver, checker, and emitters see a plain fn.
+        prog = parse("test \"one\":\n  pass\ntest \"two\":\n  pass\n")
+        self.assertEqual([tb.func_name for tb in prog.test_blocks],
+                         ["_newr_test_0", "_newr_test_1"])
+        synth = [fn for fn in prog.functions
+                 if fn.name.startswith("_newr_test_")]
+        self.assertEqual([fn.name for fn in synth],
+                         ["_newr_test_0", "_newr_test_1"])
+        self.assertIs(synth[0].body, prog.test_blocks[0].body)
+        self.assertIs(synth[1].body, prog.test_blocks[1].body)
+        self.assertEqual(synth[0].params, [])
+        self.assertIsNone(synth[0].return_type)
+
+    def test_block_and_fn_share_one_program(self):
+        prog = parse("fn test_a():\n  pass\n"
+                     "test \"block b\":\n  pass\n")
+        self.assertEqual([fn.name for fn in prog.functions],
+                         ["test_a", "_newr_test_0"])
+        self.assertEqual([tb.name for tb in prog.test_blocks],
+                         ["block b"])
+
+    def test_empty_name_is_error(self):
+        exc = err("test \"\":\n  pass\n")
+        self.assertIn("non-empty", exc.diagnostic.message)
+
+    def test_newline_in_name_is_error(self):
+        src = "test \"a\\nb\":\n  pass\n"
+        exc = err(src)
+        self.assertIn("newline", exc.diagnostic.message)
+
+    def test_interpolated_name_is_error(self):
+        exc = err("test \"a {x} b\":\n  pass\n")
+        self.assertIn("plain string", exc.diagnostic.message)
+
+    def test_missing_colon_is_error(self):
+        src = "test \"x\"\n  pass\n"
+        exc = err(src)
+        self.assertEqual(span_line(src, exc)[0], 1)
+
+    def test_block_inside_body_is_error(self):
+        src = "fn outer():\n  test \"nested\":\n    pass\n"
+        exc = err(src)
+        self.assertIn("top level", exc.diagnostic.message)
+        self.assertEqual(span_line(src, exc), (2, 3))
+
+    def test_test_is_reserved_as_an_identifier(self):
+        # `test` is a keyword now: it cannot name a variable.
+        exc = err("let test = 1\n")
+        self.assertEqual(span_line("let test = 1\n", exc)[0], 1)
 
 
 class TestCommandsEventsTasks(unittest.TestCase):

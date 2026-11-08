@@ -35,7 +35,7 @@ from .ast_nodes import (
     NamePattern, OptionDecl, OrPattern, Param, Pass, Program, Propagate,
     Reply, Require, Return, SelectDecl, Send, StoreDecl, StructDecl,
     StructField, StructPattern, StringsDecl, StringsEntry, TableDecl,
-    TaskDecl, TCall, Ternary, TextInputDecl, Throw, Try, TryExpr, Type,
+    TaskDecl, TCall, Ternary, TestBlock, TextInputDecl, Throw, Try, TryExpr, Type,
     UnaryOp, While, WildcardPattern, list_of, nullable_of,
 )
 from .errors import Diagnostic, NewrError, Span
@@ -47,7 +47,7 @@ _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _TOP_DECL_KEYWORDS = {
     "fn", "struct", "enum", "import", "bot", "command", "event", "task",
-    "strings", "store",
+    "strings", "store", "test",
 }
 # Keywords that may only appear at the top level (using one inside a
 # body is E1001).
@@ -286,6 +286,8 @@ class _Parser:
             prog.imports.append(self._parse_import())
         elif self.at_kw("fn"):
             prog.functions.append(self._parse_fn())
+        elif self.at_kw("test"):
+            prog.test_blocks.append(self._parse_test_block(prog))
         elif self.at_kw("struct"):
             prog.structs.append(self._parse_struct())
         elif self.at_kw("enum"):
@@ -423,6 +425,42 @@ class _Parser:
         return FnDecl(span=self.span(start, end), name=name_tok.value,
                       params=params, return_type=return_type, body=body,
                       pub=pub)
+
+    def _parse_test_block(self, prog: Program) -> TestBlock:
+        """Parse `test "display name":` plus an indented body
+        (SPEC.md section 8.7). The name is a plain string (no
+        interpolation, via `_parse_plain_string`), so it may
+        contain spaces. The block is lowered to a synthetic
+        function named `_newr_test_<n>` (n is the block's index
+        in source order) sharing the same body list, and that
+        function is appended to `prog.functions` so the resolver,
+        checker, and emitters handle the block exactly like a
+        parameterless `fn` with no return value. The display name
+        is what `newr test` reports; the synthetic name is what
+        its harness calls."""
+        start = self.expect_kw("test")
+        name, name_span = self._parse_plain_string()
+        if not name:
+            self._err_span(name_span,
+                           "a test block needs a non-empty name",
+                           help="write a name, like "
+                                "`test \"adds two numbers\":`")
+        if "\n" in name or "\r" in name:
+            self._err_span(
+                name_span,
+                "a test block name cannot contain a newline",
+                help="a test name is one line: the runner prints it "
+                     "as one marker line")
+        self.expect("COLON", None, "`:` after the test name")
+        body = self.parse_block()
+        end = self.tokens[self.pos - 1]
+        span = self.span(start, end)
+        func_name = f"_newr_test_{len(prog.test_blocks)}"
+        prog.functions.append(FnDecl(
+            span=span, name=func_name, params=[], return_type=None,
+            body=body, pub=False))
+        return TestBlock(span=span, name=name, body=body,
+                         func_name=func_name)
 
     def _parse_struct(self, pub: bool = False) -> StructDecl:
         start = self.expect_kw("struct")

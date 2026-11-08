@@ -65,6 +65,12 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
                          scaffold a new project (main.newr + newr.json
                          + locales/ + .env.example + .gitignore);
                          refuses when newr.json or main.newr exists
+  test [paths]... [--target py|js|java|cs|rs|kt|dart]
+                         run `fn test_*()` functions through one
+                         target's emitter; a path is a .newr file
+                         or a directory (all .newr files under it);
+                         with no paths, every .newr file in the
+                         current directory
   help [command]         show this help, or help for one command
   version                print the newr version
   explain <code>         explain a diagnostic code (also: --explain <code>)
@@ -181,6 +187,29 @@ never overwrites existing work), 2 when a file cannot be written.
 
   --name <name>     project name in newr.json (default: directory name)
   --target <target> default build target in newr.json (default: py)
+""",
+    "test": """Usage: newr test [paths]... [--target py|js|java|cs|rs|kt|dart]
+
+Run the tests of .newr programs: `fn test_*()` functions and
+`test "display name":` blocks, in source order across both forms.
+Each file is parsed, resolved, and checked like `newr build`,
+then built for one target in a temporary directory and executed,
+with one try/catch around each test so a failure is reported and
+the run continues. A test asserts with the language's own
+machinery: `if ...: throw "message"` or a leading `requires
+<condition>` in the test body. Test names must be unique within
+a file: a block and a `test_` function sharing one name is a
+build error.
+
+A path is a .newr file or a directory (every .newr file under it,
+recursively); with no paths, every .newr file in the current
+directory runs. The target defaults to newr.json (searched upward
+from the first path, else the current directory), else py.
+Bot programs are skipped, never executed: they need a live Discord
+token to start. A file with no tests passes with "no tests".
+Exit 0 when every test passes, 4 when a program has a
+build error or any test fails, 2 when a file cannot be read or
+the target's toolchain is missing, 1 on a usage error.
 """,
 }
 
@@ -763,6 +792,111 @@ def _cmd_check(args: list[str], *, json_mode: bool,
                            error_format_json=error_format_json, fast=fast)
 
 
+def _cmd_test(args: list[str], *, json_mode: bool,
+              error_format_json: bool) -> int:
+    """`newr test [paths]... [--target ...]`: run `fn test_*()`
+    functions through one target's emitter (SPEC.md section 19,
+    section 24.2 idea 13). See compiler/test.py for the runner."""
+    from .test import (
+        TestEnvError as _TestEnvError,
+        collect_paths,
+        exit_code as _test_exit_code,
+        format_human,
+        run_tests,
+        to_json_data,
+    )
+    target = None
+    target_given = False
+    rest: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--target" and i + 1 < len(args):
+            target = args[i + 1]
+            target_given = True
+            i += 2
+        elif arg.startswith("--target="):
+            target = arg.split("=", 1)[1]
+            target_given = True
+            i += 1
+        else:
+            rest.append(arg)
+            i += 1
+    if target_given and target not in VALID_TARGETS:
+        raise _UsageError(
+            f"unknown target `{target}` (targets: "
+            f"{', '.join(VALID_TARGETS)})")
+    unknown = [a for a in rest if a.startswith("-")]
+    if unknown:
+        raise _UsageError("unknown flag(s) for `newr test`: "
+                          + ", ".join(unknown))
+    if target is None:
+        # No explicit --target: the default comes from newr.json
+        # (SPEC.md section 11), searched upward from the first
+        # path, else the current directory; without a manifest it
+        # stays py, as for `newr build`.
+        anchor = Path(rest[0]) if rest else Path.cwd() / "main.newr"
+        try:
+            target = default_target_for(anchor)
+        except ManifestError as exc:
+            raise _UsageError(str(exc)) from exc
+    try:
+        paths = collect_paths(rest)
+    except _TestEnvError as exc:
+        raise _EnvError(str(exc)) from exc
+    if not paths:
+        if json_mode:
+            print(json.dumps(_envelope(
+                "test", {"files": [], "passed": 0, "failed": 0,
+                         "not_run": 0, "build_errors": 0}, [])))
+            return 0
+        if error_format_json:
+            print("[]")
+            return 0
+        print("no .newr files found")
+        return 0
+    try:
+        results = run_tests(paths, target)
+    except _TestEnvError as exc:
+        raise _EnvError(str(exc)) from exc
+    code = _test_exit_code(results)
+    if json_mode:
+        data = to_json_data(results)
+        envelope = _envelope("test", data, [])
+        if code != 0 and envelope["ok"]:
+            # A test failure carries no diagnostic; the envelope
+            # must still agree with the exit code (same rule as
+            # `fmt --check` in _cmd_fmt).
+            failing = next(
+                (r for r in results
+                 if r.error or r.failed or r.not_run or r.run_error),
+                None)
+            if failing is not None and failing.diagnostics_json:
+                first = failing.diagnostics_json[0]
+                envelope["error"] = {
+                    "code": first.get("code", "E4001"),
+                    "message": first.get("message", ""),
+                    "hint": first.get("help", ""),
+                }
+            elif failing is not None:
+                envelope["error"] = {
+                    "code": "TEST_FAILED",
+                    "message": (f"{failing.failed} test(s) failed "
+                                f"in {failing.file}"),
+                    "hint": "run `newr test` without --json for "
+                            "the per-test report",
+                }
+            envelope["ok"] = False
+        print(json.dumps(envelope))
+        return code
+    if error_format_json:
+        diags = [d for r in results for d in r.diagnostics_json]
+        print(json.dumps(diags))
+        return code
+    print(format_human(results))
+    return code
+
+
 def _cmd_build(args: list[str], *, json_mode: bool,
                error_format_json: bool) -> int:
     target = None
@@ -1116,5 +1250,8 @@ def _dispatch(argv: list[str], *, json_mode: bool,
                         error_format_json=error_format_json)
     if cmd == "init":
         return _cmd_init(args, json_mode=json_mode,
+                         error_format_json=error_format_json)
+    if cmd == "test":
+        return _cmd_test(args, json_mode=json_mode,
                          error_format_json=error_format_json)
     raise _UsageError(f"unknown command `{cmd}`. Run `newr help`.")

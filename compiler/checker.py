@@ -253,6 +253,27 @@ class Checker:
                 self._validate_type(p.type, p.span)
             if fn.return_type is not None:
                 self._validate_type(fn.return_type, fn.span)
+        # Test names must be unique within a file: the runner
+        # reports tests by name, so two tests with one name (two
+        # blocks, or a block and a `test_` function) would be
+        # indistinguishable in the report. A block name that
+        # matches a non-test function is fine: only `test_` names
+        # are tests.
+        seen_tests: dict[str, str] = {}
+        for fn in ctx.program.functions:
+            if fn.name.startswith("test_"):
+                seen_tests[fn.name] = "test function"
+        for tb in ctx.program.test_blocks:
+            if tb.name in seen_tests:
+                self._error(
+                    tb.span, "E3003",
+                    f"duplicate test name `{tb.name}`",
+                    help=f"a {seen_tests[tb.name]} is already named "
+                         f"`{tb.name}` in this file; test names must "
+                         f"be unique within a file so the runner can "
+                         f"tell them apart, so rename one of them")
+            else:
+                seen_tests[tb.name] = "test block"
         for store in ctx.program.stores:
             for table in store.tables:
                 for col in table.columns:

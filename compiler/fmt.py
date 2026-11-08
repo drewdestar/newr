@@ -963,6 +963,9 @@ class _Formatter:
                     text += f"({inner})"
                 self._line(text, src_line=vline)
             self._end_block()
+        elif isinstance(node, A.TestBlock):
+            self._line(f"test {_quote(node.name)}:", src_line=start)
+            self._emit_block(node.body)
         elif isinstance(node, A.FnDecl):
             head = "pub " if node.pub else ""
             params = ", ".join(
@@ -1089,7 +1092,15 @@ class _Formatter:
             items.append((node.span.start_byte, node, False))
         for node in prog.enums:
             items.append((node.span.start_byte, node, False))
+        # A test block's synthetic function (`_newr_test_<n>`) is
+        # never printed: the block itself renders in its place
+        # (same span, so it sorts to the same position).
+        synthetic = {tb.func_name for tb in prog.test_blocks}
         for node in prog.functions:
+            if node.name in synthetic:
+                continue
+            items.append((node.span.start_byte, node, False))
+        for node in prog.test_blocks:
             items.append((node.span.start_byte, node, False))
         if prog.bot is not None:
             items.append((prog.bot.span.start_byte, prog.bot, False))

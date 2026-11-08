@@ -1,0 +1,27 @@
+# test_demo.newr: a small program with tests (M6 Phase 2c).
+# Run it: newr build examples/test_demo.newr, then run the output.
+# Test it: newr test examples/test_demo.newr (add --target js, java,
+# cs, rs, kt, or dart to test through another emitter).
+
+fn double(x: int) -> int:
+  return x * 2
+
+fn test_double():
+  if double(21) != 42:
+    throw "double(21) should be 42"
+
+fn test_double_zero():
+  requires double(0) == 0
+
+fn test_double_negative():
+  if double(-3) != -6:
+    throw "double(-3) should be -6"
+
+test "doubles in a block":
+  if double(10) != 20:
+    throw "double(10) should be 20"
+
+test "doubles a negative in a block":
+  requires double(-5) == -10
+
+print "hello from test_demo"

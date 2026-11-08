@@ -567,6 +567,27 @@ class StructDecl(Decl):
 
 
 @dataclass
+class TestBlock(Decl):
+    """A named test block (SPEC.md section 8.7, M6 Phase 2c).
+
+    ``test "adds two numbers":`` plus an indented body. The display
+    name is a plain string, so it may contain spaces, unlike a
+    function name. The parser lowers the block to a synthetic
+    function named ``func_name`` (``_newr_test_<n>``, in source
+    order) with the same body, so the resolver, checker, and all
+    seven emitters handle it exactly like a `fn` with no params
+    and no return value. The display name is what the test runner
+    reports; the synthetic name is what the harness calls. User
+    code can never use that name: the resolver rejects the
+    `_newr_` prefix (E3001).
+    """
+
+    name: str = ""
+    body: list[Stmt] = field(default_factory=list)
+    func_name: str = ""
+
+
+@dataclass
 class FnDecl(Decl):
     name: str = ""
     params: list[Param] = field(default_factory=list)
@@ -692,6 +713,11 @@ class Program(Node):
     structs: list[StructDecl] = field(default_factory=list)
     enums: list[EnumDecl] = field(default_factory=list)
     functions: list[FnDecl] = field(default_factory=list)
+    # Named test blocks, in source order (SPEC.md section 8.7).
+    # Each block also has a synthetic FnDecl in `functions`
+    # (same body, name `_newr_test_<n>`), which is what the
+    # resolver, checker, and emitters see.
+    test_blocks: list[TestBlock] = field(default_factory=list)
     bot: BotDecl | None = None
     commands: list[CommandDecl] = field(default_factory=list)
     events: list[EventDecl] = field(default_factory=list)

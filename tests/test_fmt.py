@@ -401,6 +401,42 @@ class TestDeclarations(FormatTestCase):
                                "  table t (a: int)\n")
 
 
+class TestTestBlocks(FormatTestCase):
+    """`test "name":` blocks (SPEC.md section 8.7, M6 Phase 2c)."""
+
+    def test_block_formats_canonically(self):
+        source = ('test "adds two numbers":\n'
+                  "  requires 1 + 1 == 2\n")
+        self.assert_formats_to(source, source)
+        self.assert_roundtrip(source)
+
+    def test_mixed_fn_and_block_order_is_kept(self):
+        source = ("fn test_first():\n"
+                  "  pass\n"
+                  "\n"
+                  'test "in the middle":\n'
+                  "  pass\n"
+                  "\n"
+                  "fn test_last():\n"
+                  "  pass\n")
+        self.assert_formats_to(source, source)
+        self.assert_roundtrip(source)
+
+    def test_synthetic_function_is_never_printed(self):
+        source = ('test "adds two numbers":\n'
+                  "  requires 1 + 1 == 2\n")
+        formatted = format_source(source, "<test>")
+        self.assertNotIn("_newr_test_", formatted)
+        self.assertIn('test "adds two numbers":', formatted)
+
+    def test_name_with_a_quote_roundtrips(self):
+        source = ('test "say \\"hi\\"":\n'
+                  "  pass\n")
+        self.assert_formats_to(source, source)
+        prog = parse(format_source(source, "<test>"), "<test>")
+        self.assertEqual(prog.test_blocks[0].name, 'say "hi"')
+
+
 class TestCommentsAndBlankLines(FormatTestCase):
 
     def test_header_comments_are_kept(self):

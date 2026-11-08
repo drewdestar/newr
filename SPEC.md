@@ -526,7 +526,7 @@ information-theoretically ambiguous; the honest response is a precise
 `do` `elif` `else` `embed` `enum` `ensures` `event` `false` `finally`
 `fn` `for` `from` `if` `import` `in` `let` `log` `match` `modal` `none`
 `not` `only` `or` `pass` `pub` `reply` `requires` `return` `select`
-`send` `store` `strings` `struct` `task` `throw` `true` `try` `while`
+`send` `store` `strings` `struct` `task` `test` `throw` `true` `try` `while`
 
 Contextual words that are **not** reserved (usable as identifiers, but with
 their block meaning when they appear in the block position): `description`
@@ -727,6 +727,7 @@ require one — Java/C#/Rust — which is the emitter's job, not the language's.
 |---|---|---|
 | Import | `import "path.newr"` / `import <module>` | §11 |
 | Function | `fn name(params) -> type:` + body | §9.5 |
+| Test block | `test "display name":` + body | §8.7, core (runs under `newr test`) |
 | Struct | `struct Name:` + field lines | §8.5 |
 | Bot block | `bot "Name":` + keys | §13.1 (discord sugar) |
 | Command | `command <name>:` + keys/options/`do:` | §13.2 |
@@ -738,7 +739,7 @@ require one — Java/C#/Rust — which is the emitter's job, not the language's.
 | Statement | any statement (§9) | top-level executable code |
 
 `fn`, `struct`, `enum`, `import`, `bot`, `command`, `event`, `task`,
-`strings`, `store` are top-level only — using one inside a body is an
+`strings`, `store`, `test` are top-level only. Using one inside a body is an
 error. **Visibility:** declarations are **private by default**; `pub`
 exports them (`pub fn`, `pub struct`, `pub enum`, top-level `pub let` /
 `pub const`). Accessing a non-`pub` name from another module is an error
@@ -825,6 +826,45 @@ enum Shape:
   qualifies the variant. Enum values are value types (§7.8).
 - `match` (§9.6) on an enum is exhaustiveness-checked: every variant must
   be covered or a `_` arm must be present, else a build error.
+
+### 8.7 Test blocks (M6, both test forms decided, §24.2 #13)
+
+```
+test "adds two numbers":
+  requires add(2, 2) == 4
+
+test "list grows":
+  let xs = [1, 2]
+  xs.append(3)
+  if xs.len() != 3:
+    throw "list should have 3 items after append"
+```
+
+- A test block is a named test: `test "display name":` plus an indented
+  body of statements. It is the second test form alongside `fn test_*()`
+  functions (§19, `newr test`); a file may mix both, and the runner runs
+  them in source order across the two forms.
+- The name is a plain string (no interpolation), so it may contain
+  spaces; it must be non-empty and a single line (no newline in the
+  name), because the runner reports each test by name on one line.
+- A test block behaves like a function with no parameters and no return
+  value: it may read and call anything in scope, may `throw`, and a
+  bare `return` exits it early, but `return <value>` is an error.
+  It has no callable name in source, so it cannot recurse and cannot
+  be called from other code; only `newr test` runs it.
+- Test names must be unique within a file: two blocks with one name,
+  or a block and a `test_` function sharing one name, is a build error
+  (E3003). A block name matching a non-test function is fine.
+- Only the main file's tests are discovered: test blocks (like
+  `test_` functions) in an imported file still parse, check, and emit,
+  but `newr test` never runs them.
+- Implementation note (not a language promise): the compiler lowers a
+  block to a synthetic function named `_newr_test_<n>` (n is the
+  block's index in source order) with the same body, so the resolver,
+  checker, and all seven emitters handle it exactly like a `fn`.
+  User code can never use that name: the `_newr_` prefix is reserved
+  (E3001). In a plain `newr build` the block emits as that (never
+  called) function.
 
 ## 9. Statements and expressions
 
@@ -1598,7 +1638,7 @@ source text (.newr)
 ### 17.2 AST (node list — the v1 set)
 
 `Program` · `BotDecl` · `Import` · `StringsDecl` · `StoreDecl` ·
-`FnDecl` · `StructDecl` · `EnumDecl` (with `EnumVariant`) ·
+`FnDecl` · `TestBlock` · `StructDecl` · `EnumDecl` (with `EnumVariant`) ·
 `CommandDecl` · `OptionDecl` · `EventDecl` · `TaskDecl` ·
 `ButtonDecl` / `SelectDecl` / `ModalDecl` · statements: `Let`, `Const`,
 `Assign`, `If`, `For`, `While`, `Try`, `Throw`, `Return`, `Break`,
@@ -1705,7 +1745,7 @@ a Node script in TS, a `main()` in Java/C#/Rust/Kotlin/Dart).
 | `newr fmt` | **NOT in v1** — M4/M6 | Canonical formatting, idempotent, `fmt --check` for CI. |
 | `newr init` | **NOT in v1** — M4/M6 | Scaffolds a newr project (`main.newr` + `newr.json` + `locales/` + `.env.example` + `.gitignore`). |
 | `newr.json` | Schema defined in §11; **compiler support M4** | Project config `{name, version, target, default_locale, db_path}`. Secrets NEVER go in it — the token stays in `.env`. |
-| `newr test` | **NOT in v1** — M6 / v1.1 | Built-in testing in the same language; needs the emitter interface stable first (§24.2 #13). |
+| `newr test` | Yes (M6) | Built-in testing in the same language (§8.7, §24.2 #13): `fn test_*()` functions and `test "name":` blocks, run through one target's emitter in a temporary directory. Exit 0 when every test passes, 4 on a build error or any test failure, 2 on an unreadable file or missing toolchain, 1 on a usage error. |
 | `newr --help` / `newr help` | Yes | Usage for every command. |
 
 Error/exit-code contract (from v0, kept): 0 success, 1 usage, 2 environment,
@@ -2034,7 +2074,7 @@ verifiable output) has a structural advantage GitHub itself now names.
 | 10 | Human-readable generated code | **v1** | §1.1.6. Proven by golden files at M2+. |
 | 11 | Fast + incremental builds | **v1** (design); **M4** (cache) | §4.1. The cache design is frozen now; the simple form (rebuild everything — fast enough for small projects) ships in v1, the cache lands in M4. Benchmarks in M2. |
 | 12 | One language → many targets, same behavior (conformance corpus) | **v1** (architecture); **M2–M5** (emitters) | §18.1. The corpus is the definition of correct behavior; emitters land one at a time against it. |
-| 13 | Built-in testing (`newr test`, same language) | **Deferred to M6 / v1.1** | A test framework needs the emitter interface stable first (otherwise tests would be written against a moving target). It also needs a test syntax decision (test blocks? `test` functions?). Both arrive after M3. Not forgotten — it is the first M6 item. |
+| 13 | Built-in testing (`newr test`, same language) | **Yes (M6)** | Decided in M6 Phase 2c: BOTH forms, `fn test_*()` functions and `test "name":` blocks (§8.7), one runner, in source order across both forms. |
 | 14 | Docs generated from code comments | **Deferred to M6** | Needs a frozen doc-comment syntax (the `///` convention, from C#/Rust) and the docs site. v1 freezes the language; M6 builds the docs pipeline on top of it. |
 | 15 | No silent behavior | **v1** | §1.1.4. A non-negotiable, enforced by the checker (unknown lines are errors; no silent coercion). |
 | 16 | Truly complete stdlib (HTTP, JSON, dates, files), versioned with the language | **v1** (files, time, math, random, env); **v1.1** (HTTP, JSON, dates) | §12. Files/time/math/random/env ship in v1. HTTP needs a sandboxed `fetch` + allowlist (security review, §12.3); JSON needs a typed JSON value (no `any` in v1, §12.2); dates beyond `time.format` need a date type. All three are v1.1 with their reasons written — not dropped. The stdlib *is* versioned with the language from day one (it ships with the compiler). |

@@ -475,6 +475,14 @@ class Resolver:
                            program: A.Program) -> None:
         scope = info.scope
         for fn in program.functions:
+            # A test block's synthetic function (`_newr_test_<n>`,
+            # SPEC.md section 8.7) lives in the emitter's reserved
+            # `_newr_` namespace on purpose, so it is not declared
+            # here: `_declare` would reject the prefix (E3001).
+            # The name is only ever called by the test harness,
+            # which the checker resolves from its own function map.
+            if fn.name.startswith("_newr_test_"):
+                continue
             self._declare(scope, "fn", fn.name, fn.span, fn, pub=fn.pub)
         for st in program.structs:
             self._declare(scope, "struct", st.name, st.span, st,

@@ -74,7 +74,7 @@ KEYWORDS = {
     "finally", "fn", "for", "from", "if", "import", "in", "let", "log",
     "match", "modal", "none", "not", "only", "or", "pass", "pub",
     "reply", "requires", "ensures", "return", "select", "send",
-    "store", "strings", "struct", "task", "throw", "true", "try",
+    "store", "strings", "struct", "task", "test", "throw", "true", "try",
     "while",
 }
 
