@@ -30,6 +30,33 @@ on:
   pull_request:
 
 jobs:
+  fmt-check:
+    name: fmt --check (ubuntu, Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The canonical form is pinned by tests/test_fmt.py; every file
+      # in examples/ and conformance/ok/ must already be formatted,
+      # except the two pipeline programs listed in that file (the
+      # parser desugars `|>` to a call, so fmt cannot keep the
+      # pipeline spelling). Those two are checked for idempotency
+      # and AST round-trip by the tests, not by this job.
+      - name: fmt --check over the corpus
+        run: |
+          for f in examples/*.newr conformance/ok/*.newr conformance/ok/lib/*.newr; do
+            case "$f" in
+              conformance/ok/pipeline.newr|conformance/ok/fn_pipeline_chain.newr)
+                continue ;;
+            esac
+            python newr fmt --check "$f" || exit 1
+          done
+
   front-end:
     name: front-end suite (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

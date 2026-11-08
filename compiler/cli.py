@@ -32,6 +32,7 @@ from pathlib import Path
 
 from . import __version__
 from .checker import check_program
+from .fmt import format_source
 from .discord_check import check_discord, discord_providers
 from .errors import Diagnostic, NewrError, Span
 from .resolver import resolve_source
@@ -48,6 +49,10 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
                          Java (--target java), C# (--target cs),
                          Rust (--target rs), Kotlin (--target kt) or
                          Dart (--target dart)
+  fmt <file>... [--check]
+                         rewrite .newr files in canonical form
+                         (parse only; --check reports files that need
+                         formatting instead of rewriting them)
   help [command]         show this help, or help for one command
   version                print the newr version
   explain <code>         explain a diagnostic code (also: --explain <code>)
@@ -125,6 +130,23 @@ Print the long-form explanation of a diagnostic code, e.g. E2001.
     "help": """Usage: newr help [command]
 
 Show the general help, or help for one command.
+""",
+    "fmt": """Usage: newr fmt <file>... [--check]
+
+Rewrite .newr files in the canonical form (SPEC.md section 19): 2-space
+indent, single spaces around operators, literals and durations keep
+their source spelling, `#` comments are preserved, `print` is written
+without parentheses, and the file ends with exactly one newline.
+Formatting is idempotent: fmt(fmt(x)) == fmt(x).
+
+Only the parser runs: a file with type errors still formats as long as
+it parses. Exit 0 when every file is formatted, 4 when a file has a
+parse error or (with --check) needs formatting, 2 when a file cannot be
+read, 1 on a usage error.
+
+  --check   do not rewrite anything; print `<path>: ok` or
+            `<path>: needs formatting` per file and exit 4 when any
+            file needs formatting (for CI).
 """,
 }
 
@@ -549,6 +571,92 @@ def _finish(command: str, path: Path, program: object | None,
 # ---------------------------------------------------------------- commands
 
 
+def _cmd_fmt(args: list[str], *, json_mode: bool,
+             error_format_json: bool) -> int:
+    """`newr fmt <file>... [--check]`: rewrite files canonically.
+
+    Parse only (no resolve/check), so a file with type errors still
+    formats. Files are processed in order; a parse error is reported
+    for that file and the rest still run. An unreadable file aborts
+    the run with exit 2, like `check` and `build`.
+    """
+    check_only = "--check" in args
+    args = [a for a in args if a != "--check"]
+    unknown = [a for a in args if a.startswith("-")]
+    if unknown:
+        raise _UsageError(f"unknown flag(s) for `newr fmt`: "
+                          + ", ".join(unknown))
+    if not args:
+        raise _UsageError("`newr fmt` needs at least one .newr file")
+    files: list[dict] = []
+    diagnostics: list[Diagnostic] = []
+    sources: dict[str, str] = {}
+    failed = False
+    for name in args:
+        path = Path(name)
+        source = _read_source(path)
+        sources[str(path)] = source
+        try:
+            formatted = format_source(source, str(path))
+        except NewrError as exc:
+            diagnostics.append(exc.diagnostic)
+            failed = True
+            if not json_mode and not error_format_json:
+                print(exc.diagnostic.format(source))
+                print(f"{path}: 1 error(s), 0 warning(s)")
+            continue
+        except RecursionError:
+            diagnostics.append(Diagnostic(
+                span=Span(str(path), 0, 1), code="E1001",
+                message="too deeply nested",
+                help="split the expression or block into smaller "
+                     "pieces, newr limits nesting to 200 levels so "
+                     "a bad input cannot exhaust the stack"))
+            failed = True
+            continue
+        changed = formatted != source
+        if check_only:
+            files.append({"file": str(path), "changed": changed})
+            if changed:
+                failed = True
+            if not json_mode and not error_format_json:
+                print(f"{path}: "
+                      f"{'needs formatting' if changed else 'ok'}")
+            continue
+        if changed:
+            try:
+                with open(path, "w", encoding="utf-8",
+                          newline="") as fh:
+                    fh.write(formatted)
+            except OSError as exc:
+                raise _EnvError(
+                    f"cannot write {path}: {exc}") from exc
+        files.append({"file": str(path), "changed": changed})
+        if not json_mode and not error_format_json:
+            print(f"{path}: {'formatted' if changed else 'ok'}")
+    if json_mode:
+        data = {"files": files,
+                "diagnostics": [d.to_json(sources.get(d.span.file, ""))
+                                for d in diagnostics]}
+        envelope = _envelope("fmt", data, diagnostics)
+        if failed and envelope["ok"]:
+            # --check with files needing formatting fails with no
+            # diagnostic; the envelope must agree with the exit code.
+            envelope["ok"] = False
+            envelope["error"] = {
+                "code": "FMT",
+                "message": "one or more files need formatting",
+                "hint": "run `newr fmt` to rewrite them",
+            }
+        print(json.dumps(envelope))
+        return 4 if failed else 0
+    if error_format_json:
+        print(json.dumps([d.to_json(sources.get(d.span.file, ""))
+                          for d in diagnostics]))
+        return 4 if failed else 0
+    return 4 if failed else 0
+
+
 def _cmd_check(args: list[str], *, json_mode: bool,
                error_format_json: bool) -> int:
     fast = "--fast" in args
@@ -889,4 +997,7 @@ def _dispatch(argv: list[str], *, json_mode: bool,
     if cmd == "build":
         return _cmd_build(args, json_mode=json_mode,
                           error_format_json=error_format_json)
+    if cmd == "fmt":
+        return _cmd_fmt(args, json_mode=json_mode,
+                        error_format_json=error_format_json)
     raise _UsageError(f"unknown command `{cmd}`. Run `newr help`.")

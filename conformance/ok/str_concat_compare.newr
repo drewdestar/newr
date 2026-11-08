@@ -2,11 +2,11 @@
 let passed = true
 if "a" + "b" != "ab":
   passed = false
-if not ("abc" == "abc"):
+if not "abc" == "abc":
   passed = false
-if not ("a" < "b"):
+if not "a" < "b":
   passed = false
-if not ("b" > "a"):
+if not "b" > "a":
   passed = false
 if len("abc") != 3:
   passed = false

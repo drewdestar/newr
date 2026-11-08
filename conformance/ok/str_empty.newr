@@ -3,7 +3,7 @@ let passed = true
 let e = ""
 if len(e) != 0:
   passed = false
-if not (e == ""):
+if not e == "":
   passed = false
 if "{e}x" != "x":
   passed = false
