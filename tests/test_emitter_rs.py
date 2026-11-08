@@ -613,5 +613,13 @@ class TestBotStatements(unittest.TestCase):
             emit_rs_src(src, "<test>.newr", "Main")
 
 
+class TestInput(unittest.TestCase):
+    def test_input_maps_to_runtime_helper(self):
+        # SPEC.md §12.1: input() is a core builtin on every target;
+        # the Rust emitter routes it to newr_rt::input.
+        text = emit_rs_main_text('let s = input("Name? ")\nprint s\n')
+        self.assertIn("newr_rt::input(", text)
+
+
 if __name__ == "__main__":
     unittest.main()

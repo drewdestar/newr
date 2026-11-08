@@ -1373,7 +1373,7 @@ class _DartEmitter:
             if _is_int(t):
                 self._need_rt("absLong")
                 return f"NewrRt.absLong({arg})", _PREC["primary"]
-            return f"{arg}.abs()", _PREC["primary"]
+            return f"({arg}).abs()", _PREC["primary"]
         self._fail(f"internal error: cannot emit builtin `{name}`")
 
     def _emit_conversion(self, node: A.Call) -> tuple[str, int]:

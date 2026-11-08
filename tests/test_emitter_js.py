@@ -958,5 +958,13 @@ class TestImportedEnumMember(unittest.TestCase):
         self.assertIn("Shade_Red,", helper_text)
 
 
+class TestInput(unittest.TestCase):
+    def test_input_maps_to_runtime_helper(self):
+        # SPEC.md §12.1: input() is a core builtin on every target;
+        # the JS emitter routes it to the newr_rt input helper.
+        text = emit_js_main_text('let s = input("Name? ")\nprint s\n')
+        self.assertIn('input("Name? ")', text)
+
+
 if __name__ == "__main__":
     unittest.main()

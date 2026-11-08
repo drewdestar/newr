@@ -1,0 +1,28 @@
+# math.ceil on negative and zero inputs, plus tighter math.pi / math.e
+# bounds and a math.sqrt range check (SPEC.md §12.2; mod_math.newr
+# pins the basic ceil/pi/e cases, this one thickens them).
+let passed = true
+if math.ceil(-2.1) != -2:
+  passed = false
+if math.ceil(2.0) != 2:
+  passed = false
+if math.ceil(0.0) != 0:
+  passed = false
+if math.ceil(-0.5) != 0:
+  passed = false
+if math.pi < 3.14159:
+  passed = false
+if math.pi > 3.14160:
+  passed = false
+if math.e < 2.71828:
+  passed = false
+if math.e > 2.71829:
+  passed = false
+if math.sqrt(2.0) < 1.4142:
+  passed = false
+if math.sqrt(2.0) > 1.4143:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -161,5 +161,13 @@ class TestHelloAndHeader(unittest.TestCase):
             run_cs_ok('print -7 % 2\n'), "-1\n")
 
 
+class TestInput(unittest.TestCase):
+    def test_input_maps_to_runtime_helper(self):
+        # SPEC.md §12.1: input() is a core builtin on every target;
+        # the C# emitter routes it to NewrRt.Input.
+        text = emit_cs_main_text('let s = input("Name? ")\nprint s\n')
+        self.assertIn('NewrRt.Input("Name? ")', text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -871,7 +871,7 @@ class _CSEmitter:
             return (f"(({form}) ((a, b) => a < b ? b : a))",
                     _PREC["primary"])
         if name == "abs":
-            # int -> absLong, float -> Math.abs; the context type
+            # int -> absLong, float -> Math.Abs; the context type
             # decides (the fallback is the int form).
             if fn_target is not None and _is_fn(fn_target) and \
                     _is_float(fn_target.params[0]):
@@ -1338,7 +1338,7 @@ class _CSEmitter:
             if _is_int(t):
                 self._need_rt("absLong")
                 return f"NewrRt.AbsLong({arg})", _PREC["primary"]
-            return f"Math.abs({arg})", _PREC["primary"]
+            return f"Math.Abs({arg})", _PREC["primary"]
         self._fail(f"internal error: cannot emit builtin `{name}`")
 
     def _emit_conversion(self, node: A.Call) -> tuple[str, int]:

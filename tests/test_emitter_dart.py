@@ -684,5 +684,13 @@ class TestBotStatements(unittest.TestCase):
             emit_dart_src(src, "<test>.newr", "Main")
 
 
+class TestInput(unittest.TestCase):
+    def test_input_maps_to_runtime_helper(self):
+        # SPEC.md §12.1: input() is a core builtin on every target;
+        # the Dart emitter routes it to NewrRt.input.
+        text = emit_dart_main_text('let s = input("Name? ")\nprint s\n')
+        self.assertIn('NewrRt.input("Name? ")', text)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -152,5 +152,13 @@ class TestHelloAndHeader(unittest.TestCase):
             run_java_ok('print -7 % 2\n'), "-1\n")
 
 
+class TestInput(unittest.TestCase):
+    def test_input_maps_to_runtime_helper(self):
+        # SPEC.md §12.1: input() is a core builtin on every target;
+        # the Java emitter routes it to NewrRt.input.
+        text = emit_java_main_text('let s = input("Name? ")\nprint s\n')
+        self.assertIn('NewrRt.input("Name? ")', text)
+
+
 if __name__ == "__main__":
     unittest.main()

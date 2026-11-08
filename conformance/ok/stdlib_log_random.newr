@@ -1,0 +1,26 @@
+# log.info/warn/error plus the log statement, and random.shuffle
+# (SPEC.md §12.1, §12.2). Shuffle is non-deterministic, so only
+# length and membership are asserted, never the order.
+log.info("info level")
+log.warn("warn level")
+log.error("error level")
+log "plain log statement"
+let passed = true
+let xs = [1, 2, 3, 4, 5]
+random.shuffle(xs)
+if len(xs) != 5:
+  passed = false
+if xs.contains(1) != true:
+  passed = false
+if xs.contains(2) != true:
+  passed = false
+if xs.contains(3) != true:
+  passed = false
+if xs.contains(4) != true:
+  passed = false
+if xs.contains(5) != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

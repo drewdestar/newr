@@ -54,10 +54,11 @@ def emit_main_text(src, filename="<test>.newr"):
     return result.files[result.main_file]
 
 
-def run_src(src, filename="<test>.newr", argv=None):
+def run_src(src, filename="<test>.newr", argv=None, input_text=None):
     """Emit to a temp dir, copy newr_rt.py if needed, run it.
 
-    Returns (stdout, stderr, returncode).
+    Returns (stdout, stderr, returncode). `input_text`, when given,
+    is fed to the program's stdin (for input() tests).
     """
     result = emit_src(src, filename)
     with tempfile.TemporaryDirectory() as d:
@@ -69,12 +70,13 @@ def run_src(src, filename="<test>.newr", argv=None):
         proc = subprocess.run(
             [sys.executable, str(Path(d) / result.main_file),
              *(argv or [])],
+            input=input_text,
             capture_output=True, text=True, cwd=d)
         return proc.stdout, proc.stderr, proc.returncode
 
 
-def run_ok(src, filename="<test>.newr", argv=None):
-    stdout, stderr, code = run_src(src, filename, argv)
+def run_ok(src, filename="<test>.newr", argv=None, input_text=None):
+    stdout, stderr, code = run_src(src, filename, argv, input_text)
     assert code == 0, f"exit {code}\nstdout: {stdout}\nstderr: {stderr}"
     return stdout
 
@@ -873,6 +875,19 @@ class TestConversions(unittest.TestCase):
         self.assertEqual(run_ok("print min(3, 7)\nprint max(3, 7)\n"
                                 "print abs(-5)\nprint abs(2.5)\n"),
                          "3\n7\n5\n2.5\n")
+
+    def test_input_reads_line(self):
+        # SPEC.md §12.1: input() reads one line from stdin (blocking);
+        # the prompt is written to stdout, the line is returned without
+        # its trailing newline.
+        self.assertEqual(run_ok('let s = input("Name? ")\nprint s\n',
+                                input_text="Ada\n"),
+                         "Name? Ada\n")
+
+    def test_input_no_prompt(self):
+        self.assertEqual(run_ok("let s = input()\nprint s\n",
+                                input_text="hello\n"),
+                         "hello\n")
 
     def test_env_args(self):
         self.assertEqual(run_ok("print env.args.len()\n",
