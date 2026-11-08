@@ -1258,7 +1258,23 @@ class _JavaEmitter:
                 method = "get" if not args else "apply"
                 return (f"{binding.java}.{method}({', '.join(args)})",
                         _PREC["primary"])
-            args = [self.emit_expr(a, 0) for a in node.args]
+            # A declared fn: plain call; positional args are
+            # emitted with the declared param type as fn_target
+            # when it is a fn type (a bare builtin passed as an
+            # argument needs its type from the callee's
+            # signature); keyword args are reordered by
+            # _emit_kwargs.
+            fn = self.fns_by_java.get(binding.java)
+            params = [p.type for p in fn.params] \
+                if fn is not None else []
+            args: list[str] = []
+            for i, a in enumerate(node.args):
+                if i < len(params):
+                    p = params[i]
+                    args.append(self.emit_expr(
+                        a, 0, fn_target=p if _is_fn(p) else None))
+                else:
+                    args.append(self.emit_expr(a, 0))
             kwargs = self._emit_kwargs(node, binding)
             return (f"{binding.java}({', '.join(args + kwargs)})",
                     _PREC["primary"])
@@ -2720,7 +2736,9 @@ class _JavaEmitter:
             # only to normal (Ok) returns, not to propagated errors.
             unwrapped = self._propagate_unwrapped(stmt.value)
             return [f"{p}return {unwrapped};"]
-        value = self.emit_expr(stmt.value, 0)
+        value = self.emit_expr(stmt.value, 0,
+                               fn_target=ret_type if _is_fn(ret_type)
+                               else None)
         if not ensures:
             return [f"{p}return {value};"]
         lines = [f"{p}_newrResult = {value};"]

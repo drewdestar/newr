@@ -3443,7 +3443,9 @@ class _RsEmitter:
             # only to normal (Ok) returns, not to propagated errors.
             unwrapped = self._propagate_unwrapped(stmt.value)
             return [f"{p}return {unwrapped};"]
-        value = self._emit_value(stmt.value, ret_type)
+        value = self._emit_value(stmt.value, ret_type,
+                                 fn_target=ret_type if _is_fn(ret_type)
+                                 else None)
         if not ensures:
             return [f"{p}return {value};"]
         lines = [f"{p}_newr_result = {value};"]

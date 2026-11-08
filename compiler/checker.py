@@ -501,13 +501,25 @@ class Checker:
             return binding.type
         if expr.name in BUILTINS:
             spec = BUILTINS[expr.name]
-            return self._builtin_fn_type(expr.name, spec)
+            return self._builtin_fn_type(expr.name, spec, expected)
         if expr.name == "log":
             return fn_of([STR], NONE_TYPE)
         # Undefined names are the resolver's E3001; stay silent here.
         return UNKNOWN
 
-    def _builtin_fn_type(self, name: str, spec: dict) -> Type:
+    def _builtin_fn_type(self, name: str, spec: dict,
+                         expected: Type | None = None) -> Type:
+        # R2 (a): use-site inference. When the expected type is a
+        # non-nullable fn type, build the builtin's fn type from it,
+        # after validating arity and that the expected param types
+        # are ones the builtin accepts. Anything else keeps the old
+        # behavior (fn with __unknown__ params), so the unannotated
+        # form and invalid annotations still fail closed.
+        if expected is not None and expected.name == "fn" \
+                and expected.params and not expected.nullable:
+            inferred = self._infer_builtin_fn_type(name, expected)
+            if inferred is not None:
+                return inferred
         params: list[Type] = []
         for p in spec.get("params", []):
             if isinstance(p, Type):
@@ -526,6 +538,55 @@ class Checker:
         else:
             ret_t = UNKNOWN
         return fn_of(params, ret_t)
+
+    def _infer_builtin_fn_type(self, name: str,
+                               expected: Type) -> Type | None:
+        """Build a bare builtin's fn type from an expected fn type.
+
+        Returns None when the builtin does not accept the expected
+        shape (wrong arity, or a param type the builtin cannot
+        take); the caller then falls back to the __unknown__ form,
+        which fails closed in _check. The return types mirror the
+        call path exactly (len -> int, min/max -> T, abs -> the
+        arg type, round -> int with 1 arg and float with 2,
+        range -> list[int]). Only the six builtins whose spec
+        params are generic get inference; the rest keep today's
+        behavior exactly.
+        """
+        params = list(expected.params[:-1])
+        if any(p.nullable for p in params):
+            return None
+        if name == "len":
+            if len(params) != 1:
+                return None
+            if params[0].name not in ("str", "list", "dict", "set"):
+                return None
+            return fn_of(params, INT)
+        if name in ("min", "max"):
+            if len(params) != 2 or params[0] != params[1]:
+                return None
+            return fn_of(params, params[0])
+        if name == "abs":
+            if len(params) != 1:
+                return None
+            if params[0].name not in ("int", "float"):
+                return None
+            return fn_of(params, params[0])
+        if name == "round":
+            if len(params) not in (1, 2):
+                return None
+            if params[0].name not in ("int", "float"):
+                return None
+            if len(params) == 2 and params[1].name != "int":
+                return None
+            return fn_of(params, INT if len(params) == 1 else FLOAT)
+        if name == "range":
+            if len(params) not in (1, 2, 3):
+                return None
+            if any(p.name != "int" for p in params):
+                return None
+            return fn_of(params, list_of(INT))
+        return None
 
     # -- operators
 
