@@ -33,6 +33,13 @@ from pathlib import Path
 from . import __version__
 from .checker import check_program
 from .fmt import format_source
+from .init import (
+    InitError,
+    ManifestError,
+    VALID_TARGETS,
+    default_target_for,
+    scaffold,
+)
 from .discord_check import check_discord, discord_providers
 from .errors import Diagnostic, NewrError, Span
 from .resolver import resolve_source
@@ -45,7 +52,8 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
                          writes nothing
   build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast]
                          build a .newr program into runnable Python
-                         (default --target py), JavaScript (--target js),
+                         (default: the target in newr.json, else py),
+                         JavaScript (--target js),
                          Java (--target java), C# (--target cs),
                          Rust (--target rs), Kotlin (--target kt) or
                          Dart (--target dart)
@@ -53,6 +61,10 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
                          rewrite .newr files in canonical form
                          (parse only; --check reports files that need
                          formatting instead of rewriting them)
+  init [dir] [--name <name>] [--target py|js|java|cs|rs|kt|dart]
+                         scaffold a new project (main.newr + newr.json
+                         + locales/ + .env.example + .gitignore);
+                         refuses when newr.json or main.newr exists
   help [command]         show this help, or help for one command
   version                print the newr version
   explain <code>         explain a diagnostic code (also: --explain <code>)
@@ -86,7 +98,11 @@ the program has no errors (warnings are fine), 4 when it has errors,
     "build": """Usage: newr build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast]
 
 Build a .newr program into runnable code for one target (Python and
-TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2).
+TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2). When --target is
+omitted, the target comes from newr.json (SPEC.md section 11),
+searched upward from the program's directory; without a manifest the
+default is py, as before. A malformed manifest, or a target value
+that is not one of the seven targets, is an error naming the file.
 
 M2: `--target py` (the default) emits Python — one `.py` per `.newr`
 file, written next to the input (or to `-o` for the main file), plus a
@@ -147,6 +163,24 @@ read, 1 on a usage error.
   --check   do not rewrite anything; print `<path>: ok` or
             `<path>: needs formatting` per file and exit 4 when any
             file needs formatting (for CI).
+""",
+    "init": """Usage: newr init [dir] [--name <name>] [--target py|js|java|cs|rs|kt|dart]
+
+Scaffold a new project in [dir] (the current directory when omitted;
+created when missing): main.newr (a hello program), newr.json (the
+project manifest, SPEC.md section 11), locales/ (empty for now, v1
+strings are inline `strings` blocks, section 15), .env.example (the
+secrets template; only bot programs need it), and .gitignore.
+
+The name defaults to the directory name; the target defaults to py
+and becomes the manifest's `target`, which `newr build` then uses
+when --target is omitted. Exit 0 when the project is created, 1 when
+the target is unknown, when more than one directory is given, or
+when newr.json or main.newr already exists in the directory (init
+never overwrites existing work), 2 when a file cannot be written.
+
+  --name <name>     project name in newr.json (default: directory name)
+  --target <target> default build target in newr.json (default: py)
 """,
 }
 
@@ -657,6 +691,70 @@ def _cmd_fmt(args: list[str], *, json_mode: bool,
     return 4 if failed else 0
 
 
+def _cmd_init(args: list[str], *, json_mode: bool,
+              error_format_json: bool) -> int:
+    """`newr init [dir] [--name <name>] [--target <target>]`: scaffold
+    a project (SPEC.md section 11 and section 19).
+
+    Refuses when `newr.json` or `main.newr` already exists in the
+    target directory, so init never overwrites existing work. A
+    directory that does not exist is created.
+    """
+    name = None
+    target = "py"
+    rest: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--name" and i + 1 < len(args):
+            name = args[i + 1]
+            i += 2
+        elif arg.startswith("--name="):
+            name = arg.split("=", 1)[1]
+            i += 1
+        elif arg == "--target" and i + 1 < len(args):
+            target = args[i + 1]
+            i += 2
+        elif arg.startswith("--target="):
+            target = arg.split("=", 1)[1]
+            i += 1
+        else:
+            rest.append(arg)
+            i += 1
+    unknown = [a for a in rest if a.startswith("-")]
+    if unknown:
+        raise _UsageError("unknown flag(s) for `newr init`: "
+                          + ", ".join(unknown))
+    if len(rest) > 1:
+        raise _UsageError(
+            "`newr init` takes at most one directory "
+            f"(got {len(rest)})")
+    directory = Path(rest[0]) if rest else Path(".")
+    try:
+        created = scaffold(directory, name=name, target=target)
+    except InitError as exc:
+        raise _UsageError(str(exc)) from exc
+    except OSError as exc:
+        raise _EnvError(f"cannot scaffold {directory}: {exc}") from exc
+    if json_mode:
+        manifest = json.loads(
+            (directory / "newr.json").read_text(encoding="utf-8"))
+        data = {"dir": str(directory),
+                "name": manifest["name"],
+                "files": [str(p) for p in created]}
+        print(json.dumps(_envelope("init", data, [])))
+        return 0
+    if error_format_json:
+        print("[]")
+        return 0
+    for path in created:
+        print(f"created {path}")
+    main_display = (directory / "main.newr"
+                    if str(directory) != "." else Path("main.newr"))
+    print(f"next: newr build {main_display}")
+    return 0
+
+
 def _cmd_check(args: list[str], *, json_mode: bool,
                error_format_json: bool) -> int:
     fast = "--fast" in args
@@ -667,7 +765,8 @@ def _cmd_check(args: list[str], *, json_mode: bool,
 
 def _cmd_build(args: list[str], *, json_mode: bool,
                error_format_json: bool) -> int:
-    target = "py"
+    target = None
+    target_given = False
     output = None
     line_comments = False
     rest: list[str] = []
@@ -676,9 +775,11 @@ def _cmd_build(args: list[str], *, json_mode: bool,
         arg = args[i]
         if arg == "--target" and i + 1 < len(args):
             target = args[i + 1]
+            target_given = True
             i += 2
         elif arg.startswith("--target="):
             target = arg.split("=", 1)[1]
+            target_given = True
             i += 1
         elif arg in ("-o", "--output") and i + 1 < len(args):
             output = args[i + 1]
@@ -692,10 +793,10 @@ def _cmd_build(args: list[str], *, json_mode: bool,
         else:
             rest.append(arg)
             i += 1
-    if target not in ("py", "js", "java", "cs", "rs", "kt", "dart"):
+    if target_given and target not in VALID_TARGETS:
         raise _UsageError(
-            f"unknown target `{target}` (targets: py, js, java, cs, "
-            f"rs, kt, dart)")
+            f"unknown target `{target}` (targets: "
+            f"{', '.join(VALID_TARGETS)})")
     fast = "--fast" in rest
     rest = [a for a in rest if a != "--fast"]
     if "--check" in rest:
@@ -710,6 +811,19 @@ def _cmd_build(args: list[str], *, json_mode: bool,
             "`newr build --fast` cannot emit — emission needs the "
             "full type check. Use `newr build --fast --check` to "
             "verify only, or drop `--fast` to build.")
+    if target is None:
+        # No explicit --target: the default comes from newr.json
+        # (SPEC.md section 11), searched upward from the program's
+        # directory; without a manifest it stays py, as before.
+        positional = [a for a in rest if not a.startswith("-")]
+        if len(positional) != 1:
+            raise _UsageError(
+                "`newr build` needs exactly one .newr file "
+                f"(got {len(positional)})")
+        try:
+            target = default_target_for(Path(positional[0]))
+        except ManifestError as exc:
+            raise _UsageError(str(exc)) from exc
     return _build_emit(rest, output=output, line_comments=line_comments,
                        target=target, json_mode=json_mode,
                        error_format_json=error_format_json)
@@ -1000,4 +1114,7 @@ def _dispatch(argv: list[str], *, json_mode: bool,
     if cmd == "fmt":
         return _cmd_fmt(args, json_mode=json_mode,
                         error_format_json=error_format_json)
+    if cmd == "init":
+        return _cmd_init(args, json_mode=json_mode,
+                         error_format_json=error_format_json)
     raise _UsageError(f"unknown command `{cmd}`. Run `newr help`.")
