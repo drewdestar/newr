@@ -198,6 +198,53 @@ jobs:
           python newr.pyz check examples/hello.newr
           python newr.pyz check examples/shop.newr
 
+  build-binary:
+    name: standalone binary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller==6.22.3
+
+      # One build per OS: a binary built on Linux does not run on
+      # macOS or Windows, so each runner builds its own with
+      # scripts/build-binary.sh.
+      - name: Build the binary
+        shell: bash
+        run: bash scripts/build-binary.sh
+
+      # Smoke test through the binary, not the launcher: version,
+      # check, and build all seven targets on the shop example.
+      # The runtime files are bundled with --add-data; without them
+      # build fails with FileNotFoundError: compiler/newr_rt.py.
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          BIN=dist/newr-binary
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN=dist/newr-binary.exe; fi
+          "$BIN" version
+          "$BIN" check examples/hello.newr
+          "$BIN" check examples/shop.newr
+          for t in py js java cs rs kt dart; do
+            "$BIN" build --target "$t" -o "$RUNNER_TEMP/binary-smoke/$t/shop" examples/shop.newr
+          done
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: newr-binary-${{ matrix.os }}
+          path: dist/newr-binary*
+
   golden-rebuild:
     name: golden rebuild check (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

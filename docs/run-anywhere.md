@@ -529,3 +529,37 @@ is done.
 - SPEC.md section 13.10 (distribution) and BUILD_REPORT.md
   section 14.1 (pin P1, Python floor 3.10) as the standing
   decisions this doc does not change.
+
+## 11. M7 binary build (9 Nov 2026, Linux x86_64)
+
+Built from tree 0.2.0 (commit 50577ce) with PyInstaller 6.22.3
+in a venv, via `scripts/build-binary.sh`. CI job `build-binary`
+in `.github/workflows/ci.yml` builds one binary per OS
+(ubuntu-latest, macos-latest, windows-latest) and smoke tests
+each the same way.
+
+Measured on this VM (Linux x86_64, glibc 2.39, Python 3.12.3):
+
+- Binary size: 8,683,776 bytes (about 8.3 MB), one file.
+- `./newr-binary version` prints `newr 0.2.0`.
+- `check` passes for hello, shop, showcase.
+- `build` passes for all seven targets (py, js, java, cs, rs,
+  kt, dart) on the shop example, exit 0 each; the copied
+  runtime files (newr_rt.py, newr_rt.rs, newr_rt.kt, and the
+  rest) prove the `--add-data` bundling works.
+- Emitted hello from the binary is byte-identical to the emit
+  from the repo launcher (`./newr`), and runs to print
+  `Hello, world!`.
+- Cold start (`version`, extraction cache cleared before each
+  run, 5 runs): median 0.423 s, range 0.328 to 0.607 s.
+  Warm start: median 0.335 s. Repo launcher for comparison:
+  median 0.137 s cold, 0.126 s warm.
+- Max RSS: 18.0 MB (`check` shop), 19.1 MB (`build --target
+  py` shop).
+
+Not proven here: Windows and macOS binaries (CI only, and CI
+was red at build time, see BUILD_REPORT.md in
+newr-research/m7-build), a manylinux_2_17 build for old
+glibc, and distribution via GitHub Releases (not decided yet).
+The Linux binary here was built against glibc 2.39 and is not
+expected to run on glibc 2.17 systems.
