@@ -428,14 +428,27 @@ The compiler reasons about the program. It does not guess.
   files. It only applies a fix when the diagnostic's `fix` field says the
   fix is **unambiguous** (exactly one candidate) and **safe** (a pure rename
   or a pure deletion of a provably-dead token — never a change to program
-  meaning). It prints every change it makes, and it refuses to run on a file
-  with any error that has no safe fix (it fixes what it can and reports the
-  rest — it never half-fixes silently).
-- **`newr fix` is NOT in M1.** M1 designs the diagnostic `fix` field;
-  in M1 only the resolver attaches one (the similar-name rename,
-  E3001) — the checker does not attach fixes yet. The `fix` command
-  itself lands in M4 (tooling), once the diagnostics are proven. M1's
-  CLI is `build` / `build --check` / `check` / `help` (§19).
+  meaning). It prints every change it makes, and it refuses to modify a file
+  with any error that has no safe fix: the file is left untouched, the
+  blocking errors are reported, and no fix is applied, not even for the
+  errors that do have fixes. It never half-fixes, silently or otherwise.
+  The fixed text is verified clean by re-running the front end before
+  anything is written. Warnings never block a fix. Diagnostics from
+  imported files belong to those files; `newr fix` on an imported file
+  fixes them there.
+- **Minimal in M6.** The command landed in M6 as a minimal command:
+  general in shape (it applies any diagnostic `fix`), but today only
+  the resolver attaches one, the similar-name rename (E3001, exactly
+  one close match). The checker attaches no fixes yet.
+- **Deferred to v1.1: checker-attached fixes.** Attaching a fix to a
+  checker diagnostic is new reasoning work, not plumbing: each checker
+  fix needs its own proof that the fix is unambiguous and safe (does
+  it change program meaning, does it hold for every use site, what
+  happens when two fixes overlap). That proof needs its own design
+  per diagnostic, so it is v1.1 work, not M6. When checker fixes
+  land, they flow through this same command with no change here: the
+  command trusts the diagnostic's `fix` field and never invents a fix
+  of its own.
 
 ### 5.3 What "thinking" is NOT — explicit boundary
 
@@ -1739,7 +1752,7 @@ a Node script in TS, a `main()` in Java/C#/Rust/Kotlin/Dart).
 | `newr build` | `build [--target py\|js] [--check] [--fast] <file.newr> [-o <out>]` | `--target` selects the emitter (default `py`); without `--check` it emits (M2+). In M1 (no emitter yet) `build` without `--check` is an error telling the user to use `--check` — emitters land in M2. `--fast` emits with only parse + minimal checking (syntax + name resolution), with a warning that the output is not fully verified (§4.1). |
 | `newr build --check` | Parse + resolve + check (+ emit + verify from M2) | Writes nothing. Exit 0 on success, 4 on build error. |
 | `newr check` | Parse + resolve + check, print errors + warnings | The "thinking" command (§5.1). Exit 0 if no errors (warnings allowed), 4 on error. |
-| `newr fix` | **NOT in M1** — M4 | Applies safe, unambiguous diagnostic fixes (§5.2). |
+| `newr fix` | Yes (M6, minimal) | Applies safe, unambiguous diagnostic fixes (§5.2). |
 | `newr --explain <code>` | Yes (M1) | Prints the long form of a diagnostic code (§16). |
 | `newr --error-format=json` | Yes (M1) | One JSON object per diagnostic, same fields (§16). |
 | `newr fmt` | **NOT in v1** — M4/M6 | Canonical formatting, idempotent, `fmt --check` for CI. |
@@ -1947,7 +1960,7 @@ story) and §23.2 (the Haxe precedent, addressed head-on).
 
 | Feature in newr | Source language(s) | Why it was taken | Status |
 |---|---|---|---|
-| Helpful compiler errors: "this is what you meant, this is the fix, this is why" | Rust, Elm | Rust proved a compiler can teach; Elm proved an error can explain the *why*, not just the *where*. newr's diagnostics (§16) are modelled on both. | v1 (§5, §16); `newr fix` in M4 |
+| Helpful compiler errors: "this is what you meant, this is the fix, this is why" | Rust, Elm | Rust proved a compiler can teach; Elm proved an error can explain the *why*, not just the *where*. newr's diagnostics (§16) are modelled on both. | v1 (§5, §16); `newr fix` minimal in M6, checker fixes in v1.1 |
 | `T?` / null safety without ceremony | Rust, Swift, Kotlin | Rust's `Option` killed the null-pointer crash; Swift/Kotlin proved it can be ergonomic instead of bureaucratic. newr takes `T?` + `or` + `.unwrap()` (§7.2) — the safety, not the ceremony. | v1 |
 | Fast compile, one obvious way, readable code | Go, Python | Go proved a compiler can be fast and a language can be small; Python proved indentation + readability scale from beginners to experts. newr's shape is Python's, its compile-speed ambition is Go's. | v1 (§4, §6) |
 | Type inference: annotate where it adds clarity, not everywhere | TypeScript, Haskell | TypeScript proved inference + annotations can coexist; Haskell proved inference can be principled. newr infers from literals and signatures (§7.4) and demands an annotation only where inference is impossible. | v1 |
@@ -2062,7 +2075,7 @@ verifiable output) has a structural advantage GitHub itself now names.
 
 | # | Idea | Verdict | Reason |
 |---|---|---|---|
-| 1 | Errors that actually help (Rust/Elm style) + `newr fix` for safe fixes | **v1** (diagnostics); **M4** (`newr fix`) | Diagnostics with span + hint + machine `fix` field are in v1 (§5.1, §16). The `fix` command applies them in M4 (§5.2) — the command waits until the diagnostics are proven, the *data* does not. |
+| 1 | Errors that actually help (Rust/Elm style) + `newr fix` for safe fixes | **v1** (diagnostics); **M6 minimal** (`newr fix`), **v1.1** (checker-attached fixes) | Diagnostics with span + hint + machine `fix` field are in v1 (§5.1, §16). The `fix` command applies them in M6 (§5.2). The command waits until the diagnostics are proven, the *data* does not. Checker-attached fixes are v1.1, because each needs its own design (§5.2). |
 | 2 | One toolchain, all built-in: fmt, lint, test, package manager, docs — one binary, zero config | **v1** (build/check); **M4–M6** (fmt/fix/test/init/docs) | `build` + `check` (which is also the linter — §5.1 warnings) ship in v1 (§19). `fmt`, `fix`, `test`, `init`, docs generation land M4–M6, in that order — each needs the layer below it to be stable first. The package-manager half (v0's `install`/`update`/`agents`) lands with the newr repo as `newr_cli/`, M4+. |
 | 3 | No dependency hell: lockfile + reproducible build as default | **v1** (by absence); **lockfile with the module registry** (post-v1) | v1 has no external dependencies at all — no registry, no versions to resolve, nothing to go wrong (§11, §23). A lockfile is meaningless before a registry exists; it is specified *with* the registry, not bolted on after. |
 | 4 | Type inference | **v1** | §7.4. Annotate where it adds clarity; the checker infers the rest; ambiguity is an error, never a guess. |

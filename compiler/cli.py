@@ -61,6 +61,10 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
                          rewrite .newr files in canonical form
                          (parse only; --check reports files that need
                          formatting instead of rewriting them)
+  fix <file>... [--dry-run]
+                         apply safe, unambiguous diagnostic fixes
+                         (SPEC.md section 5.2); --dry-run prints the
+                         fixes without rewriting anything
   init [dir] [--name <name>] [--target py|js|java|cs|rs|kt|dart]
                          scaffold a new project (main.newr + newr.json
                          + locales/ + .env.example + .gitignore);
@@ -169,6 +173,25 @@ read, 1 on a usage error.
   --check   do not rewrite anything; print `<path>: ok` or
             `<path>: needs formatting` per file and exit 4 when any
             file needs formatting (for CI).
+""",
+    "fix": """Usage: newr fix <file>... [--dry-run]
+
+Apply the safe, unambiguous fixes the diagnostics carry (SPEC.md
+section 5.2): an undefined name with exactly one close match is
+renamed to that name (E3001). The fix is data in the diagnostic; the
+command never invents a fix of its own. Every change is printed, and
+the fixed text is verified clean before anything is written.
+
+A file with any error that has no safe fix is refused whole: it is
+not touched at all, and the blocking errors are printed. Warnings
+never block a fix. Exit 0 when every file is fixed or already clean,
+4 when a file is refused or has a parse error (or, with --dry-run,
+when any file would change), 2 when a file cannot be read, 1 on a
+usage error.
+
+  --dry-run   do not rewrite anything; print the fixes that would be
+              applied per file and exit 4 when any file would change
+              (for CI, like `fmt --check`).
 """,
     "init": """Usage: newr init [dir] [--name <name>] [--target py|js|java|cs|rs|kt|dart]
 
@@ -720,6 +743,111 @@ def _cmd_fmt(args: list[str], *, json_mode: bool,
     return 4 if failed else 0
 
 
+def _cmd_fix(args: list[str], *, json_mode: bool,
+             error_format_json: bool) -> int:
+    """`newr fix <file>... [--dry-run]`: apply diagnostic fixes.
+
+    Runs the full front end per file and applies the fixes the
+    diagnostics carry (compiler/fix.py). Files are processed in
+    order; a refused or unparsable file is reported and the rest
+    still run. An unreadable file aborts the run with exit 2, like
+    `check` and `build`.
+    """
+    from .fix import FixRefused, fix_text
+
+    dry_run = "--dry-run" in args
+    args = [a for a in args if a != "--dry-run"]
+    unknown = [a for a in args if a.startswith("-")]
+    if unknown:
+        raise _UsageError(f"unknown flag(s) for `newr fix`: "
+                          + ", ".join(unknown))
+    if not args:
+        raise _UsageError("`newr fix` needs at least one .newr file")
+    files: list[dict] = []
+    diagnostics: list[Diagnostic] = []
+    sources: dict[str, str] = {}
+    failed = False
+    for name in args:
+        path = Path(name)
+        source = _read_source(path)
+        sources[str(path)] = source
+        try:
+            new_source, applied = fix_text(source, str(path))
+        except NewrError as exc:
+            diagnostics.append(exc.diagnostic)
+            failed = True
+            if not json_mode and not error_format_json:
+                print(exc.diagnostic.format(source))
+                print(f"{path}: cannot fix (parse error)")
+            files.append({"file": str(path), "changed": False,
+                          "fixes": []})
+            continue
+        except FixRefused as exc:
+            diagnostics.extend(exc.diagnostics)
+            failed = True
+            if not json_mode and not error_format_json:
+                for diag in exc.diagnostics:
+                    print(diag.format(source))
+                if exc.reason:
+                    print(f"{path}: refused, {exc.reason}")
+                else:
+                    print(f"{path}: refused, "
+                          f"{len(exc.diagnostics)} error(s) "
+                          f"have no safe fix")
+            files.append({"file": str(path), "changed": False,
+                          "fixes": []})
+            continue
+        changed = new_source != source
+        fixes = [{"code": change.code, "line": change.line,
+                  "col": change.col, "old": change.old,
+                  "new": change.new} for change in applied]
+        if dry_run and changed:
+            failed = True
+        if changed and not dry_run:
+            try:
+                with open(path, "w", encoding="utf-8",
+                          newline="") as fh:
+                    fh.write(new_source)
+            except OSError as exc:
+                raise _EnvError(
+                    f"cannot write {path}: {exc}") from exc
+        files.append({"file": str(path), "changed": changed,
+                      "fixes": fixes})
+        if not json_mode and not error_format_json:
+            for change in applied:
+                print(f"{path}:{change.line}:{change.col}: "
+                      f"{change.code} `{change.old}` -> "
+                      f"`{change.new}`")
+            if not applied:
+                print(f"{path}: ok")
+            elif dry_run:
+                print(f"{path}: would fix {len(applied)} error(s)")
+            else:
+                print(f"{path}: fixed {len(applied)} error(s)")
+    if json_mode:
+        data = {"files": files,
+                "diagnostics": [d.to_json(sources.get(d.span.file, ""))
+                                for d in diagnostics]}
+        envelope = _envelope("fix", data, diagnostics)
+        if failed and envelope["ok"]:
+            # --dry-run with files that would change fails with no
+            # diagnostic; the envelope must agree with the exit code
+            # (same rule as `fmt --check` in _cmd_fmt).
+            envelope["ok"] = False
+            envelope["error"] = {
+                "code": "FIX",
+                "message": "one or more files could not be fixed",
+                "hint": "run `newr check` to see the blocking errors",
+            }
+        print(json.dumps(envelope))
+        return 4 if failed else 0
+    if error_format_json:
+        print(json.dumps([d.to_json(sources.get(d.span.file, ""))
+                          for d in diagnostics]))
+        return 4 if failed else 0
+    return 4 if failed else 0
+
+
 def _cmd_init(args: list[str], *, json_mode: bool,
               error_format_json: bool) -> int:
     """`newr init [dir] [--name <name>] [--target <target>]`: scaffold
@@ -1247,6 +1375,9 @@ def _dispatch(argv: list[str], *, json_mode: bool,
                           error_format_json=error_format_json)
     if cmd == "fmt":
         return _cmd_fmt(args, json_mode=json_mode,
+                        error_format_json=error_format_json)
+    if cmd == "fix":
+        return _cmd_fix(args, json_mode=json_mode,
                         error_format_json=error_format_json)
     if cmd == "init":
         return _cmd_init(args, json_mode=json_mode,
