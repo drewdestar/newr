@@ -1029,8 +1029,12 @@ class _Emitter:
                 if binding is not None and binding.kind in (
                         "named-module", "file-module"):
                     return self._emit_module_call(func.name, node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                        or obj.name == "db"):
                     # A named module used without an import (N-09/N-10).
+                    # `db` is a domain module like `discord`: it is not
+                    # in MODULES, but the same no-import fallback applies
+                    # (SPEC.md section 12.5).
                     fake = _Binding(py=obj.name, kind="named-module",
                                     module=obj.name)
                     return self._emit_module_call(func.name, node, fake)
@@ -1229,6 +1233,8 @@ class _Emitter:
             return (f"{binding.py}.{self._mangle(name)}"
                     f"({self._emit_call_args(node)})")
         real = binding.module or binding.py
+        if real == "db":
+            return self._emit_db_call(name, node)
         if real == "file":
             if name in ("read", "write", "append"):
                 self._need_rt(f"file_{name}")
@@ -1240,6 +1246,73 @@ class _Emitter:
             self._fail(f"module `file` has no function `{name}`")
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.py, name, args)
+
+    def _emit_db_call(self, name: str, node: A.Call) -> str:
+        """`db.*` calls (SPEC.md section 12.5): runtime helpers in
+        newr_rt.py, handles are ints, fd-style. The checker (db_check)
+        has already validated the call, so the arity here is trusted.
+        """
+        args = [self.emit_expr(a, 0) for a in node.args]
+        if name == "open":
+            self._need_rt("db_open")
+            return f"db_open({args[0]})"
+        if name == "exec":
+            self._need_rt("db_exec")
+            rest = ", ".join(args[2:])
+            return f"db_exec({args[0]}, {args[1]}, [{rest}])"
+        if name == "query":
+            self._need_rt("db_query")
+            py_struct, decl = self._db_row_struct(node)
+            names = [f.name for f in decl.fields]
+            types = [self._db_field_type(f.type) for f in decl.fields]
+            names_lit = "[" + ", ".join(repr(n) for n in names) + "]"
+            types_lit = "[" + ", ".join(repr(t) for t in types) + "]"
+            rest = ", ".join(args[2:])
+            return (f"[{py_struct}(*row) for row in "
+                    f"db_query({args[0]}, {args[1]}, [{rest}], "
+                    f"{names_lit}, {types_lit})]")
+        if name == "begin":
+            self._need_rt("db_begin")
+            return f"db_begin({args[0]})"
+        if name == "commit":
+            self._need_rt("db_commit")
+            return f"db_commit({args[0]})"
+        if name == "rollback":
+            self._need_rt("db_rollback")
+            return f"db_rollback({args[0]})"
+        if name == "last_id":
+            self._need_rt("db_last_id")
+            return f"db_last_id({args[0]})"
+        if name == "close":
+            self._need_rt("db_close")
+            return f"db_close({args[0]})"
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (Python name, decl) of the row struct for a `db.query`
+        call. The row type comes from `node.expr_type`, set by
+        db_check to `list[Row]`. A struct from an imported file module
+        resolves to its qualified name (`alias.Struct`)."""
+        t = node.expr_type
+        if t is None or t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._mangle(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    self._need_file_module(bound)
+                    return f"{bound}.{self._mangle(row_name)}", s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
 
     def _emit_enum_call(self, enum_name: str, variant: str,
                         node: A.Call) -> str:

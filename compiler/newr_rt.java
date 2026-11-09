@@ -34,6 +34,13 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -1464,5 +1471,291 @@ public class NewrRt {
     /** newr `file.exists(path)`. */
     public static boolean fileExists(String path) {
         return Files.exists(Path.of(path));
+    }
+
+    // ---------------------------------------------------------------- db module
+    // SQLite via JDBC (SPEC.md section 12.5). The driver itself
+    // (org.xerial:sqlite-jdbc, 3.54.1.0) is a runtime dependency
+    // only: this file compiles against java.sql alone, and
+    // `Class.forName("org.sqlite.JDBC")` loads the driver at
+    // runtime. Handles are ints, fd-style: ids from 1, a registry
+    // maps each id to its Connection. `?` binding is mandatory:
+    // values are never interpolated into the SQL text. The
+    // connection stays in autocommit, so `db.begin` runs an
+    // explicit BEGIN IMMEDIATE (the store's pattern) and a bare
+    // `db.exec` commits at once, mirroring the Python target.
+
+    private static final Map<Long, Connection> _dbConnections =
+        new LinkedHashMap<>();
+    private static long _dbNextId = 1;
+
+    /** newr `db.open(path)`: open (create if needed) and return a handle. */
+    public static long dbOpen(String path) {
+        try {
+            Class.forName("org.sqlite.JDBC");
+            Connection conn =
+                DriverManager.getConnection("jdbc:sqlite:" + path);
+            try (Statement st = conn.createStatement()) {
+                st.execute("PRAGMA foreign_keys = ON");
+                st.execute("PRAGMA busy_timeout = 5000");
+            }
+            long handle = _dbNextId;
+            _dbNextId += 1;
+            _dbConnections.put(handle, conn);
+            return handle;
+        } catch (ClassNotFoundException | SQLException e) {
+            throw asError(e);
+        }
+    }
+
+    private static Connection _dbConn(long handle) {
+        Connection conn = _dbConnections.get(handle);
+        if (conn == null) {
+            throw new NewrError("db: unknown or closed handle " + handle);
+        }
+        return conn;
+    }
+
+    private static void _dbBind(PreparedStatement ps, int index,
+                                Object value) throws SQLException {
+        // Bind by newr value type: long as INTEGER, double as REAL,
+        // String as TEXT, boolean as 0/1 (JDBC has no boolean column
+        // type in SQLite). A value of any other type is a caller bug.
+        if (value instanceof Long v) {
+            ps.setLong(index, v);
+        } else if (value instanceof Double v) {
+            ps.setDouble(index, v);
+        } else if (value instanceof String v) {
+            ps.setString(index, v);
+        } else if (value instanceof Boolean v) {
+            ps.setInt(index, v ? 1 : 0);
+        } else {
+            throw new NewrError("db: cannot bind a "
+                + value.getClass().getSimpleName() + " value");
+        }
+    }
+
+    private static Object _dbValue(Object value, String typeStr) {
+        // Convert one raw SQLite value to the newr value for a
+        // `db.query` field type (`int`, `float`, `str`, `bool`,
+        // each optionally `?`). Mirrors the Python `_db_value`
+        // (newr_rt.py): NULL lands only in a nullable field, and
+        // a value that cannot convert throws instead of silently
+        // producing a wrong value.
+        boolean nullable = typeStr.endsWith("?");
+        String base = nullable ? typeStr.substring(0, typeStr.length() - 1)
+            : typeStr;
+        if (value == null) {
+            if (nullable) {
+                return null;
+            }
+            throw new NewrError("db: NULL in non-nullable " + base
+                + " field");
+        }
+        switch (base) {
+            case "int":
+                if (value instanceof Boolean) {
+                    throw new NewrError("db: cannot convert bool to int");
+                }
+                if (value instanceof Number n) {
+                    double d = n.doubleValue();
+                    if (d != Math.floor(d) || d < (double) Long.MIN_VALUE
+                            || d > (double) Long.MAX_VALUE) {
+                        throw new NewrError("db: cannot convert " + value
+                            + " to int");
+                    }
+                    return checkInt(n.longValue());
+                }
+                if (value instanceof String s) {
+                    try {
+                        return checkInt(Long.parseLong(s.strip()));
+                    } catch (NumberFormatException e) {
+                        throw new NewrError("db: cannot convert " + value
+                            + " to int");
+                    }
+                }
+                throw new NewrError("db: cannot convert "
+                    + value.getClass().getSimpleName() + " to int");
+            case "float":
+                if (value instanceof Boolean) {
+                    throw new NewrError("db: cannot convert bool to float");
+                }
+                if (value instanceof Number n) {
+                    return n.doubleValue();
+                }
+                if (value instanceof String s) {
+                    try {
+                        return Double.parseDouble(s.strip());
+                    } catch (NumberFormatException e) {
+                        throw new NewrError("db: cannot convert " + value
+                            + " to float");
+                    }
+                }
+                throw new NewrError("db: cannot convert "
+                    + value.getClass().getSimpleName() + " to float");
+            case "str":
+                if (value instanceof Boolean b) {
+                    return b ? "true" : "false";
+                }
+                if (value instanceof String s) {
+                    return s;
+                }
+                return toStr(value);
+            case "bool":
+                if (value instanceof Boolean b) {
+                    return b;
+                }
+                if (value instanceof Number n) {
+                    long v = n.longValue();
+                    if (v == 0) {
+                        return false;
+                    }
+                    if (v == 1) {
+                        return true;
+                    }
+                    throw new NewrError("db: cannot convert " + value
+                        + " to bool");
+                }
+                if (value instanceof String s) {
+                    if (s.equals("0")) {
+                        return false;
+                    }
+                    if (s.equals("1")) {
+                        return true;
+                    }
+                    throw new NewrError("db: cannot convert " + value
+                        + " to bool");
+                }
+                throw new NewrError("db: cannot convert "
+                    + value.getClass().getSimpleName() + " to bool");
+            default:
+                throw new NewrError("db: unknown field type " + typeStr);
+        }
+    }
+
+    /** newr `db.exec(handle, sql, args...)`: run one statement,
+     * return the rows affected (0 for DDL). */
+    public static long dbExec(long handle, String sql, Object[] args) {
+        try {
+            PreparedStatement ps =
+                _dbConn(handle).prepareStatement(sql);
+            try {
+                for (int i = 0; i < args.length; i++) {
+                    _dbBind(ps, i + 1, args[i]);
+                }
+                return ps.executeUpdate();
+            } finally {
+                ps.close();
+            }
+        } catch (SQLException e) {
+            throw asError(e);
+        }
+    }
+
+    /** newr `db.query(handle, sql, args...)`: run a SELECT and
+     * return one list per row, converted values in field order. A
+     * missing column throws; extra columns are ignored. */
+    public static List<Object[]> dbQuery(long handle, String sql,
+            Object[] args, String[] fieldNames, String[] fieldTypes) {
+        try {
+            PreparedStatement ps =
+                _dbConn(handle).prepareStatement(sql);
+            try {
+                for (int i = 0; i < args.length; i++) {
+                    _dbBind(ps, i + 1, args[i]);
+                }
+                List<Object[]> rows = new ArrayList<>();
+                try (ResultSet rs = ps.executeQuery()) {
+                    ResultSetMetaData meta = rs.getMetaData();
+                    java.util.Set<String> cols = new java.util.HashSet<>();
+                    for (int i = 1; i <= meta.getColumnCount(); i++) {
+                        cols.add(meta.getColumnName(i));
+                    }
+                    while (rs.next()) {
+                        Object[] row = new Object[fieldNames.length];
+                        for (int i = 0; i < fieldNames.length; i++) {
+                            if (!cols.contains(fieldNames[i])) {
+                                throw new NewrError("db: column '"
+                                    + fieldNames[i]
+                                    + "' missing from query result");
+                            }
+                            row[i] = _dbValue(rs.getObject(fieldNames[i]),
+                                fieldTypes[i]);
+                        }
+                        rows.add(row);
+                    }
+                }
+                return rows;
+            } finally {
+                ps.close();
+            }
+        } catch (SQLException e) {
+            throw asError(e);
+        }
+    }
+
+    /** newr `db.begin(handle)`: BEGIN IMMEDIATE. */
+    public static Object dbBegin(long handle) {
+        try {
+            try (Statement st = _dbConn(handle).createStatement()) {
+                st.execute("BEGIN IMMEDIATE");
+            }
+        } catch (SQLException e) {
+            throw asError(e);
+        }
+        return null;
+    }
+
+    /** newr `db.commit(handle)`: COMMIT. */
+    public static Object dbCommit(long handle) {
+        try {
+            try (Statement st = _dbConn(handle).createStatement()) {
+                st.execute("COMMIT");
+            }
+        } catch (SQLException e) {
+            throw asError(e);
+        }
+        return null;
+    }
+
+    /** newr `db.rollback(handle)`: ROLLBACK. */
+    public static Object dbRollback(long handle) {
+        try {
+            try (Statement st = _dbConn(handle).createStatement()) {
+                st.execute("ROLLBACK");
+            }
+        } catch (SQLException e) {
+            throw asError(e);
+        }
+        return null;
+    }
+
+    /** newr `db.last_id(handle)`: the last INSERT rowid. */
+    public static long dbLastId(long handle) {
+        try {
+            try (Statement st = _dbConn(handle).createStatement();
+                 ResultSet rs =
+                     st.executeQuery("SELECT last_insert_rowid()")) {
+                rs.next();
+                return checkInt(rs.getLong(1));
+            }
+        } catch (SQLException e) {
+            throw asError(e);
+        }
+    }
+
+    /** newr `db.close(handle)`: close and drop the handle. A second
+     * close (or any use after close) raises NewrError. */
+    public static Object dbClose(long handle) {
+        Connection conn = _dbConnections.remove(handle);
+        if (conn == null) {
+            throw new NewrError("db: unknown or closed handle " + handle);
+        }
+        try {
+            conn.close();
+        } catch (SQLException e) {
+            throw asError(e);
+        }
+        return null;
     }
 }

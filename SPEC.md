@@ -1224,6 +1224,9 @@ works with no `import` line. Writing `import math` is still allowed (and
 is the documented style when a file leans on a module heavily); it changes
 nothing about what is checked. The one exception is `discord`, which is
 imported implicitly by bot blocks (§13.1) and is not core-checked (§2.1).
+`db` is the same shape: a domain module, not core — its rules live in
+`db_check.py` / `db_limits.py` (§12.5), and the core checker returns
+UNKNOWN for db calls (§2.1).
 
 | Module | Members | Notes |
 |---|---|---|
@@ -1232,6 +1235,7 @@ imported implicitly by bot blocks (§13.1) and is not core-checked (§2.1).
 | `random` | `int(a: int, b: int) -> int`, `choice(list) -> T`, `shuffle(list)` | Seeded by the runtime, not user-seedable in v1. |
 | `file` | `read(path: str) -> str`, `write(path: str, content: str)`, `append(path: str, content: str)`, `exists(path: str) -> bool` | Text files, UTF-8 (§3.4). `read`/`write` throw on failure (§10). Paths use `/` (§3.2). |
 | `env` | `get(name: str) -> str?`, `get(name: str, default: str) -> str`, `args -> list[str]` | The only env access (§3.4). `env.args` is the command-line arguments **including the program name at index 0** (the Python/Go/Rust/Node convention). |
+| `db` | `open(path: str) -> int`, `exec(handle: int, sql: str, args...) -> int`, `query(handle: int, sql: str, args...) -> list[RowStruct]`, `begin(handle: int)`, `commit(handle: int)`, `rollback(handle: int)`, `last_id(handle: int) -> int`, `close(handle: int)` | SQLite, sync (§12.5). A domain module, not core: checked by `db_check.py`, not the core checker. |
 
 **`json` is v1.1, not v1.** `json.parse` cannot be typed honestly without
 an `any` type (the spec has none, §7.1), and typing it as
@@ -1272,6 +1276,95 @@ forgotten.
 
 `set` construction: `set([1, 2])` (a builtin call on a list). There is no
 set-literal syntax in v1 (keeps `{...}` unambiguous for dict literals).
+
+### 12.5 The `db` module — SQLite, sync (M8a)
+
+`db` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/db_check.py` /
+`compiler/db_limits.py`, and the core checker returns UNKNOWN for db
+calls. It landed in v1 early, per the app-track decision
+(`docs/app-track.md` §7); `json` stays v1.1 (§12.2). The module is
+SQLite only, sync on all seven targets.
+
+```newr
+let h = db.open("todo.db")          # -> int, a connection handle
+db.exec(h, "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")
+let n = db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "beli susu", false)  # -> int, rows affected
+let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")  # -> list[Todo]
+db.begin(h)
+db.commit(h)
+db.rollback(h)
+let id = db.last_id(h)              # -> int, last AUTOINCREMENT id on this handle
+db.close(h)
+```
+
+- **The handle is an `int`, fd style.** `db.open` returns a
+  connection id managed by a runtime registry in `newr_rt.*`, the
+  way Unix file descriptors are ints. Zero type-system change: an
+  opaque `db.Connection` type would need coordinated changes in the
+  checker plus all seven emitters' type mappings. A wrong handle
+  fails loudly at runtime (unknown id throws). A distinct handle
+  type is v1.1 material, not M8a.
+- **Arguments are variadic, after the SQL string.** Each bound
+  value must be `int`, `float`, `str`, or `bool`. A list, a dict, a
+  struct, `none`, or a nullable value is a checker error (E2011).
+  A NULL column value comes from omitting the column (DEFAULT
+  NULL) or from a literal NULL in the SQL text, not from a bound
+  argument.
+- **Parameter binding is mandatory, by construction.** The SQL
+  string and the bound values travel on separate paths in every
+  emitter, exactly like the store (§14). There is no API that
+  concatenates values into SQL. When the SQL is a string literal,
+  the checker counts its `?` placeholders (skipping `?` inside
+  quoted SQL text) and reports a mismatch with the bound values
+  (E2011). When the SQL is computed, the count check is skipped
+  and a mismatch throws at runtime.
+- **`db.query` returns a typed struct list.** The call site MUST
+  carry the expected type (a `let` annotation, a return type, or
+  a function argument type); without one the checker reports
+  E2011 naming the fix. Columns match struct fields BY NAME. A
+  missing column throws at runtime. An extra column in the SELECT
+  is ignored. A value that cannot convert to the field type
+  throws at runtime. A NULL in a non-nullable field throws;
+  nullable fields (`int?`, `str?`) map NULL to `none`. Row struct
+  fields must be `int`, `float`, `str`, or `bool` (or nullable);
+  any other field type is E2011. There is no `any` type (§7.1),
+  so a list of dicts would be the same lie the spec already
+  rejected for `json.parse` — the typed struct list is the only
+  honest shape in v1.
+- **Transactions are explicit.** `db.begin` runs BEGIN IMMEDIATE;
+  `db.commit` / `db.rollback` end it. A second `db.begin` without
+  commit or rollback is E2011. A failed `db.exec` inside a
+  transaction does NOT auto-rollback; the caller rolls back in
+  `catch`, or the next `db.begin` fails until rollback.
+- **Every db call throws on failure**, like `file.read` (§10).
+  Callers use the existing `try:` / `catch:` / `finally:`.
+- **`db.open` creates the file when missing**, and throws when the
+  parent directory does not exist. `db.open(":memory:")` is
+  supported and is what the conformance programs use, so
+  conformance stays hermetic.
+- **`db.exec` runs exactly one statement.** Multi-statement SQL
+  is a runtime error. Migrations are successive `db.exec` calls
+  inside one transaction.
+- **Pragmas on every connection:** `PRAGMA foreign_keys = ON`
+  and `PRAGMA busy_timeout = 5000`, matching the store (§14).
+  Journal mode stays at the SQLite default; WAL is a later
+  optimization.
+- **`db.close` closes the handle.** Using a closed handle throws;
+  the checker also flags a use after `db.close` in the same body
+  (E2011). A program that exits without closing is fine (the OS
+  reclaims the file), but the example closes explicitly.
+- **Type mapping, inherited from the store (§14):** `int` is
+  stored as TEXT and read back through the target int64 parse
+  (BigInt on JS); `float` is REAL; `str` is TEXT; `bool` is
+  INTEGER 0/1.
+- **Not in M8a:** Postgres, MySQL, or any second driver; a
+  migrations framework, an ORM, a query builder; connection
+  pooling (one connection per handle); BLOB columns (v1 has no
+  bytes type); encryption, backup API, FTS, savepoints, nested
+  transactions (a `db.begin` inside an open transaction is a
+  runtime error); the browser target for js; Android sqlite
+  for kt.
 
 ## 13. The `discord` module — one domain module
 
@@ -1488,8 +1581,10 @@ button "Buy again" (style: primary, id: "buy-again", timeout: 60s):
 
 `store` is **discord-module surface** (G1), not a core-language feature:
 it is durable state for bots (balances, ledgers, idempotency keys). A
-general program's durable state in v1 is **file I/O** (§12); a general
-`db` / `sqlite` module is v1.1. The economy builtins are store operations
+general program's durable state in v1 is **file I/O** (§12) and the
+`db` module (§12.5), which landed early in v1 (M8a) although an
+earlier draft of this section said a general `db` / `sqlite` module
+was v1.1. The economy builtins are store operations
 of the discord module.
 
 ```
@@ -1598,7 +1693,7 @@ this section said "panic-mode + statement-boundary synchronisation";
 that was wrong — the M1 parser aborts on the first syntax error, and
 the code agrees.)
 
-The full code scheme is 38 codes: 29 numbered (`E1xxx` syntax,
+The full code scheme is 39 codes: 30 numbered (`E1xxx` syntax,
 `E2xxx` types, `E3xxx` resolver, `W1xxx` warnings) + 9 lexer codes in
 the descriptive `E_*` family. The complete table lives in
 `docs/error-index.md`; `newr --explain <CODE>` prints the long form of
@@ -1611,7 +1706,7 @@ any of them. The numbered codes:
   condition; `E2005` use before definition; `E2006` non-exhaustive
   match; `E2007` `break`/`continue`/`return` in the wrong place;
   `E2008` Discord rule violation; `E2009` i18n violation;
-  `E2010` not all paths answer.
+  `E2010` not all paths answer; `E2011` db module rule violation.
 - Resolver: `E3001` undefined name; `E3002` wrong number of
   arguments; `E3003` duplicate definition; `E3004` import cycle;
   `E3005` name not exported; `E3006` bot/command/event/task in an

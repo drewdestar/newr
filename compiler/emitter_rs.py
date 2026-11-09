@@ -317,6 +317,9 @@ class _RsEmitter:
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
         self.uses_sqlite: bool = False
+        # This file uses `db.*` (set by `_emit_db_call`) — the
+        # `newr_db` helper module is emitted into the file only then.
+        self._file_uses_db: bool = False
         self.rt_helpers: set[str] = set()
         # Module-level declarations of the file being emitted.
         self.fns: dict[str, A.FnDecl] = {}
@@ -1418,6 +1421,10 @@ class _RsEmitter:
                                                           is_main=False)
                 files.update(sub_files)
                 uses_rt = uses_rt or sub_rt
+                # A `db.*` call in a file module needs rusqlite in
+                # the Cargo.toml too (the gate reads only the main
+                # emitter — see emit_program_rs).
+                self.uses_sqlite = self.uses_sqlite or sub_em.uses_sqlite
             return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -2047,7 +2054,8 @@ class _RsEmitter:
                 if binding is not None and binding.kind in (
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                       or obj.name == "db"):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -2499,7 +2507,7 @@ class _RsEmitter:
                     self._fail(
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
-            if obj.name in MODULES:
+            if obj.name in MODULES or obj.name == "db":
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(rs=obj.name, kind="module",
@@ -3847,6 +3855,9 @@ class _RsEmitter:
                         f"(&{self.emit_expr(node.args[0], 0)})",
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
+        if real == "db":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_db_call(node, args)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.rs,
                                            node.func.name, args)
@@ -3897,6 +3908,342 @@ class _RsEmitter:
                 self._need_rt("env_get")
                 return f"newr_rt::env_get(&{args[0]})", _PREC["primary"]
         self._fail(f"module `{real}` has no function `{name}`")
+
+    def _emit_db_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`db.*` calls (SPEC.md section 12.5): the helpers live in
+        the `newr_db` module emitted into this file (see
+        `_emit_db_mod`) — inline, not in newr_rt.rs, because the
+        runtime file is std-only and a program that never uses `db`
+        must not need rusqlite or cargo. Handles are i64, fd-style.
+        Bind args are passed as `&dyn ToSql` (rusqlite binds a
+        bool as 0/1 itself, and `Option<T>` as NULL). The checker
+        (db_check) has already validated the call, so the arity
+        here is trusted. `db.query` maps each converted row to the
+        row struct through `db_query_as`."""
+        name = node.func.name
+        self._need_sqlite()
+        self._need_rt("to_str")
+        self._file_uses_db = True
+        if name == "open":
+            return f"newr_db::db_open(&{args[0]})", _PREC["primary"]
+        if name == "exec":
+            binds = ", ".join(
+                f"(&{a} as &dyn rusqlite::types::ToSql)"
+                for a in args[2:])
+            return (f"newr_db::db_exec({args[0]}, &{args[1]}, "
+                    f"&[{binds}])", _PREC["primary"])
+        if name == "query":
+            rs_struct, decl = self._db_row_struct(node)
+            names = [_rs_str(f.name) for f in decl.fields]
+            types = [_rs_str(self._db_field_type(f.type))
+                     for f in decl.fields]
+            fields = ", ".join(
+                f"{self._mangle(f.name)}: "
+                f"{self._db_accessor(f.type)}(&row[{i}])"
+                for i, f in enumerate(decl.fields))
+            names_lit = "&[" + ", ".join(names) + "]"
+            types_lit = "&[" + ", ".join(types) + "]"
+            binds = ", ".join(
+                f"(&{a} as &dyn rusqlite::types::ToSql)"
+                for a in args[2:])
+            return (f"newr_db::db_query_as::<{rs_struct}>({args[0]}, "
+                    f"&{args[1]}, &[{binds}], {names_lit}, {types_lit}, "
+                    f"|row| {rs_struct} {{ {fields} }})",
+                    _PREC["primary"])
+        if name == "begin":
+            return f"newr_db::db_begin({args[0]})", _PREC["primary"]
+        if name == "commit":
+            return f"newr_db::db_commit({args[0]})", _PREC["primary"]
+        if name == "rollback":
+            return f"newr_db::db_rollback({args[0]})", _PREC["primary"]
+        if name == "last_id":
+            return f"newr_db::db_last_id({args[0]})", _PREC["primary"]
+        if name == "close":
+            return f"newr_db::db_close({args[0]})", _PREC["primary"]
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (Rust constructor, decl) of the row struct for a
+        `db.query` call. The row type comes from `node.expr_type`,
+        set by db_check to `list[Row]`. A struct from an imported
+        file module resolves to its qualified name."""
+        t = self._type_of(node)
+        if t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._struct_rs_name(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    return self._struct_rs_name(row_name), s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
+
+    @staticmethod
+    def _db_accessor(t: Type) -> str:
+        """The `newr_db` accessor for a row field type: the plain
+        one for a non-nullable field, the `_opt` one (returning
+        `Option<...>`) for a nullable field."""
+        base = {"int": "as_int", "float": "as_float",
+                "str": "as_str", "bool": "as_bool"}[t.name]
+        return (f"newr_db::{base}_opt" if t.nullable
+                else f"newr_db::{base}")
+
+    def _emit_db_mod(self) -> list[str]:
+        """The `newr_db` helper module, emitted into a file that
+        uses `db.*` (at top level, before `fn main`). The int
+        handle registry (one `LazyLock<Mutex<DbState>>`, the
+        program is single-threaded but the registry is global)
+        plus open/exec/query/begin/commit/rollback/last_id/close
+        over rusqlite (the store's library, 0.41 — the same sync
+        API the store uses). Conversion mirrors the Python
+        `_db_value` (newr_rt.py): NULL lands only in a nullable
+        field, `?` binds are positional (the Nth argument binds
+        the Nth `?` — `params_from_iter` over `&dyn ToSql`),
+        bool binds as 0/1, a value that cannot convert panics
+        instead of silently producing a wrong value. `db_query`
+        looks rows up by column NAME (a missing column panics,
+        extra columns are ignored). Transactions are raw SQL
+        (`BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` through
+        `execute_batch`, exactly like the Python runtime), so no
+        `&mut` borrow of the connection is ever needed."""
+        return [
+            "#[allow(dead_code)]",
+            "mod newr_db {",
+            "  use std::collections::HashMap;",
+            "  use std::sync::Mutex;",
+            "",
+            "  struct DbState {",
+            "    conns: HashMap<i64, rusqlite::Connection>,",
+            "    next_id: i64,",
+            "  }",
+            "",
+            "  static DB: std::sync::LazyLock<Mutex<DbState>> =",
+            "    std::sync::LazyLock::new(|| Mutex::new(DbState { conns: HashMap::new(), next_id: 1 }));",
+            "",
+            "  fn with_conn<T>(handle: i64, f: impl FnOnce(&rusqlite::Connection) -> T) -> T {",
+            "    let db = DB.lock().unwrap();",
+            "    let conn = db.conns.get(&handle).unwrap_or_else(|| panic!(\"db: unknown or closed handle {}\", handle));",
+            "    f(conn)",
+            "  }",
+            "",
+            "  fn db_value(value: rusqlite::types::Value, type_str: &str) -> rusqlite::types::Value {",
+            "    let nullable = type_str.ends_with('?');",
+            "    let base = if nullable { &type_str[..type_str.len() - 1] } else { type_str };",
+            "    if value == rusqlite::types::Value::Null {",
+            "      if nullable {",
+            "        return rusqlite::types::Value::Null;",
+            "      }",
+            "      panic!(\"db: NULL in non-nullable {} field\", base);",
+            "    }",
+            "    match base {",
+            "      \"int\" => match value {",
+            "        rusqlite::types::Value::Integer(i) => rusqlite::types::Value::Integer(i),",
+            "        rusqlite::types::Value::Real(r) => {",
+            "          if r != r.floor() || r < -9223372036854775808.0 || r > 9223372036854775807.0 {",
+            "            panic!(\"db: cannot convert {} to int\", r);",
+            "          }",
+            "          rusqlite::types::Value::Integer(r as i64)",
+            "        }",
+            "        rusqlite::types::Value::Text(s) => match s.trim().parse::<i64>() {",
+            "          Ok(i) => rusqlite::types::Value::Integer(i),",
+            "          Err(_) => panic!(\"db: cannot convert '{}' to int\", s),",
+            "        },",
+            "        _ => panic!(\"db: cannot convert value to int\"),",
+            "      },",
+            "      \"float\" => match value {",
+            "        rusqlite::types::Value::Integer(i) => rusqlite::types::Value::Real(i as f64),",
+            "        rusqlite::types::Value::Real(r) => rusqlite::types::Value::Real(r),",
+            "        rusqlite::types::Value::Text(s) => match s.trim().parse::<f64>() {",
+            "          Ok(f) => rusqlite::types::Value::Real(f),",
+            "          Err(_) => panic!(\"db: cannot convert '{}' to float\", s),",
+            "        },",
+            "        _ => panic!(\"db: cannot convert value to float\"),",
+            "      },",
+            "      \"str\" => match value {",
+            "        rusqlite::types::Value::Text(s) => rusqlite::types::Value::Text(s),",
+            "        rusqlite::types::Value::Integer(i) => rusqlite::types::Value::Text(i.to_string()),",
+            "        rusqlite::types::Value::Real(r) => rusqlite::types::Value::Text(crate::newr_rt::to_str(&r)),",
+            "        rusqlite::types::Value::Blob(b) => rusqlite::types::Value::Text(String::from_utf8_lossy(&b).into_owned()),",
+            "        _ => panic!(\"db: cannot convert value to str\"),",
+            "      },",
+            "      \"bool\" => match value {",
+            "        rusqlite::types::Value::Integer(i) => {",
+            "          if i == 0 {",
+            "            rusqlite::types::Value::Integer(0)",
+            "          } else if i == 1 {",
+            "            rusqlite::types::Value::Integer(1)",
+            "          } else {",
+            "            panic!(\"db: cannot convert {} to bool\", i);",
+            "          }",
+            "        }",
+            "        rusqlite::types::Value::Real(r) => {",
+            "          let w = r as i64;",
+            "          if w == 0 {",
+            "            rusqlite::types::Value::Integer(0)",
+            "          } else if w == 1 {",
+            "            rusqlite::types::Value::Integer(1)",
+            "          } else {",
+            "            panic!(\"db: cannot convert {} to bool\", r);",
+            "          }",
+            "        }",
+            "        rusqlite::types::Value::Text(s) => {",
+            "          if s == \"0\" {",
+            "            rusqlite::types::Value::Integer(0)",
+            "          } else if s == \"1\" {",
+            "            rusqlite::types::Value::Integer(1)",
+            "          } else {",
+            "            panic!(\"db: cannot convert '{}' to bool\", s);",
+            "          }",
+            "        }",
+            "        _ => panic!(\"db: cannot convert value to bool\"),",
+            "      },",
+            "      _ => panic!(\"db: unknown field type {}\", type_str),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_int(v: &rusqlite::types::Value) -> i64 {",
+            "    match v {",
+            "      rusqlite::types::Value::Integer(i) => *i,",
+            "      _ => panic!(\"db: internal: expected int value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_float(v: &rusqlite::types::Value) -> f64 {",
+            "    match v {",
+            "      rusqlite::types::Value::Real(r) => *r,",
+            "      _ => panic!(\"db: internal: expected float value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_str(v: &rusqlite::types::Value) -> String {",
+            "    match v {",
+            "      rusqlite::types::Value::Text(s) => s.clone(),",
+            "      _ => panic!(\"db: internal: expected str value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_bool(v: &rusqlite::types::Value) -> bool {",
+            "    match v {",
+            "      rusqlite::types::Value::Integer(i) => *i != 0,",
+            "      _ => panic!(\"db: internal: expected bool value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_int_opt(v: &rusqlite::types::Value) -> Option<i64> {",
+            "    match v {",
+            "      rusqlite::types::Value::Null => None,",
+            "      rusqlite::types::Value::Integer(i) => Some(*i),",
+            "      _ => panic!(\"db: internal: expected int value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_float_opt(v: &rusqlite::types::Value) -> Option<f64> {",
+            "    match v {",
+            "      rusqlite::types::Value::Null => None,",
+            "      rusqlite::types::Value::Real(r) => Some(*r),",
+            "      _ => panic!(\"db: internal: expected float value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_str_opt(v: &rusqlite::types::Value) -> Option<String> {",
+            "    match v {",
+            "      rusqlite::types::Value::Null => None,",
+            "      rusqlite::types::Value::Text(s) => Some(s.clone()),",
+            "      _ => panic!(\"db: internal: expected str value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_bool_opt(v: &rusqlite::types::Value) -> Option<bool> {",
+            "    match v {",
+            "      rusqlite::types::Value::Null => None,",
+            "      rusqlite::types::Value::Integer(i) => Some(*i != 0),",
+            "      _ => panic!(\"db: internal: expected bool value\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn db_open(path: &str) -> i64 {",
+            "    let conn = rusqlite::Connection::open(path).unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "    conn.execute_batch(\"PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;\").unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "    let mut db = DB.lock().unwrap();",
+            "    let handle = db.next_id;",
+            "    db.next_id += 1;",
+            "    db.conns.insert(handle, conn);",
+            "    handle",
+            "  }",
+            "",
+            "  pub fn db_exec(handle: i64, sql: &str, args: &[&dyn rusqlite::types::ToSql]) -> i64 {",
+            "    with_conn(handle, |conn| {",
+            "      let n = conn.execute(sql, rusqlite::params_from_iter(args.iter().copied())).unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "      n as i64",
+            "    })",
+            "  }",
+            "",
+            "  pub fn db_query(handle: i64, sql: &str, args: &[&dyn rusqlite::types::ToSql], names: &[&str], types: &[&str]) -> Vec<Vec<rusqlite::types::Value>> {",
+            "    with_conn(handle, |conn| {",
+            "      let mut stmt = conn.prepare(sql).unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "      let cols: Vec<String> = stmt.column_names().map(|s| s.to_string()).collect();",
+            "      let mut rows = stmt.query(rusqlite::params_from_iter(args.iter().copied())).unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "      let mut out: Vec<Vec<rusqlite::types::Value>> = Vec::new();",
+            "      while let Some(row) = rows.next().unwrap_or_else(|e| panic!(\"db: {}\", e)) {",
+            "        let mut by_name: HashMap<String, rusqlite::types::Value> = HashMap::new();",
+            "        for (i, name) in cols.iter().enumerate() {",
+            "          by_name.insert(name.clone(), row.get::<_, rusqlite::types::Value>(i).unwrap_or_else(|e| panic!(\"db: {}\", e)));",
+            "        }",
+            "        let mut out_row: Vec<rusqlite::types::Value> = Vec::new();",
+            "        for (name, type_str) in names.iter().zip(types.iter()) {",
+            "          let raw = by_name.get(*name).unwrap_or_else(|| panic!(\"db: column '{}' missing from query result\", name));",
+            "          out_row.push(db_value(raw.clone(), type_str));",
+            "        }",
+            "        out.push(out_row);",
+            "      }",
+            "      out",
+            "    })",
+            "  }",
+            "",
+            "  pub fn db_query_as<T>(handle: i64, sql: &str, args: &[&dyn rusqlite::types::ToSql], names: &[&str], types: &[&str], map: impl Fn(Vec<rusqlite::types::Value>) -> T) -> Vec<T> {",
+            "    db_query(handle, sql, args, names, types).into_iter().map(map).collect()",
+            "  }",
+            "",
+            "  pub fn db_begin(handle: i64) {",
+            "    with_conn(handle, |conn| {",
+            "      conn.execute_batch(\"BEGIN IMMEDIATE\").unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "    });",
+            "  }",
+            "",
+            "  pub fn db_commit(handle: i64) {",
+            "    with_conn(handle, |conn| {",
+            "      conn.execute_batch(\"COMMIT\").unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "    });",
+            "  }",
+            "",
+            "  pub fn db_rollback(handle: i64) {",
+            "    with_conn(handle, |conn| {",
+            "      conn.execute_batch(\"ROLLBACK\").unwrap_or_else(|e| panic!(\"db: {}\", e));",
+            "    });",
+            "  }",
+            "",
+            "  pub fn db_last_id(handle: i64) -> i64 {",
+            "    with_conn(handle, |conn| conn.last_insert_rowid())",
+            "  }",
+            "",
+            "  pub fn db_close(handle: i64) {",
+            "    let mut db = DB.lock().unwrap();",
+            "    if db.conns.remove(&handle).is_none() {",
+            "      panic!(\"db: unknown or closed handle {}\", handle);",
+            "    }",
+            "  }",
+            "}",
+        ]
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:
@@ -4153,7 +4500,7 @@ class _RsEmitter:
         return lines, name
 
     # ------------------------------------------------------------ bot (M5)
-    # serenity 0.12.5 + poise 0.7.1 (SPEC §18), rusqlite 0.32.1.
+    # serenity 0.12.5 + poise 0.7.1 (SPEC §18), rusqlite 0.41.1.
     # The bot file is one Rust file per .newr file: `pub struct Bot`
     # (one rusqlite connection per store) + `pub struct Data`
     # (shared state for poise) + one `#[poise::command]` async fn
@@ -6776,6 +7123,16 @@ class _RsEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_fn(decl))
+        # Top-level statements are emitted first (into a temp
+        # list): a `db.*` call inside them — or inside a function
+        # above — sets `_file_uses_db`, and the `newr_db` helper
+        # module is emitted only then, before `fn main()` (or
+        # `__newr_init()` for a file module).
+        stmt_lines = self._emit_block(program.stmts, 1, top_level=True)
+        if self._file_uses_db:
+            if body:
+                body.append("")
+            body.extend(self._emit_db_mod())
         # Top-level statements: main() for the entry file,
         # __newr_init() for a file module. The module inits run
         # first (in import order), then this file's statements.
@@ -6789,7 +7146,7 @@ class _RsEmitter:
             if imp.path is not None:
                 stem = self.imported_modules[imp.bound_name]
                 body.append(f"  {stem}::__newr_init();")
-        body.extend(self._emit_block(program.stmts, 1, top_level=True))
+        body.extend(stmt_lines)
         body.append("}")
         lines = self._header(main_path)
         if self.rt_helpers:
@@ -6831,7 +7188,7 @@ def _rs_cargo_toml(stem: str, file_stem: str, *,
                    uses_sqlite: bool) -> str:
     """The Cargo build file for a bot program: serenity 0.12.5 and
     poise 0.7.1 (both pinned, verified live - see
-    tests/test_emitter_rs.py), tokio 1, rusqlite 0.32 with the
+    tests/test_emitter_rs.py), tokio 1, rusqlite 0.41 with the
     bundled feature only when a store is used. Two binaries - the
     bot and the standalone registration script - with
     `default-run` so a bare `cargo run` still runs the bot."""
@@ -6861,8 +7218,32 @@ def _rs_cargo_toml(stem: str, file_stem: str, *,
         '"rt-multi-thread"] }',
     ]
     if uses_sqlite:
-        lines.append('rusqlite = { version = "0.32", features = '
+        lines.append('rusqlite = { version = "0.41", features = '
                      '["bundled"] }')
+    return "\n".join(lines) + "\n"
+
+
+def _rs_db_cargo_toml(stem: str, file_stem: str) -> str:
+    """The Cargo build file for a plain (non-bot) program that uses
+    `db.*`: rusqlite 0.41 with the bundled feature only (a plain
+    program otherwise builds with bare rustc and no Cargo.toml).
+    One binary, no deploy script, no serenity/poise."""
+    artifact = "".join(ch.lower() if ch.isalnum() else "-"
+                       for ch in stem).strip("-") or "main"
+    lines = [
+        "# Generated by newr - do not edit by hand.",
+        "[package]",
+        f'name = "{artifact}"',
+        'version = "1.0.0"',
+        'edition = "2021"',
+        "",
+        "[[bin]]",
+        f'name = "{stem}"',
+        f'path = "{file_stem}.rs"',
+        "",
+        "[dependencies]",
+        'rusqlite = { version = "0.41", features = ["bundled"] }',
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -6910,6 +7291,12 @@ def emit_program_rs(program: A.Program, *, main_path: str,
         files[file_stem + "_deploy.rs"] = deploy
         files["Cargo.toml"] = _rs_cargo_toml(stem, file_stem,
                                              uses_sqlite=em.uses_sqlite)
+    elif em.uses_sqlite:
+        # A plain program that uses `db.*` needs a Cargo build
+        # file too (B8): rusqlite only, no serenity/poise and no
+        # deploy script — plain programs otherwise build with
+        # bare rustc and no Cargo.toml at all.
+        files["Cargo.toml"] = _rs_db_cargo_toml(stem, file_stem)
     return EmitResult(files=files,
                       main_file=file_stem + ".rs",
                       uses_rt=uses_rt)

@@ -3,7 +3,9 @@
 The core builtins and core modules (``math``, ``time``, ``random``,
 ``file``, ``env``) are part of the language, so this module is imported by
 the core checker. It contains NO Discord data — the discord module's
-signatures live in ``discord_check.py`` / ``discord_limits.py``.
+signatures live in ``discord_check.py`` / ``discord_limits.py`` — and
+NO db data — the db module's signatures live in ``db_check.py`` /
+``db_limits.py``.
 
 Signatures are data: ``(parameter types, return type)``. A parameter
 type of ``"T"`` means "the element type of the first argument" (for
@@ -94,7 +96,7 @@ BUILTINS: dict[str, dict] = {
 # bare ``log <expr>`` is a statement (a Log node) and never reaches the
 # resolver as a name.
 RESERVED_BUILTIN_NAMES = set(BUILTINS) | {
-    "math", "time", "random", "file", "env", "t", "discord", "log",
+    "math", "time", "random", "file", "env", "t", "discord", "db", "log",
 }
 
 # ---------------------------------------------------------------- core modules

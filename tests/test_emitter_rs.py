@@ -621,5 +621,104 @@ class TestInput(unittest.TestCase):
         self.assertIn("newr_rt::input(", text)
 
 
+@unittest.skipUnless(CARGO, "cargo is not installed")
+@unittest.skipUnless(HAS_RS_EMITTER, "compiler/emitter_rs.py is missing")
+class TestDb(unittest.TestCase):
+    """db module on Rust (SPEC.md section 12.5, M8a): `db.*` calls
+    emit to the `newr_db` module in the emitted file (inline, not
+    newr_rt.rs — the runtime file stays std-only), over rusqlite
+    0.41, and a program using them gets a Cargo.toml with rusqlite
+    only (B8) and builds with cargo."""
+
+    def _emit(self, src, stem="probe"):
+        from compiler.db_check import check_db
+        resolved = resolve_source(src, "<db-test>.newr")
+        diags = list(resolved.diagnostics)
+        diags += check_program(
+            resolved.program,
+            providers=discord_providers(resolved.program)).diagnostics
+        diags += check_discord(resolved.program)
+        diags += check_db(resolved.program)
+        bad = [d for d in diags if d.is_error()]
+        self.assertEqual(bad, [], [f"{d.code}: {d.message}" for d in bad])
+        return emit_rs(resolved.program, main_path="<db-test>.newr",
+                       sources={"<db-test>.newr": src},
+                       output_stem=stem)
+
+    def _run(self, src, stem="probe"):
+        result = self._emit(src, stem)
+        proc, d = cargo_build_result(result)
+        try:
+            self.assertEqual(
+                proc.returncode, 0,
+                f"cargo build failed:\n{proc.stdout}\n{proc.stderr}")
+            target = (Path(_cargo_env()["CARGO_TARGET_DIR"])
+                      / "debug" / stem)
+            run = subprocess.run(
+                [str(target)], capture_output=True, text=True, cwd=d,
+                env=_cargo_env(), timeout=120)
+            return run.stdout, run.stderr, run.returncode
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_db_probe_runs(self):
+        src = ('struct Todo:\n'
+               '  id: int\n'
+               '  title: str\n'
+               '  done: bool\n'
+               '\n'
+               'let h = db.open(":memory:")\n'
+               'db.exec(h, "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")\n'
+               'let n = db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "beli susu", false)\n'
+               'print(n)\n'
+               'let id = db.last_id(h)\n'
+               'print(id)\n'
+               'let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "UPDATE todos SET done = ? WHERE id = ?", true, 1)\n'
+               'db.commit(h)\n'
+               'let todos2: list[Todo] = db.query(h, "SELECT id, title, done FROM todos WHERE done = ?", true)\n'
+               'print(todos2)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "rollback me", false)\n'
+               'db.rollback(h)\n'
+               'let todos3: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos3)\n'
+               'db.close(h)\n')
+        out, err, code = self._run(src)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            out,
+            "1\n1\n[Todo(id: 1, title: beli susu, done: false)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n")
+
+    def test_db_uses_newr_db_helpers(self):
+        text = self._emit(
+            'let h = db.open(":memory:")\n'
+            'db.exec(h, "CREATE TABLE t (v INTEGER)")\n'
+            'db.close(h)\n').files["probe.rs"]
+        self.assertIn("mod newr_db", text)
+        self.assertIn("newr_db::db_open(", text)
+        self.assertIn("newr_db::db_exec(", text)
+        self.assertIn("newr_db::db_close(", text)
+
+    def test_db_program_cargo_toml_has_rusqlite_only(self):
+        result = self._emit(
+            'let h = db.open(":memory:")\n'
+            'db.close(h)\n')
+        toml = result.files["Cargo.toml"]
+        self.assertIn('rusqlite = { version = "0.41"', toml)
+        self.assertIn('features = ["bundled"]', toml)
+        self.assertNotIn("serenity", toml)
+        self.assertNotIn("poise", toml)
+        self.assertNotIn("_deploy", toml)
+
+    def test_plain_program_has_no_cargo_toml(self):
+        result = emit_rs_src('print "hi"\n', stem="hello")
+        self.assertNotIn("Cargo.toml", result.files)
+
+
 if __name__ == "__main__":
     unittest.main()

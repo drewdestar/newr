@@ -160,5 +160,92 @@ class TestInput(unittest.TestCase):
         self.assertIn('NewrRt.input("Name? ")', text)
 
 
+class TestDb(unittest.TestCase):
+    """db module on Java (SPEC.md section 12.5, M8a): `db.*` calls
+    emit to the NewrRt.java helpers over JDBC, and a program using
+    them runs with the sqlite-jdbc driver on the classpath."""
+
+    _JARS = (Path.home() / "jars" / "sqlite-jdbc-3.54.1.0.jar",
+             Path.home() / "jars" / "slf4j-api-2.0.19.jar")
+
+    def _run(self, src, stem="Probe"):
+        from compiler.db_check import check_db
+        resolved = resolve_source(src, "<db-test>.newr")
+        diags = list(resolved.diagnostics)
+        diags += check_program(
+            resolved.program,
+            providers=discord_providers(resolved.program)).diagnostics
+        diags += check_discord(resolved.program)
+        diags += check_db(resolved.program)
+        bad = [d for d in diags if d.is_error()]
+        self.assertEqual(bad, [], [f"{d.code}: {d.message}" for d in bad])
+        result = emit_java(resolved.program, main_path="<db-test>.newr",
+                           sources={"<db-test>.newr": src},
+                           output_stem=stem)
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in result.files.items():
+                (Path(d) / name).write_text(text, encoding="utf-8")
+            if result.uses_rt:
+                (Path(d) / "NewrRt.java").write_text(
+                    RT_JAVA_SRC.read_text(encoding="utf-8"),
+                    encoding="utf-8")
+            java_files = [str(p) for p in Path(d).glob("*.java")]
+            proc = subprocess.run(
+                [JAVAC, *java_files], capture_output=True, text=True,
+                cwd=d)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            cp = os.pathsep.join([d, *[str(j) for j in self._JARS]])
+            proc = subprocess.run(
+                [JAVA, "-cp", cp, stem],
+                capture_output=True, text=True, cwd=d)
+            return proc.stdout, proc.stderr, proc.returncode
+
+    @unittest.skipUnless(JAVA and JAVAC, "a JDK is not installed")
+    @unittest.skipUnless(
+        all(j.exists() for j in _JARS),
+        "sqlite-jdbc/slf4j jars are not in ~/jars")
+    def test_db_probe_runs(self):
+        src = ('struct Todo:\n'
+               '  id: int\n'
+               '  title: str\n'
+               '  done: bool\n'
+               '\n'
+               'let h = db.open(":memory:")\n'
+               'db.exec(h, "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")\n'
+               'let n = db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "beli susu", false)\n'
+               'print(n)\n'
+               'let id = db.last_id(h)\n'
+               'print(id)\n'
+               'let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "UPDATE todos SET done = ? WHERE id = ?", true, 1)\n'
+               'db.commit(h)\n'
+               'let todos2: list[Todo] = db.query(h, "SELECT id, title, done FROM todos WHERE done = ?", true)\n'
+               'print(todos2)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "rollback me", false)\n'
+               'db.rollback(h)\n'
+               'let todos3: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos3)\n'
+               'db.close(h)\n')
+        out, err, code = self._run(src)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            out,
+            "1\n1\n[Todo(id: 1, title: beli susu, done: false)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n")
+
+    def test_db_uses_jdbc_helpers(self):
+        text = emit_java_main_text(
+            'let h = db.open(":memory:")\n'
+            'db.exec(h, "CREATE TABLE t (v INTEGER)")\n'
+            'db.close(h)\n')
+        self.assertIn("NewrRt.dbOpen(", text)
+        self.assertIn("NewrRt.dbExec(", text)
+        self.assertIn("NewrRt.dbClose(", text)
+
+
 if __name__ == "__main__":
     unittest.main()

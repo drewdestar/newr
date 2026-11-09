@@ -306,6 +306,9 @@ class _DartEmitter:
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
         self.uses_sqlite: bool = False
+        # This file uses `db.*` (set by `_emit_db_call`) — the
+        # `NewrDb` helper class is emitted into the file only then.
+        self._file_uses_db: bool = False
         self.uses_math: bool = False
         # File-module imports referenced by this file:
         # bound name -> file stem (for `import '<stem>.dart'
@@ -1156,7 +1159,8 @@ class _DartEmitter:
                 if binding is not None and binding.kind in (
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                       or obj.name == "db"):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -1601,7 +1605,7 @@ class _DartEmitter:
                     self._fail(
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
-            if obj.name in MODULES:
+            if obj.name in MODULES or obj.name == "db":
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(dart=obj.name, kind="module",
@@ -3145,6 +3149,9 @@ class _DartEmitter:
                         f"({self.emit_expr(node.args[0], 0)})",
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
+        if real == "db":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_db_call(node, args)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.dart,
                                            node.func.name, args)
@@ -3216,6 +3223,284 @@ class _DartEmitter:
                             _PREC["primary"])
                 return f"NewrRt.envGet({args[0]})", _PREC["primary"]
         self._fail(f"module `{real}` has no function `{name}`")
+
+    def _emit_db_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`db.*` calls (SPEC.md section 12.5): the helpers live in
+        the `NewrDb` class emitted into this file (see
+        `_emit_db_class`) — inline, not in newr_rt.dart, because
+        the runtime file is dependency-free and a program that
+        never uses `db` must not need package:sqlite3 or a
+        pubspec. Handles are ints, fd-style. The checker
+        (db_check) has already validated the call, so the arity
+        here is trusted. `db.query` maps each converted row to
+        the row struct through `queryAs<T>`."""
+        name = node.func.name
+        self._need_sqlite()
+        self._need_rt("toStr")
+        self._file_uses_db = True
+        if name == "open":
+            return f"NewrDb.open({args[0]})", _PREC["primary"]
+        if name == "exec":
+            rest = ", ".join(args[2:])
+            return (f"NewrDb.exec({args[0]}, {args[1]}, [{rest}])",
+                    _PREC["primary"])
+        if name == "query":
+            dart_struct, decl = self._db_row_struct(node)
+            names = [_dart_str(f.name) for f in decl.fields]
+            types = [_dart_str(self._db_field_type(f.type))
+                     for f in decl.fields]
+            fields = ", ".join(
+                f"{self._mangle(f.name)}: "
+                f"row[{i}] as {self._dart_type(f.type)}"
+                for i, f in enumerate(decl.fields))
+            names_lit = "[" + ", ".join(names) + "]"
+            types_lit = "[" + ", ".join(types) + "]"
+            rest = ", ".join(args[2:])
+            return (f"NewrDb.queryAs<{dart_struct}>({args[0]}, "
+                    f"{args[1]}, [{rest}], {names_lit}, {types_lit}, "
+                    f"(row) => {dart_struct}({fields}))",
+                    _PREC["primary"])
+        if name == "begin":
+            return f"NewrDb.begin({args[0]})", _PREC["primary"]
+        if name == "commit":
+            return f"NewrDb.commit({args[0]})", _PREC["primary"]
+        if name == "rollback":
+            return f"NewrDb.rollback({args[0]})", _PREC["primary"]
+        if name == "last_id":
+            return f"NewrDb.lastId({args[0]})", _PREC["primary"]
+        if name == "close":
+            return f"NewrDb.close({args[0]})", _PREC["primary"]
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (Dart constructor, decl) of the row struct for a
+        `db.query` call. The row type comes from `node.expr_type`,
+        set by db_check to `list[Row]`. A struct from an imported
+        file module resolves to its qualified class name."""
+        t = self._type_of(node)
+        if t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._struct_dart_name(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    return self._struct_dart_name(row_name), s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
+
+    def _emit_db_class(self) -> list[str]:
+        """The `NewrDb` helper class, emitted into a file that uses
+        `db.*` (at top level, before `void main`). The int handle
+        registry plus open/exec/query/begin/commit/rollback/
+        last_id/close over package:sqlite3 (the store's library,
+        3.9.0 — the same sync API the store uses). Conversion
+        mirrors the Python `_db_value` (newr_rt.py): NULL lands
+        only in a nullable field, `?` binds are positional (the
+        Nth argument binds the Nth `?` — the sqlite3 package
+        binds a bool as 0/1 itself), a value that cannot convert
+        throws instead of silently producing a wrong value.
+        `query` looks rows up by column NAME (a missing column
+        throws, extra columns are ignored)."""
+        return [
+            "class NewrDb {",
+            "  static final Map<int, Database> _conns = {};",
+            "  static int _nextId = 1;",
+            "",
+            "  static Database _conn(int handle) {",
+            "    final conn = _conns[handle];",
+            "    if (conn == null) {",
+            "      throw NewrError('db: unknown or closed handle $handle');",
+            "    }",
+            "    return conn;",
+            "  }",
+            "",
+            "  static Object? _dbValue(Object? value, String typeStr) {",
+            "    final nullable = typeStr.endsWith('?');",
+            "    final base = nullable",
+            "        ? typeStr.substring(0, typeStr.length - 1)",
+            "        : typeStr;",
+            "    if (value == null) {",
+            "      if (nullable) {",
+            "        return null;",
+            "      }",
+            "      throw NewrError('db: NULL in non-nullable $base field');",
+            "    }",
+            "    switch (base) {",
+            "      case 'int':",
+            "        if (value is bool) {",
+            "          throw NewrError('db: cannot convert bool to int');",
+            "        }",
+            "        if (value is int) {",
+            "          return value;",
+            "        }",
+            "        if (value is double) {",
+            "          if (value != value.floorToDouble()",
+            "              || value < -9223372036854775808.0",
+            "              || value > 9223372036854775807.0) {",
+            "            throw NewrError('db: cannot convert $value to int');",
+            "          }",
+            "          return value.toInt();",
+            "        }",
+            "        if (value is String) {",
+            "          final parsed = int.tryParse(value.trim());",
+            "          if (parsed != null) {",
+            "            return parsed;",
+            "          }",
+            "          throw NewrError(\"db: cannot convert '$value' to int\");",
+            "        }",
+            "        throw NewrError('db: cannot convert '",
+            "            '${value.runtimeType} to int');",
+            "      case 'float':",
+            "        if (value is bool) {",
+            "          throw NewrError('db: cannot convert bool to float');",
+            "        }",
+            "        if (value is int) {",
+            "          return value.toDouble();",
+            "        }",
+            "        if (value is double) {",
+            "          return value;",
+            "        }",
+            "        if (value is String) {",
+            "          final parsed = double.tryParse(value.trim());",
+            "          if (parsed != null) {",
+            "            return parsed;",
+            "          }",
+            "          throw NewrError(",
+            "              \"db: cannot convert '$value' to float\");",
+            "        }",
+            "        throw NewrError('db: cannot convert '",
+            "            '${value.runtimeType} to float');",
+            "      case 'str':",
+            "        if (value is bool) {",
+            "          return value ? 'true' : 'false';",
+            "        }",
+            "        if (value is String) {",
+            "          return value;",
+            "        }",
+            "        if (value is int) {",
+            "          return value.toString();",
+            "        }",
+            "        if (value is double) {",
+            "          return NewrRt.toStr(value);",
+            "        }",
+            "        throw NewrError('db: cannot convert '",
+            "            '${value.runtimeType} to str');",
+            "      case 'bool':",
+            "        if (value is bool) {",
+            "          return value;",
+            "        }",
+            "        if (value is int) {",
+            "          if (value == 0) {",
+            "            return false;",
+            "          }",
+            "          if (value == 1) {",
+            "            return true;",
+            "          }",
+            "          throw NewrError('db: cannot convert $value to bool');",
+            "        }",
+            "        if (value is double) {",
+            "          final w = value.toInt();",
+            "          if (w == 0) {",
+            "            return false;",
+            "          }",
+            "          if (w == 1) {",
+            "            return true;",
+            "          }",
+            "          throw NewrError('db: cannot convert $value to bool');",
+            "        }",
+            "        if (value is String) {",
+            "          if (value == '0') {",
+            "            return false;",
+            "          }",
+            "          if (value == '1') {",
+            "            return true;",
+            "          }",
+            "          throw NewrError(",
+            "              \"db: cannot convert '$value' to bool\");",
+            "        }",
+            "        throw NewrError('db: cannot convert '",
+            "            '${value.runtimeType} to bool');",
+            "      default:",
+            "        throw NewrError('db: unknown field type $typeStr');",
+            "    }",
+            "  }",
+            "",
+            "  static int open(String path) {",
+            "    final db = sqlite3.open(path);",
+            "    db.execute('PRAGMA foreign_keys = ON');",
+            "    db.execute('PRAGMA busy_timeout = 5000');",
+            "    final handle = _nextId;",
+            "    _nextId += 1;",
+            "    _conns[handle] = db;",
+            "    return handle;",
+            "  }",
+            "",
+            "  static int exec(int handle, String sql, List<Object?> args) {",
+            "    final db = _conn(handle);",
+            "    db.execute(sql, args);",
+            "    return db.getUpdatedRows();",
+            "  }",
+            "",
+            "  static List<List<Object?>> query(int handle, String sql,",
+            "      List<Object?> args, List<String> names, List<String> types) {",
+            "    final db = _conn(handle);",
+            "    final result = db.select(sql, args);",
+            "    final rows = <List<Object?>>[];",
+            "    for (final row in result) {",
+            "      final outRow = <Object?>[];",
+            "      for (var i = 0; i < names.length; i++) {",
+            "        if (!result.columnNames.contains(names[i])) {",
+            "          throw NewrError(",
+            "              \"db: column '${names[i]}' missing from query result\");",
+            "        }",
+            "        outRow.add(_dbValue(row[names[i]], types[i]));",
+            "      }",
+            "      rows.add(outRow);",
+            "    }",
+            "    return rows;",
+            "  }",
+            "",
+            "  static List<T> queryAs<T>(int handle, String sql,",
+            "      List<Object?> args, List<String> names, List<String> types,",
+            "      T Function(List<Object?>) map) {",
+            "    return query(handle, sql, args, names, types).map(map).toList();",
+            "  }",
+            "",
+            "  static void begin(int handle) {",
+            "    _conn(handle).execute('BEGIN IMMEDIATE');",
+            "  }",
+            "",
+            "  static void commit(int handle) {",
+            "    _conn(handle).execute('COMMIT');",
+            "  }",
+            "",
+            "  static void rollback(int handle) {",
+            "    _conn(handle).execute('ROLLBACK');",
+            "  }",
+            "",
+            "  static int lastId(int handle) {",
+            "    return _conn(handle).lastInsertRowId;",
+            "  }",
+            "",
+            "  static void close(int handle) {",
+            "    final db = _conns.remove(handle);",
+            "    if (db == null) {",
+            "      throw NewrError('db: unknown or closed handle $handle');",
+            "    }",
+            "    db.dispose();",
+            "  }",
+            "}",
+        ]
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:
@@ -3840,12 +4125,16 @@ class _DartEmitter:
                 body.append("")
             body.extend(self._emit_fn(decl))
         # Top-level statements: main() for the entry file, a
-        # newrInit() for a file module.
+        # newrInit() for a file module. Emitted FIRST into
+        # `stmt_lines` (they may use `db.*`, which decides whether
+        # the `NewrDb` helper class is emitted at all — the class
+        # must land before main(), and the flag is only final once
+        # the statements AND the top-level fn bodies are emitted),
+        # then appended after the declarations.
+        stmt_lines: list[str] = []
         if program.stmts:
-            if body:
-                body.append("")
             if is_main:
-                body.append("void main(List<String> args) {")
+                stmt_lines.append("void main(List<String> args) {")
                 # Initialize the imported file modules first, in
                 # import order (each module's own newrInit handles
                 # ITS imports transitively).
@@ -3858,15 +4147,23 @@ class _DartEmitter:
                     stem = self.imported_modules.get(imp.bound_name,
                                                      imp.bound_name)
                     self.dart_imports[imp.bound_name] = stem
-                    body.append(f"  {imp.bound_name}.newrInit();")
-                body.extend(self._emit_block(program.stmts, 1,
-                                             top_level=True))
-                body.append("}")
+                    stmt_lines.append(f"  {imp.bound_name}.newrInit();")
+                stmt_lines.extend(self._emit_block(program.stmts, 1,
+                                                   top_level=True))
+                stmt_lines.append("}")
             else:
-                body.append("void newrInit() {")
-                body.extend(self._emit_block(program.stmts, 1,
-                                             top_level=True))
-                body.append("}")
+                stmt_lines.append("void newrInit() {")
+                stmt_lines.extend(self._emit_block(program.stmts, 1,
+                                                   top_level=True))
+                stmt_lines.append("}")
+        if self._file_uses_db:
+            if body:
+                body.append("")
+            body.extend(self._emit_db_class())
+        if stmt_lines:
+            if body:
+                body.append("")
+            body.extend(stmt_lines)
         lines = self._header(main_path)
         imports = self._render_imports()
         if imports:
@@ -3912,6 +4209,11 @@ class _DartEmitter:
                                                       is_main=False)
             files.update(sub_files)
             uses_rt = uses_rt or sub_rt
+            # A `db.*` use in an imported file module needs the
+            # sqlite3 dependency in the manifest too (the module's
+            # own file imports package:sqlite3 through its
+            # `NewrDb` class).
+            self.uses_sqlite = self.uses_sqlite or sub_em.uses_sqlite
         return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -5802,6 +6104,10 @@ def emit_program_dart(program: A.Program, *, main_path: str,
         files[stem + "_deploy.dart"] = deploy
         files["pubspec.yaml"] = _dart_pubspec(stem,
                                               uses_sqlite=em.uses_sqlite)
+    elif em.uses_sqlite:
+        # A plain `db.*` program (no bot) still needs a pubspec:
+        # sqlite3 only, no nyxx (the program has no bot to run).
+        files["pubspec.yaml"] = _dart_db_pubspec(stem)
     return EmitResult(files=files,
                       main_file=stem + ".dart",
                       uses_rt=uses_rt)
@@ -5829,6 +6135,27 @@ def _dart_pubspec(stem: str, *, uses_sqlite: bool) -> str:
     ]
     if uses_sqlite:
         lines.append("  sqlite3: 3.9.0")
+    return "\n".join(lines) + "\n"
+
+
+def _dart_db_pubspec(stem: str) -> str:
+    """The pubspec for a plain `db.*` program (no bot): sqlite3
+    3.9.0 only, no nyxx (the program has no bot to run). Dart
+    SDK ^3.0.0."""
+    name = "".join(ch.lower() if ch.isalnum() else "_"
+                   for ch in stem).strip("_") or "db_app"
+    lines = [
+        "# Generated by newr - do not edit by hand.",
+        f"name: {name}",
+        "description: A newr program using the db module.",
+        "version: 1.0.0",
+        "",
+        "environment:",
+        "  sdk: ^3.0.0",
+        "",
+        "dependencies:",
+        "  sqlite3: 3.9.0",
+    ]
     return "\n".join(lines) + "\n"
 
 

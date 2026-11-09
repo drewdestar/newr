@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import os
+import sqlite3
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
@@ -481,3 +482,160 @@ def file_append(path: str, content: str) -> None:
 def file_exists(path: str) -> bool:
     """newr `file.exists(path)`."""
     return os.path.exists(path)
+
+
+# ------------------------------------------------------------ db module
+# SQLite via the stdlib `sqlite3`, synchronous (SPEC.md section 12.5).
+# Handles are ints, fd-style: ids from 1, a registry maps each id to
+# its connection. `isolation_level=None` is autocommit, so explicit
+# BEGIN IMMEDIATE / COMMIT / ROLLBACK do the transaction work and a
+# bare `db.exec` commits at once. `?` binding is mandatory: values
+# are never interpolated into the SQL text.
+
+_DB_CONNECTIONS: dict[int, sqlite3.Connection] = {}
+_DB_NEXT_ID = 1
+
+
+def db_open(path: str) -> int:
+    """newr `db.open(path)`: open (create if needed) and return a handle."""
+    global _DB_NEXT_ID
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    handle = _DB_NEXT_ID
+    _DB_NEXT_ID += 1
+    _DB_CONNECTIONS[handle] = conn
+    return handle
+
+
+def _db_conn(handle: int) -> sqlite3.Connection:
+    conn = _DB_CONNECTIONS.get(handle)
+    if conn is None:
+        raise NewrError(f"db: unknown or closed handle {handle}")
+    return conn
+
+
+def _db_value(value, type_str: str):
+    """Convert one raw SQLite value to the newr value for a `db.query`
+    field type (`int`, `float`, `str`, `bool`, each optionally `?`).
+
+    A NULL lands only in a nullable field. An int column stored as
+    TEXT parses strictly (`int("42")` works, `int("abc")` throws); a
+    REAL 3.0 converts to int 3 but 3.5 throws; a bool field accepts
+    0/1 (or "0"/"1") and nothing else. Anything that cannot convert
+    raises NewrError instead of silently producing a wrong value.
+    """
+    nullable = type_str.endswith("?")
+    base = type_str[:-1] if nullable else type_str
+    if value is None:
+        if nullable:
+            return None
+        raise NewrError(f"db: NULL in non-nullable {base} field")
+    if base == "int":
+        if isinstance(value, bool):
+            raise NewrError("db: cannot convert bool to int")
+        if isinstance(value, int):
+            return check_int(value)
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise NewrError(f"db: cannot convert {value} to int")
+            return check_int(int(value))
+        if isinstance(value, str):
+            try:
+                return check_int(int(value.strip()))
+            except ValueError:
+                raise NewrError(f"db: cannot convert {value!r} to int")
+        raise NewrError(f"db: cannot convert {type(value).__name__} to int")
+    if base == "float":
+        if isinstance(value, bool):
+            raise NewrError("db: cannot convert bool to float")
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value.strip())
+            except ValueError:
+                raise NewrError(
+                    f"db: cannot convert {value!r} to float")
+        raise NewrError(f"db: cannot convert {type(value).__name__} to float")
+    if base == "str":
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, str):
+            return value
+        return to_str(value)
+    if base == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int):
+            if value == 0:
+                return False
+            if value == 1:
+                return True
+            raise NewrError(f"db: cannot convert {value} to bool")
+        if isinstance(value, str):
+            if value == "0":
+                return False
+            if value == "1":
+                return True
+            raise NewrError(f"db: cannot convert {value!r} to bool")
+        raise NewrError(f"db: cannot convert {type(value).__name__} to bool")
+    raise NewrError(f"db: unknown field type {type_str}")
+
+
+def db_exec(handle: int, sql: str, args: list) -> int:
+    """newr `db.exec(handle, sql, args...)`: run one statement, return
+    the rows affected (0 for DDL, whose rowcount is -1)."""
+    cur = _db_conn(handle).execute(sql, args)
+    return cur.rowcount if cur.rowcount >= 0 else 0
+
+
+def db_query(handle: int, sql: str, args: list, field_names: list,
+             field_types: list) -> list:
+    """newr `db.query(handle, sql, args...)`: run a SELECT and return
+    one list per row, converted values in field order. A missing
+    column throws; extra columns are ignored."""
+    cur = _db_conn(handle).execute(sql, args)
+    cols = [d[0] for d in cur.description] if cur.description else []
+    rows = []
+    for raw in cur.fetchall():
+        by_name = dict(zip(cols, raw))
+        row = []
+        for name, type_str in zip(field_names, field_types):
+            if name not in by_name:
+                raise NewrError(
+                    f"db: column {name!r} missing from query result")
+            row.append(_db_value(by_name[name], type_str))
+        rows.append(row)
+    return rows
+
+
+def db_begin(handle: int) -> None:
+    """newr `db.begin(handle)`: BEGIN IMMEDIATE."""
+    _db_conn(handle).execute("BEGIN IMMEDIATE")
+
+
+def db_commit(handle: int) -> None:
+    """newr `db.commit(handle)`: COMMIT."""
+    _db_conn(handle).execute("COMMIT")
+
+
+def db_rollback(handle: int) -> None:
+    """newr `db.rollback(handle)`: ROLLBACK."""
+    _db_conn(handle).execute("ROLLBACK")
+
+
+def db_last_id(handle: int) -> int:
+    """newr `db.last_id(handle)`: the last INSERT rowid."""
+    cur = _db_conn(handle).execute("SELECT last_insert_rowid()")
+    row = cur.fetchone()
+    return check_int(row[0])
+
+
+def db_close(handle: int) -> None:
+    """newr `db.close(handle)`: close and drop the handle. A second
+    close (or any use after close) raises NewrError."""
+    conn = _DB_CONNECTIONS.pop(handle, None)
+    if conn is None:
+        raise NewrError(f"db: unknown or closed handle {handle}")
+    conn.close()

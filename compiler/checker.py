@@ -6,7 +6,8 @@ no-implicit-numeric-coercion rule (G7), nullability (``T?`` / ``?.`` /
 contracts, value-type rules, and the W1003/W1005/W1008 warnings.
 
 This module is the CORE language: it must never import anything
-Discord (``discord_check`` / ``discord_limits``). Discord entity and
+Discord (``discord_check`` / ``discord_limits``) or anything db
+(``db_check`` / ``db_limits``). Discord entity and
 store member types arrive through the ``providers`` parameter of
 ``check_program`` -- a dict of type-provider tables, normally built
 by ``discord_check.discord_providers(program)``:
@@ -1164,9 +1165,13 @@ class Checker:
             if binding is not None and binding.kind == "module":
                 return self._module_member_type(obj.name, expr.name,
                                                 expr.span, as_value=True)
-            if binding is None and obj.name in MODULES:
+            if binding is None and (obj.name in MODULES
+                                or obj.name == "db"):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
+                # `db` is a domain module like `discord`: it is not
+                # in MODULES, but the same no-import fallback applies
+                # (SPEC.md section 12.5). Mirrors the emitter.
                 return self._module_member_type(obj.name, expr.name,
                                                 expr.span, as_value=True)
             if binding is not None and binding.kind == "store":
@@ -1231,13 +1236,17 @@ class Checker:
         mod = None
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
-        elif target is None and bound in MODULES:
+        elif target is None and (bound in MODULES or bound == "db"):
             # N-09/N-10: named modules are usable by name without an
-            # import (SPEC.md SS12.2); the import is optional.
+            # import (SPEC.md SS12.2). `db` is a domain module: not
+            # in MODULES, but the same fallback applies (SPEC.md
+            # section 12.5). Mirrors the emitter.
             mod = bound
         if mod is not None:
             if mod == "discord":
                 return UNKNOWN  # discord module surface: not core's job
+            if mod == "db":
+                return UNKNOWN  # db module surface: not core's job
             members = MODULES.get(mod, {})
             if name in members:
                 sig = members[name]
@@ -1527,11 +1536,17 @@ class Checker:
         if isinstance(obj, A.Name):
             binding = self._lookup(obj.name)
             if binding is not None and binding.kind == "module":
-                return self._call_module_member(obj.name, func.name, expr)
-            if binding is None and obj.name in MODULES:
+                return self._call_module_member(obj.name, func.name, expr,
+                                                expected)
+            if binding is None and (obj.name in MODULES
+                                or obj.name == "db"):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
-                return self._call_module_member(obj.name, func.name, expr)
+                # `db` is a domain module: not in MODULES, but the
+                # same no-import fallback applies (SPEC.md section
+                # 12.5). Mirrors the emitter.
+                return self._call_module_member(obj.name, func.name, expr,
+                                                expected)
             if binding is not None and binding.kind == "store":
                 return self._call_store(obj.name, func.name, expr)
             if obj.name == "log" and func.name in ("info", "warn", "error"):
@@ -1664,20 +1679,49 @@ class Checker:
         return UNKNOWN
 
     def _call_module_member(self, bound: str, name: str,
-                            expr: A.Call) -> Type:
+                            expr: A.Call, expected=None) -> Type:
         ctx = self._ctx
         target = ctx.imports.get(bound) if ctx else None
         mod = None
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
-        elif target is None and bound in MODULES:
+        elif target is None and (bound in MODULES or bound == "db"):
             # N-09/N-10: named modules are usable by name without an
-            # import (SPEC.md SS12.2); the import is optional.
+            # import (SPEC.md SS12.2); the import is optional. `db`
+            # is a domain module: not in MODULES, but the same
+            # no-import fallback applies (SPEC.md section 12.5).
+            # Mirrors the emitter.
             mod = bound
         if mod is not None:
             if mod == "discord":
                 for arg in expr.args:
                     self.synth(arg)
+                return UNKNOWN
+            if mod == "db":
+                # M8a: the fixed db return types live here, in the
+                # core checker, so a `let` bound from a db call gets
+                # a real type and the emitters can use the value
+                # (print it, convert it, pass it on). Returning
+                # UNKNOWN here left every db-bound name untyped, so
+                # `print(n)` after `let n = db.exec(...)` died in
+                # the emitter with E4001 even though check passed.
+                # `query` takes its row type from the expected type
+                # at the call site (the let annotation, the return
+                # type); without one db_check reports E2011.
+                for arg in expr.args:
+                    self.synth(arg)
+                if name in ("open", "exec", "last_id"):
+                    return INT
+                if name in ("begin", "commit", "rollback", "close"):
+                    return NONE_TYPE
+                if name == "query":
+                    exp = expected
+                    if exp is not None and exp.name == "Result" \
+                            and exp.params:
+                        exp = exp.params[0]
+                    if exp is not None and exp.name == "list" \
+                            and len(exp.params) == 1:
+                        return exp
                 return UNKNOWN
             members = MODULES.get(mod, {})
             if name not in members:

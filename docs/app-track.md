@@ -236,9 +236,18 @@ shape end to end first.
 
 ## 7. Phases (each: research and eval, build, verify)
 
-- M8a `db`: research sqlite libraries per target (versions, licenses,
-  browser story), then build, then conformance on all seven targets
-  plus a `todo` example program that stores and lists rows.
+- M8a `db`: LANDED 10 Nov 2026 (research in `newr-research/m8a-db-eval/EVAL.md`,
+  build report in `newr-research/m8a-db-build/BUILD_REPORT.md`). SQLite,
+  sync, on all seven targets: py stdlib sqlite3, js node:sqlite
+  (Node floor 24.17.0), java/kt sqlite-jdbc 3.54.1.0 + slf4j-api
+  2.0.19, cs Microsoft.Data.Sqlite 8.0.0 (net8.0), rs rusqlite 0.41.1,
+  dart package:sqlite3 3.9.0. Handles are ints, fd style; `?` binding
+  mandatory; BEGIN IMMEDIATE plus COMMIT/ROLLBACK; PRAGMA busy_timeout
+  5000. `db.query` returns a typed struct list via expected-type
+  inference (the open question in section 9 is settled: typed struct
+  list, never stringified dicts). Suite 1276 tests OK (skipped=15);
+  conformance 80/80 on all seven targets; `examples/todo.newr` stores
+  and lists rows, goldens pinned for it on all seven targets.
 - M8b `http` plus `json`: research server and fetch natives per
   target, then build, then a `hello_api` example: backend serves one
   JSON route, frontend fetches and prints it.
@@ -271,6 +280,18 @@ moving with honest PRs.
 
 Limits:
 
+- M8a `db` limits (10 Nov 2026): SQLite only, no Postgres/MySQL.
+  The js target is Node only (node:sqlite); the browser target
+  cannot run `db` (sql.js plus IndexedDB is the documented shape,
+  not built). On cs/rs/dart the db helpers are emitted inline into
+  general files only, so a bot program's handler using `db.*` fails
+  at compile time with an undefined reference (java/kt/py/js are
+  fine, their helpers live in the runtime); a bot that needs a
+  database today uses a `store`. On dart the program must run with
+  `dart run`, not plain `dart <file>`, so the sqlite3 build hook
+  downloads the native libsqlite3. On java/kt the user supplies the
+  sqlite-jdbc jar on the runtime classpath (the conformance runner
+  downloads it automatically; `newr build` does not).
 - UI parity is the hard part. A button will not look identical on all
   seven targets in M8, and the doc does not claim it will. Same layout,
   same behavior, native look per target.
@@ -286,6 +307,12 @@ Limits:
 Open questions (to settle in the M8a research, before building):
 
 - Should `db.query` return a list of dicts or a typed struct list?
+  SETTLED in M8a (10 Nov 2026): a typed struct list, resolved from
+  the expected type at the call site (`let todos: list[Todo] =
+  db.query(...)`). Columns match struct fields by name; a missing
+  column or a value that cannot convert throws. Never stringified
+  dicts, never `list[dict[str, str]]`; the honest fallback (had
+  inference failed) would have been a cursor-style API, not dicts.
 - Should the frontend fetch go through `http` only, or also a
   generated client from the shared route table?
 - Which UI toolkit per target is the M8 default where two exist

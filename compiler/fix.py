@@ -41,6 +41,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .checker import check_program
+from .db_check import check_db
 from .discord_check import check_discord, discord_providers
 from .errors import Diagnostic
 from .resolver import resolve_source
@@ -87,6 +88,7 @@ def front_end_diagnostics(source: str, filename: str) -> list[Diagnostic]:
     diagnostics += check_program(resolved.program,
                                  providers=providers).diagnostics
     diagnostics += check_discord(resolved.program)
+    diagnostics += check_db(resolved.program)
     return diagnostics
 
 

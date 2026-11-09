@@ -202,6 +202,58 @@ Reads an environment variable, none when absent (or the default).
 
 Command-line arguments, including the program name at index 0.
 
+## db module (SPEC.md section 12.5)
+
+SQLite, sync, one connection per handle. The handle is an `int` (fd style). `db.query` returns a typed struct list, resolved from the expected type at the call site. Every db call throws on failure.
+
+### `db.open`
+
+`open(path: str) -> int`
+
+Opens a SQLite database file and returns a connection handle (an int, fd style). Creates the file when missing; throws when the parent directory does not exist. `":memory:"` opens a private in-memory database.
+
+### `db.exec`
+
+`exec(handle: int, sql: str, args...) -> int`
+
+Runs exactly one statement and returns rows affected (0 for DDL). Values bind to `?` placeholders, one argument per placeholder, in order. Throws on failure.
+
+### `db.query`
+
+`query(handle: int, sql: str, args...) -> list[RowStruct]`
+
+Runs a SELECT and returns the rows as a typed struct list. The call site must carry the expected type, for example `let todos: list[Todo] = db.query(...)`. Columns match struct fields by name; a missing column or a value that cannot convert throws at runtime.
+
+### `db.begin`
+
+`begin(handle: int)`
+
+Begins an explicit transaction (BEGIN IMMEDIATE). A second begin without commit or rollback is an error.
+
+### `db.commit`
+
+`commit(handle: int)`
+
+Commits the open transaction.
+
+### `db.rollback`
+
+`rollback(handle: int)`
+
+Rolls the open transaction back.
+
+### `db.last_id`
+
+`last_id(handle: int) -> int`
+
+The last AUTOINCREMENT id on this handle.
+
+### `db.close`
+
+`close(handle: int)`
+
+Closes the handle. Using a closed handle throws.
+
 ## Methods (SPEC.md section 12.4)
 
 Methods on values. The receiver type is shown first.

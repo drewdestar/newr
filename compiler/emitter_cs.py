@@ -316,6 +316,9 @@ class _CSEmitter:
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
         self.uses_sqlite: bool = False
+        # This file uses `db.*` (set by `_emit_db_call`) — the
+        # `NewrDb` helper class is emitted into the file only then.
+        self._file_uses_db: bool = False
         self.rt_helpers: set[str] = set()
         # Module-level declarations of the file being emitted.
         self.fns: dict[str, A.FnDecl] = {}
@@ -1127,7 +1130,8 @@ class _CSEmitter:
                 if binding is not None and binding.kind in (
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                       or obj.name == "db"):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -3174,6 +3178,9 @@ class _CSEmitter:
                         f"({self.emit_expr(node.args[0], 0)})",
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
+        if real == "db":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_db_call(node, args)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
@@ -3246,6 +3253,392 @@ class _CSEmitter:
                             _PREC["primary"])
                 return f"NewrRt.EnvGet({args[0]})", _PREC["primary"]
         self._fail(f"module `{real}` has no function `{name}`")
+
+    def _emit_db_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`db.*` calls (SPEC.md section 12.5): the helpers live in
+        the `NewrDb` class emitted into this file (see
+        `_emit_db_class`) — inline, not in newr_rt.cs, because the
+        runtime file is dependency-free and a program that never
+        uses `db` must not need the Sqlite package. Handles are
+        longs, fd-style. The checker (db_check) has already
+        validated the call, so the arity here is trusted.
+        `db.query` maps each converted `object[]` row to the row
+        struct through `QueryAs<T>`."""
+        name = node.func.name
+        self._need_sqlite()
+        self._need_rt("NewrError")
+        self._file_uses_db = True
+        if name == "open":
+            return f"NewrDb.Open({args[0]})", _PREC["primary"]
+        if name == "exec":
+            rest = ", ".join(args[2:])
+            if rest:
+                return (f"NewrDb.Exec({args[0]}, {args[1]}, {rest})",
+                        _PREC["primary"])
+            return f"NewrDb.Exec({args[0]}, {args[1]})", _PREC["primary"]
+        if name == "query":
+            cs_struct, decl = self._db_row_struct(node)
+            names = [_cs_str(f.name) for f in decl.fields]
+            types = [_cs_str(self._db_field_type(f.type))
+                     for f in decl.fields]
+            casts = ", ".join(
+                f"({self._cs_type(f.type)}) row[{i}]"
+                for i, f in enumerate(decl.fields))
+            names_lit = "new string[] {" + ", ".join(names) + "}"
+            types_lit = "new string[] {" + ", ".join(types) + "}"
+            rest = ", ".join(args[2:])
+            return (f"NewrDb.QueryAs<{cs_struct}>({args[0]}, {args[1]}, "
+                    f"new object[] {{{rest}}}, {names_lit}, {types_lit}, "
+                    f"row => new {cs_struct}({casts}))",
+                    _PREC["primary"])
+        if name == "begin":
+            return f"NewrDb.Begin({args[0]})", _PREC["primary"]
+        if name == "commit":
+            return f"NewrDb.Commit({args[0]})", _PREC["primary"]
+        if name == "rollback":
+            return f"NewrDb.Rollback({args[0]})", _PREC["primary"]
+        if name == "last_id":
+            return f"NewrDb.LastId({args[0]})", _PREC["primary"]
+        if name == "close":
+            return f"NewrDb.Close({args[0]})", _PREC["primary"]
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (C# constructor, decl) of the row struct for a
+        `db.query` call. The row type comes from `node.expr_type`,
+        set by db_check to `list[Row]`. A struct from an imported
+        file module resolves to its qualified class name."""
+        t = self._type_of(node)
+        if t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._struct_cs_name(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    return self._struct_cs_name(row_name), s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
+
+    def _emit_db_class(self) -> list[str]:
+        """The `NewrDb` helper class, emitted into a file that uses
+        `db.*` (at indent 1, nested in the program class). The int
+        handle registry plus open/exec/query/begin/commit/rollback/
+        last_id/close over Microsoft.Data.Sqlite (the store's
+        library, 8.0.0 — the same sync API the store uses).
+        Conversion mirrors the Python `_db_value` (newr_rt.py) and
+        the Java `_dbValue` (newr_rt.java): NULL lands only in a
+        nullable field, `?` binds are positional (the Nth added
+        parameter binds the Nth `?`), bool binds as 0/1, a value
+        that cannot convert throws instead of silently producing
+        a wrong value. `Query` looks rows up by column NAME (a
+        missing column throws, extra columns are ignored)."""
+        return [
+            "  private static class NewrDb {",
+            "    private static readonly Dictionary<long, SqliteConnection> Conns = new();",
+            "    private static long NextId = 1;",
+            "",
+            "    private static SqliteConnection Conn(long handle) {",
+            "      if (!Conns.TryGetValue(handle, out SqliteConnection conn)) {",
+            "        throw new NewrRt.NewrError(\"db: unknown or closed handle \" + handle);",
+            "      }",
+            "      return conn;",
+            "    }",
+            "",
+            "    private static object BindArg(object value) {",
+            "      if (value == null) {",
+            "        return DBNull.Value;",
+            "      }",
+            "      if (value is bool b) {",
+            "        return b ? 1L : 0L;",
+            "      }",
+            "      return value;",
+            "    }",
+            "",
+            "    private static object DbValue(object value, string typeStr) {",
+            "      bool nullable = typeStr.EndsWith(\"?\");",
+            "      string baseType = nullable ? typeStr.Substring(0, typeStr.Length - 1) : typeStr;",
+            "      if (value == null || value is DBNull) {",
+            "        if (nullable) {",
+            "          return null;",
+            "        }",
+            "        throw new NewrRt.NewrError(\"db: NULL in non-nullable \" + baseType + \" field\");",
+            "      }",
+            "      switch (baseType) {",
+            "        case \"int\":",
+            "          if (value is bool) {",
+            "            throw new NewrRt.NewrError(\"db: cannot convert bool to int\");",
+            "          }",
+            "          if (value is long l) {",
+            "            return l;",
+            "          }",
+            "          if (value is double d) {",
+            "            if (d != Math.Floor(d) || d < (double) long.MinValue || d > (double) long.MaxValue) {",
+            "              throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to int\");",
+            "            }",
+            "            return (long) d;",
+            "          }",
+            "          if (value is string s) {",
+            "            if (long.TryParse(s.Trim(), out long parsed)) {",
+            "              return parsed;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to int\");",
+            "          }",
+            "          throw new NewrRt.NewrError(\"db: cannot convert \" + value.GetType().Name + \" to int\");",
+            "        case \"float\":",
+            "          if (value is bool) {",
+            "            throw new NewrRt.NewrError(\"db: cannot convert bool to float\");",
+            "          }",
+            "          if (value is long li) {",
+            "            return (double) li;",
+            "          }",
+            "          if (value is double dd) {",
+            "            return dd;",
+            "          }",
+            "          if (value is string ss) {",
+            "            if (double.TryParse(ss.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsedF)) {",
+            "              return parsedF;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to float\");",
+            "          }",
+            "          throw new NewrRt.NewrError(\"db: cannot convert \" + value.GetType().Name + \" to float\");",
+            "        case \"str\":",
+            "          if (value is bool bb) {",
+            "            return bb ? \"true\" : \"false\";",
+            "          }",
+            "          if (value is string str) {",
+            "            return str;",
+            "          }",
+            "          return NewrRt.ToStr(value);",
+            "        case \"bool\":",
+            "          if (value is bool b2) {",
+            "            return b2;",
+            "          }",
+            "          if (value is long v) {",
+            "            if (v == 0) {",
+            "              return false;",
+            "            }",
+            "            if (v == 1) {",
+            "              return true;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to bool\");",
+            "          }",
+            "          if (value is double dv) {",
+            "            long w = (long) dv;",
+            "            if (w == 0) {",
+            "              return false;",
+            "            }",
+            "            if (w == 1) {",
+            "              return true;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to bool\");",
+            "          }",
+            "          if (value is string s2) {",
+            "            if (s2 == \"0\") {",
+            "              return false;",
+            "            }",
+            "            if (s2 == \"1\") {",
+            "              return true;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to bool\");",
+            "          }",
+            "          throw new NewrRt.NewrError(\"db: cannot convert \" + value.GetType().Name + \" to bool\");",
+            "        default:",
+            "          throw new NewrRt.NewrError(\"db: unknown field type \" + typeStr);",
+            "      }",
+            "    }",
+            "",
+            "    private static SqliteCommand Prepare(SqliteConnection conn, string sql, object[] args) {",
+            "      string rewritten = RewritePlaceholders(sql, out int count);",
+            "      if (args.Length != count) {",
+            "        throw new NewrRt.NewrError(\"db: SQL has \" + count + \" `?` placeholder(s) but \" + args.Length + \" bound value(s)\");",
+            "      }",
+            "      SqliteCommand cmd = conn.CreateCommand();",
+            "      cmd.CommandText = rewritten;",
+            "      for (int i = 0; i < args.Length; i++) {",
+            "        cmd.Parameters.AddWithValue(\"?\" + (i + 1), BindArg(args[i]));",
+            "      }",
+            "      return cmd;",
+            "    }",
+            "",
+            "    private static string RewritePlaceholders(string sql, out int count) {",
+            "      // Microsoft.Data.Sqlite binds `?` only by number: an",
+            "      // unnamed `?` cannot take a named parameter (it errors",
+            "      // \"Must add values for the following parameters\"). So",
+            "      // each bare `?` outside quoted text becomes `?N`, and",
+            "      // the Nth argument binds `?N` — the same positional",
+            "      // rule the other targets get from their drivers for",
+            "      // free. A `?N` already in the SQL is kept as-is",
+            "      // (SQLite numbers a bare `?` one above the largest",
+            "      // number seen so far), and `?` inside single- or",
+            "      // double-quoted text is a literal question mark, not a",
+            "      // placeholder (the same rule as the checker's",
+            "      // `_count_placeholders` in db_check.py).",
+            "      var text = new System.Text.StringBuilder();",
+            "      int max = 0;",
+            "      bool inSingle = false;",
+            "      bool inDouble = false;",
+            "      int i = 0;",
+            "      while (i < sql.Length) {",
+            "        char c = sql[i];",
+            "        if (inSingle) {",
+            "          text.Append(c);",
+            "          if (c == '\\'') {",
+            "            if (i + 1 < sql.Length && sql[i + 1] == '\\'') {",
+            "              text.Append(sql[i + 1]);",
+            "              i += 2;",
+            "              continue;",
+            "            }",
+            "            inSingle = false;",
+            "          }",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (inDouble) {",
+            "          text.Append(c);",
+            "          if (c == '\"') {",
+            "            inDouble = false;",
+            "          }",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (c == '\\'') {",
+            "          inSingle = true;",
+            "          text.Append(c);",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (c == '\"') {",
+            "          inDouble = true;",
+            "          text.Append(c);",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (c == '?') {",
+            "          int j = i + 1;",
+            "          int num = 0;",
+            "          while (j < sql.Length && sql[j] >= '0' && sql[j] <= '9') {",
+            "            num = num * 10 + (sql[j] - '0');",
+            "            j++;",
+            "          }",
+            "          if (j > i + 1) {",
+            "            if (num > max) {",
+            "              max = num;",
+            "            }",
+            "            text.Append(sql.Substring(i, j - i));",
+            "            i = j;",
+            "            continue;",
+            "          }",
+            "          max++;",
+            "          text.Append(\"?\" + max);",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        text.Append(c);",
+            "        i++;",
+            "      }",
+            "      count = max;",
+            "      return text.ToString();",
+            "    }",
+            "",
+            "    public static long Open(string path) {",
+            "      SqliteConnection conn = new SqliteConnection(\"Data Source=\" + path);",
+            "      conn.Open();",
+            "      using (SqliteCommand cmd = conn.CreateCommand()) {",
+            "        cmd.CommandText = \"PRAGMA foreign_keys = ON\";",
+            "        cmd.ExecuteNonQuery();",
+            "        cmd.CommandText = \"PRAGMA busy_timeout = 5000\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "      long handle = NextId++;",
+            "      Conns[handle] = conn;",
+            "      return handle;",
+            "    }",
+            "",
+            "    public static long Exec(long handle, string sql, params object[] args) {",
+            "      using (SqliteCommand cmd = Prepare(Conn(handle), sql, args)) {",
+            "        int affected = cmd.ExecuteNonQuery();",
+            "        return affected >= 0 ? affected : 0;",
+            "      }",
+            "    }",
+            "",
+            "    public static List<object[]> Query(long handle, string sql, object[] args, string[] names, string[] types) {",
+            "      using (SqliteCommand cmd = Prepare(Conn(handle), sql, args)) {",
+            "        using (SqliteDataReader reader = cmd.ExecuteReader()) {",
+            "          List<object[]> rows = new();",
+            "          while (reader.Read()) {",
+            "            Dictionary<string, object> byName = new();",
+            "            for (int i = 0; i < reader.FieldCount; i++) {",
+            "              object v = reader.GetValue(i);",
+            "              byName[reader.GetName(i)] = v is DBNull ? null : v;",
+            "            }",
+            "            object[] row = new object[names.Length];",
+            "            for (int i = 0; i < names.Length; i++) {",
+            "              if (!byName.TryGetValue(names[i], out object raw)) {",
+            "                throw new NewrRt.NewrError(\"db: column '\" + names[i] + \"' missing from query result\");",
+            "              }",
+            "              row[i] = DbValue(raw, types[i]);",
+            "            }",
+            "            rows.Add(row);",
+            "          }",
+            "          return rows;",
+            "        }",
+            "      }",
+            "    }",
+            "",
+            "    public static List<T> QueryAs<T>(long handle, string sql, object[] args, string[] names, string[] types, Func<object[], T> map) {",
+            "      List<object[]> rows = Query(handle, sql, args, names, types);",
+            "      List<T> result = new();",
+            "      foreach (object[] row in rows) {",
+            "        result.Add(map(row));",
+            "      }",
+            "      return result;",
+            "    }",
+            "",
+            "    public static void Begin(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"BEGIN IMMEDIATE\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "    }",
+            "",
+            "    public static void Commit(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"COMMIT\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "    }",
+            "",
+            "    public static void Rollback(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"ROLLBACK\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "    }",
+            "",
+            "    public static long LastId(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"SELECT last_insert_rowid()\";",
+            "        return (long) cmd.ExecuteScalar();",
+            "      }",
+            "    }",
+            "",
+            "    public static void Close(long handle) {",
+            "      SqliteConnection conn = Conn(handle);",
+            "      conn.Close();",
+            "      Conns.Remove(handle);",
+            "    }",
+            "  }",
+        ]
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:
@@ -3856,6 +4249,17 @@ class _CSEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_fn(decl, 1))
+        # Top-level statements are emitted first (into a temp
+        # list): a `db.*` call inside them — or inside a function
+        # above — sets `_file_uses_db`, and the `NewrDb` helper
+        # class is emitted only then, before Main() (or the static
+        # constructor for a file module).
+        stmt_lines = (self._emit_block(program.stmts, 2, top_level=True)
+                      if program.stmts else [])
+        if self._file_uses_db:
+            if body:
+                body.append("")
+            body.extend(self._emit_db_class())
         # Top-level statements: Main() for the entry file, a static
         # constructor for a file module.
         if program.stmts:
@@ -3863,13 +4267,11 @@ class _CSEmitter:
                 body.append("")
             if is_main:
                 body.append("  public static void Main(string[] args) {")
-                body.extend(self._emit_block(program.stmts, 2,
-                                             top_level=True))
+                body.extend(stmt_lines)
                 body.append("  }")
             else:
                 body.append(f"  static {self.output_stem}() {{")
-                body.extend(self._emit_block(program.stmts, 2,
-                                             top_level=True))
+                body.extend(stmt_lines)
                 body.append("  }")
         lines = self._header(main_path)
         imports = self._render_imports()
@@ -3917,6 +4319,10 @@ class _CSEmitter:
                                                       is_main=False)
             files.update(sub_files)
             uses_rt = uses_rt or sub_rt
+            # A `db.*` call in a file module needs the Sqlite
+            # package in the csproj too (the gate reads only the
+            # main emitter — see emit_program_cs).
+            self.uses_sqlite = self.uses_sqlite or sub_em.uses_sqlite
         return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -5791,14 +6197,27 @@ def emit_program_cs(program: A.Program, *, main_path: str,
         f"    <AssemblyName>{stem}</AssemblyName>",
         "  </PropertyGroup>",
     ]
-    if program.bot is not None:
+    # The package references: a bot program needs Discord.Net +
+    # Microsoft.Data.Sqlite (the store backend); a plain program
+    # that uses `db.*` needs Microsoft.Data.Sqlite alone (B8 — the
+    # gate is `bot is not None or uses_sqlite`, not `bot is not
+    # None`). A program that uses neither gets no references at
+    # all, so it stays dependency-free.
+    if program.bot is not None or em.uses_sqlite:
         csproj_lines += [
             "  <ItemGroup>",
-            "    <PackageReference Include=\"Discord.Net\" "
-            "Version=\"3.20.2\" />",
+        ]
+        if program.bot is not None:
+            csproj_lines.append(
+                "    <PackageReference Include=\"Discord.Net\" "
+                "Version=\"3.20.2\" />")
+        csproj_lines += [
             "    <PackageReference Include=\"Microsoft.Data.Sqlite\" "
             "Version=\"8.0.0\" />",
             "  </ItemGroup>",
+        ]
+    if program.bot is not None:
+        csproj_lines += [
             "  <ItemGroup>",
             "    <Compile Remove=\"*.cs\" />",
         ]

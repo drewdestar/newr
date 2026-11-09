@@ -966,5 +966,78 @@ class TestInput(unittest.TestCase):
         self.assertIn('input("Name? ")', text)
 
 
+class TestDb(unittest.TestCase):
+    """db module on JS (SPEC.md section 12.5, M8a): `db.*` calls
+    emit to the newr_rt.js helpers over node:sqlite, and a program
+    using them runs under plain node with no package.json."""
+
+    def _run(self, src):
+        from compiler.db_check import check_db
+        resolved = resolve_source(src, "<db-test>.newr")
+        diags = list(resolved.diagnostics)
+        diags += check_program(
+            resolved.program,
+            providers=discord_providers(resolved.program)).diagnostics
+        diags += check_discord(resolved.program)
+        diags += check_db(resolved.program)
+        bad = [d for d in diags if d.is_error()]
+        self.assertEqual(bad, [], [f"{d.code}: {d.message}" for d in bad])
+        result = emit_js(resolved.program, main_path="<db-test>.newr",
+                         sources={"<db-test>.newr": src})
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in result.files.items():
+                (Path(d) / name).write_text(text, encoding="utf-8")
+            if result.uses_rt:
+                (Path(d) / "newr_rt.js").write_text(
+                    RT_JS_SRC.read_text(encoding="utf-8"),
+                    encoding="utf-8")
+            proc = subprocess.run(
+                [NODE, str(Path(d) / result.main_file)],
+                capture_output=True, text=True, cwd=d)
+            return proc.stdout, proc.stderr, proc.returncode
+
+    def test_db_probe_runs(self):
+        src = ('struct Todo:\n'
+               '  id: int\n'
+               '  title: str\n'
+               '  done: bool\n'
+               '\n'
+               'let h = db.open(":memory:")\n'
+               'db.exec(h, "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")\n'
+               'let n = db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "beli susu", false)\n'
+               'print(n)\n'
+               'let id = db.last_id(h)\n'
+               'print(id)\n'
+               'let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "UPDATE todos SET done = ? WHERE id = ?", true, 1)\n'
+               'db.commit(h)\n'
+               'let todos2: list[Todo] = db.query(h, "SELECT id, title, done FROM todos WHERE done = ?", true)\n'
+               'print(todos2)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "rollback me", false)\n'
+               'db.rollback(h)\n'
+               'let todos3: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos3)\n'
+               'db.close(h)\n')
+        out, err, code = self._run(src)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            out,
+            "1\n1\n[Todo(id: 1, title: beli susu, done: false)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n")
+
+    def test_db_uses_node_sqlite_helpers(self):
+        text = emit_js_main_text(
+            'let h = db.open(":memory:")\n'
+            'db.exec(h, "CREATE TABLE t (v INTEGER)")\n'
+            'db.close(h)\n')
+        self.assertIn("dbOpen(", text)
+        self.assertIn("dbExec(", text)
+        self.assertIn("dbClose(", text)
+
+
 if __name__ == "__main__":
     unittest.main()

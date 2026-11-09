@@ -72,6 +72,42 @@ _DART_HOME = Path(os.environ["DART_HOME"]) \
 DART = shutil.which("dart", path=str(_DART_HOME / "dart-sdk" / "bin")) \
     or shutil.which("dart")
 
+# JDBC driver jars (M8a): a `db.*` program needs sqlite-jdbc on the
+# runtime classpath (compiling needs only java.sql, which is in the
+# JDK). The jars live in ~/jars on the build VM; otherwise they are
+# downloaded from Maven Central into that cache (once) and reused.
+# Pins verified live (M8a): sqlite-jdbc 3.54.1.0, slf4j-api 2.0.19
+# (the version the repo's bot pom and the emitter tests use).
+_JDBC_DIR = Path.home() / "jars"
+_JDBC_JARS = {
+    "sqlite-jdbc": ("sqlite-jdbc-3.54.1.0.jar",
+                    "https://repo1.maven.org/maven2/org/xerial/"
+                    "sqlite-jdbc/3.54.1.0/sqlite-jdbc-3.54.1.0.jar"),
+    "slf4j-api": ("slf4j-api-2.0.19.jar",
+                  "https://repo1.maven.org/maven2/org/slf4j/"
+                  "slf4j-api/2.0.19/slf4j-api-2.0.19.jar"),
+}
+
+
+def _jdbc_classpath() -> list[str] | None:
+    """The sqlite-jdbc + slf4j jars for a db program's runtime
+    classpath, downloading them into ~/jars when absent. Returns
+    None when they cannot be obtained (the caller skips the db
+    program then, instead of failing the whole corpus)."""
+    paths = []
+    for _name, (fname, url) in _JDBC_JARS.items():
+        dest = _JDBC_DIR / fname
+        if not dest.exists():
+            try:
+                import urllib.request
+                _JDBC_DIR.mkdir(parents=True, exist_ok=True)
+                urllib.request.urlretrieve(url, dest)
+            except Exception as exc:  # noqa: BLE001 - network is best-effort
+                print(f"WARN: could not download {url}: {exc}")
+                return None
+        paths.append(str(dest))
+    return paths
+
 # name -> (source file, output files the build produces)
 GOLDENS = {
     "hello": ("examples/hello.newr", ["hello.py"]),
@@ -79,6 +115,7 @@ GOLDENS = {
     "showcase": ("examples/showcase.newr", ["showcase.py"]),
     "shop": ("examples/shop.newr", ["shop.py", "shop_items.py"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.py"]),
+    "todo": ("examples/todo.newr", ["todo.py"]),
 }
 
 # The JS twin of GOLDENS (M3): the same sources, `.js` outputs.
@@ -92,6 +129,7 @@ GOLDENS_JS = {
     "shop": ("examples/shop.newr",
              ["shop.js", "shop_items.js", "shop_deploy.js"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.js"]),
+    "todo": ("examples/todo.newr", ["todo.js"]),
 }
 
 # The Java twin of GOLDENS (M4): the same sources, `.java` outputs.
@@ -104,6 +142,7 @@ GOLDENS_JAVA = {
     "shop": ("examples/shop.newr",
              ["shop.java", "shop_items.java", "shop_deploy.java"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.java"]),
+    "todo": ("examples/todo.newr", ["todo.java"]),
 }
 
 # The C# twin of GOLDENS (M4): the same sources, `.cs` outputs.
@@ -115,6 +154,7 @@ GOLDENS_CS = {
     "shop": ("examples/shop.newr",
              ["shop.cs", "shop_items.cs", "shop_deploy.cs"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.cs"]),
+    "todo": ("examples/todo.newr", ["todo.cs"]),
 }
 
 # The Rust twin of GOLDENS (M5): the same sources, `.rs` outputs.
@@ -130,6 +170,7 @@ GOLDENS_RS = {
     "shop": ("examples/shop.newr",
              ["shop.rs", "shop_deploy.rs"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.rs"]),
+    "todo": ("examples/todo.newr", ["todo.rs"]),
 }
 
 # The Kotlin twin of GOLDENS (M5): the same sources, `.kt` outputs.
@@ -143,6 +184,7 @@ GOLDENS_KT = {
     "shop": ("examples/shop.newr",
              ["shop.kt", "shop_deploy.kt"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.kt"]),
+    "todo": ("examples/todo.newr", ["todo.kt"]),
 }
 
 # The Dart twin of GOLDENS (M5): the same sources, `.dart` outputs.
@@ -158,6 +200,7 @@ GOLDENS_DART = {
     "shop": ("examples/shop.newr",
              ["shop.dart", "shop_items.dart", "shop_deploy.dart"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.dart"]),
+    "todo": ("examples/todo.newr", ["todo.dart"]),
 }
 
 _SUFFIX = {"py": ".py", "js": ".js", "java": ".java", "cs": ".cs",
@@ -295,8 +338,22 @@ def run_conformance(target: str = "py") -> int:
                           f"{c.returncode}\n{c.stderr}")
                     failures += 1
                     continue
-                r = subprocess.run([JAVA, path.stem],
-                                   capture_output=True, text=True, cwd=d)
+                if any("NewrRt.dbOpen(" in t for t in files.values()):
+                    # A `db.*` program: the driver jar is needed at
+                    # run time (compile needs only java.sql).
+                    jars = _jdbc_classpath()
+                    if jars is None:
+                        print(f"SKIP {path.name}: sqlite-jdbc jars "
+                              "unavailable")
+                        continue
+                    cp = os.pathsep.join([str(d), *jars])
+                    r = subprocess.run([JAVA, "-cp", cp, path.stem],
+                                       capture_output=True, text=True,
+                                       cwd=d)
+                else:
+                    r = subprocess.run([JAVA, path.stem],
+                                       capture_output=True, text=True,
+                                       cwd=d)
             elif target == "rs":
                 if RUSTC is None:
                     print("SKIP rs: no rustc found "
@@ -343,9 +400,28 @@ def run_conformance(target: str = "py") -> int:
                           f"{c.returncode}\n{c.stderr}")
                     failures += 1
                     continue
-                r = subprocess.run([JAVA, "-jar",
-                                    str(Path(d) / "app.jar")],
-                                   capture_output=True, text=True, cwd=d)
+                if any("NewrRt.dbOpen(" in t for t in files.values()):
+                    # A `db.*` program: the driver jar is needed at
+                    # run time. `java -jar` ignores -cp, so run the
+                    # main class directly on the classpath (the
+                    # facade class is <Stem>Kt, first letter upper).
+                    jars = _jdbc_classpath()
+                    if jars is None:
+                        print(f"SKIP {path.name}: sqlite-jdbc jars "
+                              "unavailable")
+                        continue
+                    cp = os.pathsep.join(
+                        [str(Path(d) / "app.jar"), *jars])
+                    main_class = (path.stem[:1].upper()
+                                  + path.stem[1:] + "Kt")
+                    r = subprocess.run([JAVA, "-cp", cp, main_class],
+                                       capture_output=True, text=True,
+                                       cwd=d)
+                else:
+                    r = subprocess.run([JAVA, "-jar",
+                                        str(Path(d) / "app.jar")],
+                                       capture_output=True, text=True,
+                                       cwd=d)
             elif target == "dart":
                 if DART is None:
                     print("SKIP dart: no dart found "

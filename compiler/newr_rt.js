@@ -1009,6 +1009,202 @@ function fileExists(path) {
   return fs.existsSync(path);
 }
 
+// ---------------------------------------------------------------- db module
+// SQLite via the `node:sqlite` builtin, synchronous (SPEC.md section
+// 12.5). Handles are ints, fd-style: ids from 1, a registry maps
+// each id to its DatabaseSync. `?` binding is mandatory: values are
+// never interpolated into the SQL text. Int columns read back
+// through BigInt plus checkInt (J9: node:sqlite returns JS numbers
+// and throws above 2^53); bool binds as 0/1 because node:sqlite
+// does not accept boolean bind parameters.
+
+const _dbConnections = new Map();
+let _dbNextId = 1;
+
+function dbOpen(path) {
+  // newr `db.open(path)`: open (create if needed) and return a handle.
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(path);
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
+  const handle = _dbNextId;
+  _dbNextId += 1;
+  _dbConnections.set(handle, db);
+  return checkInt(BigInt(handle));
+}
+
+function _dbConn(handle) {
+  const db = _dbConnections.get(Number(handle));
+  if (db === undefined) {
+    throw new NewrError(`db: unknown or closed handle ${handle}`);
+  }
+  return db;
+}
+
+function _dbBindArg(value) {
+  // node:sqlite binds null, number, string, bigint, Uint8Array.
+  // A newr bool binds as 0/1; a newr int is already a BigInt.
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  return value;
+}
+
+function _dbValue(value, typeStr) {
+  // Convert one raw SQLite value to the newr value for a `db.query`
+  // field type (`int`, `float`, `str`, `bool`, each optionally `?`).
+  // Mirrors the Python `_db_value` (newr_rt.py): NULL lands only in
+  // a nullable field, and a value that cannot convert throws
+  // instead of silently producing a wrong value.
+  const nullable = typeStr.endsWith("?");
+  const base = nullable ? typeStr.slice(0, -1) : typeStr;
+  if (value === null || value === undefined) {
+    if (nullable) {
+      return null;
+    }
+    throw new NewrError(`db: NULL in non-nullable ${base} field`);
+  }
+  if (base === "int") {
+    if (typeof value === "boolean") {
+      throw new NewrError("db: cannot convert bool to int");
+    }
+    if (typeof value === "bigint") {
+      return checkInt(value);
+    }
+    if (typeof value === "number") {
+      if (!Number.isInteger(value)) {
+        throw new NewrError(`db: cannot convert ${value} to int`);
+      }
+      return checkInt(BigInt(value));
+    }
+    if (typeof value === "string") {
+      const s = value.trim();
+      if (!/^-?\d+$/.test(s)) {
+        throw new NewrError(`db: cannot convert ${value} to int`);
+      }
+      return checkInt(BigInt(s));
+    }
+    throw new NewrError(`db: cannot convert ${typeof value} to int`);
+  }
+  if (base === "float") {
+    if (typeof value === "boolean") {
+      throw new NewrError("db: cannot convert bool to float");
+    }
+    if (typeof value === "bigint") {
+      return Number(value);
+    }
+    if (typeof value === "number") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const s = value.trim();
+      if (s === "") {
+        throw new NewrError(`db: cannot convert ${value} to float`);
+      }
+      const n = Number(s);
+      if (Number.isNaN(n)) {
+        throw new NewrError(`db: cannot convert ${value} to float`);
+      }
+      return n;
+    }
+    throw new NewrError(`db: cannot convert ${typeof value} to float`);
+  }
+  if (base === "str") {
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    return toStr(value);
+  }
+  if (base === "bool") {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "bigint") {
+      if (value === 0n) return false;
+      if (value === 1n) return true;
+      throw new NewrError(`db: cannot convert ${value} to bool`);
+    }
+    if (typeof value === "number") {
+      if (value === 0) return false;
+      if (value === 1) return true;
+      throw new NewrError(`db: cannot convert ${value} to bool`);
+    }
+    if (typeof value === "string") {
+      if (value === "0") return false;
+      if (value === "1") return true;
+      throw new NewrError(`db: cannot convert ${value} to bool`);
+    }
+    throw new NewrError(`db: cannot convert ${typeof value} to bool`);
+  }
+  throw new NewrError(`db: unknown field type ${typeStr}`);
+}
+
+function dbExec(handle, sql, args) {
+  // newr `db.exec(handle, sql, args...)`: run one statement, return
+  // the rows affected (0 for DDL).
+  const info = _dbConn(handle).prepare(sql).run(...args.map(_dbBindArg));
+  return checkInt(BigInt(info.changes));
+}
+
+function dbQuery(handle, sql, args, fieldNames, fieldTypes) {
+  // newr `db.query(handle, sql, args...)`: run a SELECT and return
+  // one list per row, converted values in field order. A missing
+  // column throws; extra columns are ignored.
+  const rows = _dbConn(handle).prepare(sql).all(...args.map(_dbBindArg));
+  const out = [];
+  for (const raw of rows) {
+    const row = [];
+    for (let i = 0; i < fieldNames.length; i++) {
+      const name = fieldNames[i];
+      if (!(name in raw)) {
+        throw new NewrError(`db: column ${name} missing from query result`);
+      }
+      row.push(_dbValue(raw[name], fieldTypes[i]));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function dbBegin(handle) {
+  // newr `db.begin(handle)`: BEGIN IMMEDIATE.
+  _dbConn(handle).exec("BEGIN IMMEDIATE");
+  return null;
+}
+
+function dbCommit(handle) {
+  // newr `db.commit(handle)`: COMMIT.
+  _dbConn(handle).exec("COMMIT");
+  return null;
+}
+
+function dbRollback(handle) {
+  // newr `db.rollback(handle)`: ROLLBACK.
+  _dbConn(handle).exec("ROLLBACK");
+  return null;
+}
+
+function dbLastId(handle) {
+  // newr `db.last_id(handle)`: the last INSERT rowid.
+  const row = _dbConn(handle).prepare("SELECT last_insert_rowid() AS id").get();
+  return checkInt(BigInt(row.id));
+}
+
+function dbClose(handle) {
+  // newr `db.close(handle)`: close and drop the handle. A second
+  // close (or any use after close) raises NewrError.
+  const db = _dbConnections.get(Number(handle));
+  if (db === undefined) {
+    throw new NewrError(`db: unknown or closed handle ${handle}`);
+  }
+  _dbConnections.delete(Number(handle));
+  db.close();
+  return null;
+}
+
 module.exports = {
   INT64_MIN,
   INT64_MAX,
@@ -1061,4 +1257,12 @@ module.exports = {
   fileWrite,
   fileAppend,
   fileExists,
+  dbOpen,
+  dbExec,
+  dbQuery,
+  dbBegin,
+  dbCommit,
+  dbRollback,
+  dbLastId,
+  dbClose,
 };

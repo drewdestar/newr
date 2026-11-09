@@ -34,6 +34,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.SecureRandom
+import java.sql.Connection
+import java.sql.DriverManager
+import java.sql.PreparedStatement
+import java.sql.SQLException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
@@ -1377,5 +1381,282 @@ object NewrRt {
     /** newr `file.exists(path)`. */
     fun fileExists(path: String): Boolean {
         return Files.exists(Path.of(path))
+    }
+
+    // -- db (SPEC.md section 12.5, M8a) ---------------------------
+    // The SQLite helpers over JDBC, the Kotlin twin of the Java
+    // ones in NewrRt.java. `Class.forName("org.sqlite.JDBC")`
+    // loads the driver at runtime. Handles are Longs, fd-style:
+    // ids from 1, a registry maps each id to its Connection. `?`
+    // binding is mandatory: values are never interpolated into
+    // the SQL text. The connection stays in autocommit, so
+    // `db.begin` runs an explicit BEGIN IMMEDIATE (the store's
+    // pattern) and a bare `db.exec` commits at once, mirroring
+    // the Python target. The imports above are java.sql (part of
+    // the JDK, so this file still compiles with plain kotlinc);
+    // only the driver jar is needed at runtime.
+
+    private val _dbConnections = LinkedHashMap<Long, Connection>()
+    private var _dbNextId = 1L
+
+    /** newr `db.open(path)`: open (create if needed) and return a handle. */
+    fun dbOpen(path: String): Long {
+        try {
+            Class.forName("org.sqlite.JDBC")
+            val conn = DriverManager.getConnection("jdbc:sqlite:" + path)
+            conn.createStatement().use { st ->
+                st.execute("PRAGMA foreign_keys = ON")
+                st.execute("PRAGMA busy_timeout = 5000")
+            }
+            val handle = _dbNextId
+            _dbNextId += 1
+            _dbConnections[handle] = conn
+            return handle
+        } catch (e: ClassNotFoundException) {
+            throw asError(e)
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
+    }
+
+    private fun _dbConn(handle: Long): Connection {
+        return _dbConnections[handle]
+            ?: throw NewrError("db: unknown or closed handle " + handle)
+    }
+
+    private fun _dbBind(ps: PreparedStatement, index: Int, value: Any?) {
+        // Bind by newr value type: Long as INTEGER, Double as REAL,
+        // String as TEXT, Boolean as 0/1 (JDBC has no boolean column
+        // type in SQLite). A value of any other type is a caller bug
+        // (the checker only allows int/float/str/bool binds, and
+        // never a nullable one, so null is unreachable here).
+        when (value) {
+            null -> throw NewrError("db: cannot bind a null value")
+            is Long -> ps.setLong(index, value)
+            is Double -> ps.setDouble(index, value)
+            is String -> ps.setString(index, value)
+            is Boolean -> ps.setInt(index, if (value) 1 else 0)
+            else -> throw NewrError("db: cannot bind a "
+                + value.javaClass.simpleName + " value")
+        }
+    }
+
+    private fun _dbValue(value: Any?, typeStr: String): Any? {
+        // Convert one raw SQLite value to the newr value for a
+        // `db.query` field type (`int`, `float`, `str`, `bool`,
+        // each optionally `?`). Mirrors the Python `_db_value`
+        // (newr_rt.py): NULL lands only in a nullable field, and
+        // a value that cannot convert throws instead of silently
+        // producing a wrong value.
+        val nullable = typeStr.endsWith("?")
+        val base = if (nullable) typeStr.substring(0, typeStr.length - 1)
+            else typeStr
+        if (value == null) {
+            if (nullable) {
+                return null
+            }
+            throw NewrError("db: NULL in non-nullable " + base + " field")
+        }
+        when (base) {
+            "int" -> {
+                if (value is Boolean) {
+                    throw NewrError("db: cannot convert bool to int")
+                }
+                if (value is Number) {
+                    val d = value.toDouble()
+                    if (d != Math.floor(d) || d < Long.MIN_VALUE.toDouble()
+                            || d > Long.MAX_VALUE.toDouble()) {
+                        throw NewrError("db: cannot convert " + value
+                            + " to int")
+                    }
+                    return checkInt(value.toLong())
+                }
+                if (value is String) {
+                    try {
+                        return checkInt(value.trim().toLong())
+                    } catch (e: NumberFormatException) {
+                        throw NewrError("db: cannot convert " + value
+                            + " to int")
+                    }
+                }
+                throw NewrError("db: cannot convert "
+                    + value.javaClass.simpleName + " to int")
+            }
+            "float" -> {
+                if (value is Boolean) {
+                    throw NewrError("db: cannot convert bool to float")
+                }
+                if (value is Number) {
+                    return value.toDouble()
+                }
+                if (value is String) {
+                    try {
+                        return value.trim().toDouble()
+                    } catch (e: NumberFormatException) {
+                        throw NewrError("db: cannot convert " + value
+                            + " to float")
+                    }
+                }
+                throw NewrError("db: cannot convert "
+                    + value.javaClass.simpleName + " to float")
+            }
+            "str" -> {
+                if (value is Boolean) {
+                    return if (value) "true" else "false"
+                }
+                if (value is String) {
+                    return value
+                }
+                return toStr(value)
+            }
+            "bool" -> {
+                if (value is Boolean) {
+                    return value
+                }
+                if (value is Number) {
+                    val v = value.toLong()
+                    if (v == 0L) {
+                        return false
+                    }
+                    if (v == 1L) {
+                        return true
+                    }
+                    throw NewrError("db: cannot convert " + value
+                        + " to bool")
+                }
+                if (value is String) {
+                    if (value == "0") {
+                        return false
+                    }
+                    if (value == "1") {
+                        return true
+                    }
+                    throw NewrError("db: cannot convert " + value
+                        + " to bool")
+                }
+                throw NewrError("db: cannot convert "
+                    + value.javaClass.simpleName + " to bool")
+            }
+            else -> throw NewrError("db: unknown field type " + typeStr)
+        }
+    }
+
+    /** newr `db.exec(handle, sql, args...)`: run one statement,
+     * return the rows affected (0 for DDL). */
+    fun dbExec(handle: Long, sql: String, args: Array<Any?>): Long {
+        try {
+            _dbConn(handle).prepareStatement(sql).use { ps ->
+                for (i in args.indices) {
+                    _dbBind(ps, i + 1, args[i])
+                }
+                return ps.executeUpdate().toLong()
+            }
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
+    }
+
+    /** newr `db.query(handle, sql, args...)`: run a SELECT and
+     * return one list per row, converted values in field order. A
+     * missing column throws; extra columns are ignored. */
+    fun dbQuery(handle: Long, sql: String, args: Array<Any?>,
+            fieldNames: Array<String>,
+            fieldTypes: Array<String>): List<Array<Any?>> {
+        try {
+            _dbConn(handle).prepareStatement(sql).use { ps ->
+                for (i in args.indices) {
+                    _dbBind(ps, i + 1, args[i])
+                }
+                val rows = ArrayList<Array<Any?>>()
+                ps.executeQuery().use { rs ->
+                    val meta = rs.metaData
+                    val cols = HashSet<String>()
+                    for (i in 1..meta.columnCount) {
+                        cols.add(meta.getColumnName(i))
+                    }
+                    while (rs.next()) {
+                        val row = arrayOfNulls<Any?>(fieldNames.size)
+                        for (i in fieldNames.indices) {
+                            if (!cols.contains(fieldNames[i])) {
+                                throw NewrError("db: column '"
+                                    + fieldNames[i]
+                                    + "' missing from query result")
+                            }
+                            row[i] = _dbValue(rs.getObject(fieldNames[i]),
+                                fieldTypes[i])
+                        }
+                        rows.add(row)
+                    }
+                }
+                return rows
+            }
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
+    }
+
+    /** newr `db.begin(handle)`: BEGIN IMMEDIATE. */
+    fun dbBegin(handle: Long) {
+        try {
+            _dbConn(handle).createStatement().use { st ->
+                st.execute("BEGIN IMMEDIATE")
+            }
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
+    }
+
+    /** newr `db.commit(handle)`: COMMIT. */
+    fun dbCommit(handle: Long) {
+        try {
+            _dbConn(handle).createStatement().use { st ->
+                st.execute("COMMIT")
+            }
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
+    }
+
+    /** newr `db.rollback(handle)`: ROLLBACK. */
+    fun dbRollback(handle: Long) {
+        try {
+            _dbConn(handle).createStatement().use { st ->
+                st.execute("ROLLBACK")
+            }
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
+    }
+
+    /** newr `db.last_id(handle)`: the last INSERT rowid. */
+    fun dbLastId(handle: Long): Long {
+        try {
+            val st = _dbConn(handle).createStatement()
+            try {
+                val rs = st.executeQuery("SELECT last_insert_rowid()")
+                try {
+                    rs.next()
+                    return checkInt(rs.getLong(1))
+                } finally {
+                    rs.close()
+                }
+            } finally {
+                st.close()
+            }
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
+    }
+
+    /** newr `db.close(handle)`: close and drop the handle. A second
+     * close (or any use after close) raises NewrError. */
+    fun dbClose(handle: Long) {
+        val conn = _dbConnections.remove(handle)
+            ?: throw NewrError("db: unknown or closed handle " + handle)
+        try {
+            conn.close()
+        } catch (e: SQLException) {
+            throw asError(e)
+        }
     }
 }

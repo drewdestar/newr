@@ -32,6 +32,7 @@ import re
 from pathlib import Path
 
 from . import __version__
+from .db_limits import DB_MEMBERS
 from .modules import BUILTINS, METHODS, MODULES
 from .parser import parse
 
@@ -114,6 +115,18 @@ def api_markdown() -> str:
         for name, entry in members.items():
             lines += [f"### `{module}.{name}`", "",
                       f"`{entry['sig']}`", "", entry["doc"], ""]
+    lines += [
+        "## db module (SPEC.md section 12.5)",
+        "",
+        "SQLite, sync, one connection per handle. The handle is an "
+        "`int` (fd style). `db.query` returns a typed struct list, "
+        "resolved from the expected type at the call site. Every db "
+        "call throws on failure.",
+        "",
+    ]
+    for name, entry in DB_MEMBERS.items():
+        lines += [f"### `db.{name}`", "",
+                  f"`{entry['sig']}`", "", entry["doc"], ""]
     lines += [
         "## Methods (SPEC.md section 12.4)",
         "",

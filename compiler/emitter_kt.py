@@ -1170,7 +1170,8 @@ class _KtEmitter:
                 if binding is not None and binding.kind in (
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                       or obj.name == "db"):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -1604,7 +1605,7 @@ class _KtEmitter:
                     self._fail(
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
-            if obj.name in MODULES:
+            if obj.name in MODULES or obj.name == "db":
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(java=obj.name, kind="module",
@@ -3162,6 +3163,9 @@ class _KtEmitter:
                         f"({self.emit_expr(node.args[0], 0)})",
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
+        if real == "db":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_db_call(node, args)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
@@ -3233,6 +3237,84 @@ class _KtEmitter:
                             _PREC["primary"])
                 return f"NewrRt.envGet({args[0]})", _PREC["primary"]
         self._fail(f"module `{real}` has no function `{name}`")
+
+    def _emit_db_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`db.*` calls (SPEC.md section 12.5): runtime helpers in
+        NewrRt.kt over JDBC, the Kotlin twin of the Java ones in
+        NewrRt.java. Handles are Longs, fd-style. The checker
+        (db_check) has already validated the call, so the arity
+        here is trusted. `db.query` maps each returned `Array<Any?>`
+        row to the row struct with `as` casts (a nullable field
+        stays boxed, so a NULL survives the cast)."""
+        name = node.func.name
+        self._need_sqlite()
+        if name == "open":
+            self._need_rt("dbOpen")
+            return f"NewrRt.dbOpen({args[0]})", _PREC["primary"]
+        if name == "exec":
+            self._need_rt("dbExec")
+            rest = ", ".join(args[2:])
+            return (f"NewrRt.dbExec({args[0]}, {args[1]}, "
+                    f"arrayOf({rest}))", _PREC["primary"])
+        if name == "query":
+            self._need_rt("dbQuery")
+            kt_struct, decl = self._db_row_struct(node)
+            names = [_kt_str(f.name) for f in decl.fields]
+            types = [_kt_str(self._db_field_type(f.type))
+                     for f in decl.fields]
+            casts = ", ".join(
+                f"row[{i}] as {self._kt_boxed_type(f.type)}"
+                for i, f in enumerate(decl.fields))
+            names_lit = "arrayOf(" + ", ".join(names) + ")"
+            types_lit = "arrayOf(" + ", ".join(types) + ")"
+            rest = ", ".join(args[2:])
+            return (f"NewrRt.dbQuery({args[0]}, {args[1]}, "
+                    f"arrayOf({rest}), {names_lit}, {types_lit})"
+                    f".map {{ row -> {kt_struct}({casts}) }}"
+                    f".toMutableList()",
+                    _PREC["primary"])
+        if name == "begin":
+            self._need_rt("dbBegin")
+            return f"NewrRt.dbBegin({args[0]})", _PREC["primary"]
+        if name == "commit":
+            self._need_rt("dbCommit")
+            return f"NewrRt.dbCommit({args[0]})", _PREC["primary"]
+        if name == "rollback":
+            self._need_rt("dbRollback")
+            return f"NewrRt.dbRollback({args[0]})", _PREC["primary"]
+        if name == "last_id":
+            self._need_rt("dbLastId")
+            return f"NewrRt.dbLastId({args[0]})", _PREC["primary"]
+        if name == "close":
+            self._need_rt("dbClose")
+            return f"NewrRt.dbClose({args[0]})", _PREC["primary"]
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (Kotlin constructor, decl) of the row struct for a
+        `db.query` call. The row type comes from `node.expr_type`,
+        set by db_check to `list[Row]`. A struct from an imported
+        file module resolves to its qualified class name."""
+        t = self._type_of(node)
+        if t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._struct_kt_name(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    return self._struct_kt_name(row_name), s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:

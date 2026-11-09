@@ -33,6 +33,7 @@ exception to the numbering scheme, not an oversight.
 | `E2008` | Discord rule violation |
 | `E2009` | i18n violation (`strings`/`t()`) |
 | `E2010` | Not all paths answer (command handler) |
+| `E2011` | db module rule violation |
 
 ## Resolver — `E3xxx`
 

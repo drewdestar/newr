@@ -40,6 +40,7 @@ from .init import (
     default_target_for,
     scaffold,
 )
+from .db_check import check_db
 from .discord_check import check_discord, discord_providers
 from .errors import Diagnostic, NewrError, Span
 from .resolver import resolve_source
@@ -381,6 +382,16 @@ A command handler can finish without answering the interaction. Every
 branch of a handler must end in a reply, defer, edit, or followup (or
 throw). An `if` counts only with an `else` whose branches all answer;
 `for`/`while` never count, because they may run zero times.""",
+    "E2011": """E2011: db module rule violation.
+
+A rule of the db module was broken: an unknown db function, the wrong
+number of arguments, a handle or SQL argument of the wrong type, a
+bound value that is not an int, float, str, or bool, a placeholder
+count mismatch between the SQL and the bound values, a `db.query`
+with no expected row type (annotate the let with `list[RowStruct]`),
+a row struct field that cannot be read from a row, a second
+`db.begin` on a handle already in a transaction, or a use of a closed
+handle. The diagnostic names the rule and the fix.""",
     "E3001": """E3001: undefined name.
 
 There is no binding with this name in scope. Check the spelling — the
@@ -531,6 +542,7 @@ def _run_pipeline(path: Path, *, fast: bool) -> tuple[
         core = check_program(resolved.program, providers=providers)
         diagnostics += core.diagnostics
         diagnostics += check_discord(resolved.program)
+        diagnostics += check_db(resolved.program)
     return resolved.program, diagnostics, source
 
 

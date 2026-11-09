@@ -31,6 +31,15 @@ def _discord_literal_lines(path: Path) -> list[tuple[int, str]]:
     return out
 
 
+def _db_literal_lines(path: Path) -> list[tuple[int, str]]:
+    out = []
+    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(),
+                            start=1):
+        if '"db"' in line:
+            out.append((i, line.strip()))
+    return out
+
+
 class TestCoreDiscordBoundary(unittest.TestCase):
     def test_checker_import_does_not_load_discord_modules(self):
         for mod in ("compiler.discord_check", "compiler.discord_limits"):
@@ -80,6 +89,78 @@ class TestCoreDiscordBoundary(unittest.TestCase):
         src = path.read_text(encoding="utf-8")
         reserved = src.split("RESERVED_BUILTIN_NAMES", 1)[1]
         self.assertIn('"discord"', reserved[:300])
+
+
+class TestCoreDbBoundary(unittest.TestCase):
+    """The db twin of the discord boundary (SPEC.md SS2.1, SS12.5):
+    the core checker never imports anything db, and the literal
+    "db" occurs in core only at the documented exemption sites."""
+
+    def test_checker_import_does_not_load_db_modules(self):
+        for mod in ("compiler.db_check", "compiler.db_limits"):
+            sys.modules.pop(mod, None)
+        import compiler.checker  # noqa: F401
+        self.assertNotIn("compiler.db_check", sys.modules)
+        self.assertNotIn("compiler.db_limits", sys.modules)
+
+    def test_checker_source_has_no_db_import(self):
+        path = _root() / "compiler" / "checker.py"
+        src = path.read_text(encoding="utf-8")
+        for line in src.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("import ", "from ")):
+                self.assertNotIn("db_", stripped,
+                                 f"core checker imports a db module: {line!r}")
+
+    def test_db_check_is_the_only_db_limits_importer(self):
+        # db_check.py imports the db limits (and docs.py renders the
+        # surface from them into api.md); the core checker does not.
+        path = _root() / "compiler" / "db_check.py"
+        src = path.read_text(encoding="utf-8")
+        self.assertIn("db_limits", src)
+        docs = (_root() / "compiler" / "docs.py").read_text(
+            encoding="utf-8")
+        self.assertIn("db_limits", docs)
+
+    def test_checker_db_literal_only_at_bypass_sites(self):
+        # SPEC.md SS2.1 + SS12.2 + SS12.5: `db` is usable by name
+        # without an import, and the core checker returns UNKNOWN
+        # for db calls (the rules live in db_check.py). The name
+        # occurs at exactly six sites: two UNKNOWN bypasses (`if
+        # mod == "db": return UNKNOWN`) and four no-import fallback
+        # guards (the N-09/N-10 pattern, mirroring the emitters)
+        # that route a bare `db` to the bypass — never a db rule.
+        hits = _db_literal_lines(_root() / "compiler" / "checker.py")
+        self.assertEqual(len(hits), 6, hits)
+        bypasses = [line for _n, line in hits
+                    if line == 'if mod == "db":']
+        self.assertEqual(len(bypasses), 2, hits)
+        fallbacks = [line for _n, line in hits
+                     if line != 'if mod == "db":']
+        self.assertEqual(len(fallbacks), 4, hits)
+        for line in fallbacks:
+            self.assertTrue(
+                line.startswith(("or obj.name",
+                                 "elif target is None")),
+                line)
+
+    def test_resolver_db_literal_only_at_exemption_sites(self):
+        hits = _db_literal_lines(_root() / "compiler" / "resolver.py")
+        # The NAMED_MODULES registry only; db needs no W1002-style
+        # exemption (no implicit import).
+        self.assertEqual(len(hits), 1, hits)
+        joined = " ".join(line for _n, line in hits)
+        self.assertIn("NAMED_MODULES", joined)
+
+    def test_modules_db_literal_only_in_reserved_names(self):
+        # SPEC.md SS2.1: the one occurrence is the RESERVED_BUILTIN_NAMES
+        # entry (a module name a program may not redefine).
+        path = _root() / "compiler" / "modules.py"
+        hits = _db_literal_lines(path)
+        self.assertEqual(len(hits), 1, hits)
+        src = path.read_text(encoding="utf-8")
+        reserved = src.split("RESERVED_BUILTIN_NAMES", 1)[1]
+        self.assertIn('"db"', reserved[:300])
 
 
 if __name__ == "__main__":

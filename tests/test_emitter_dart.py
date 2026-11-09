@@ -692,5 +692,116 @@ class TestInput(unittest.TestCase):
         self.assertIn('NewrRt.input("Name? ")', text)
 
 
+class TestDb(unittest.TestCase):
+    """db module on Dart (SPEC.md section 12.5, M8a): `db.*` calls
+    emit to the `NewrDb` class over package:sqlite3 (the store's
+    library, 3.9.0), and a program using them runs after
+    `dart pub get` (the pubspec carries sqlite3 only, no nyxx)."""
+
+    def _emit(self, src, stem="Probe"):
+        from compiler.db_check import check_db
+        resolved = resolve_source(src, "<db-test>.newr")
+        diags = list(resolved.diagnostics)
+        diags += check_program(
+            resolved.program,
+            providers=discord_providers(resolved.program)).diagnostics
+        diags += check_discord(resolved.program)
+        diags += check_db(resolved.program)
+        bad = [d for d in diags if d.is_error()]
+        self.assertEqual(bad, [], [f"{d.code}: {d.message}" for d in bad])
+        return emit_dart(resolved.program, main_path="<db-test>.newr",
+                         sources={"<db-test>.newr": src},
+                         output_stem=stem)
+
+    def _run(self, src, stem="Probe"):
+        result = self._emit(src, stem)
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in result.files.items():
+                (Path(d) / name).write_text(text, encoding="utf-8")
+            if result.uses_rt:
+                (Path(d) / "newr_rt.dart").write_text(
+                    RT_DART_SRC.read_text(encoding="utf-8"),
+                    encoding="utf-8")
+            # The pubspec needs `dart pub get` before the program
+            # can run (package:sqlite3 is not in the SDK). Try
+            # offline first (the cache has sqlite3 3.9.0 from M5),
+            # fall back to the network. The program must run with
+            # `dart run`, not plain `dart <file>`: only `dart run`
+            # executes the sqlite3 build hook, which downloads the
+            # precompiled libsqlite3 native asset (plain `dart`
+            # only reads an existing native_assets.yaml and dies
+            # with "No available native assets" without it).
+            proc = subprocess.run(
+                [DART, "pub", "get", "--offline"],
+                capture_output=True, text=True, cwd=d)
+            if proc.returncode != 0:
+                proc = subprocess.run(
+                    [DART, "pub", "get"],
+                    capture_output=True, text=True, cwd=d)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            proc = subprocess.run(
+                [DART, "run", result.main_file],
+                capture_output=True, text=True, cwd=d)
+            return proc.stdout, proc.stderr, proc.returncode
+
+    @unittest.skipUnless(DART, "a Dart SDK is not installed")
+    def test_db_probe_runs(self):
+        src = ('struct Todo:\n'
+               '  id: int\n'
+               '  title: str\n'
+               '  done: bool\n'
+               '\n'
+               'let h = db.open(":memory:")\n'
+               'db.exec(h, "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")\n'
+               'let n = db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "beli susu", false)\n'
+               'print(n)\n'
+               'let id = db.last_id(h)\n'
+               'print(id)\n'
+               'let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "UPDATE todos SET done = ? WHERE id = ?", true, 1)\n'
+               'db.commit(h)\n'
+               'let todos2: list[Todo] = db.query(h, "SELECT id, title, done FROM todos WHERE done = ?", true)\n'
+               'print(todos2)\n'
+               'db.begin(h)\n'
+               'db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "rollback me", false)\n'
+               'db.rollback(h)\n'
+               'let todos3: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               'print(todos3)\n'
+               'db.close(h)\n')
+        out, err, code = self._run(src)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            out,
+            "1\n1\n[Todo(id: 1, title: beli susu, done: false)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n"
+            "[Todo(id: 1, title: beli susu, done: true)]\n")
+
+    def test_db_uses_newr_db_helpers(self):
+        text = self._emit(
+            'let h = db.open(":memory:")\n'
+            'db.exec(h, "CREATE TABLE t (v INTEGER)")\n'
+            'db.close(h)\n').files["Probe.dart"]
+        self.assertIn("class NewrDb {", text)
+        self.assertIn("NewrDb.open(", text)
+        self.assertIn("NewrDb.exec(", text)
+        self.assertIn("NewrDb.close(", text)
+
+    def test_db_pubspec_has_sqlite_reference(self):
+        result = self._emit(
+            'let h = db.open(":memory:")\n'
+            'db.close(h)\n')
+        self.assertIn("pubspec.yaml", result.files)
+        self.assertIn("  sqlite3: 3.9.0",
+                      result.files["pubspec.yaml"])
+        self.assertNotIn("nyxx", result.files["pubspec.yaml"])
+
+    def test_plain_program_has_no_pubspec(self):
+        result = emit_dart_src('print "Hello, world!"\n',
+                               "examples/hello.newr", "Hello")
+        self.assertNotIn("pubspec.yaml", result.files)
+
+
 if __name__ == "__main__":
     unittest.main()

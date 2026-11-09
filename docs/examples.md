@@ -42,3 +42,12 @@ Then run it with: DISCORD_TOKEN=... python examples/showcase.py
 ### fn `double`
 
 Doubles a number.
+
+## `todo.newr`
+
+### struct `Todo`
+
+todo.newr, a todo list stored in SQLite (M8a example).
+Add rows, list them, mark one done, list again. Runs on :memory:
+so every run prints the same output.
+Build it with: newr build examples/todo.newr

@@ -23,6 +23,14 @@ from compiler.newr_rt import (
     as_error,
     check_int,
     coalesce,
+    db_begin,
+    db_close,
+    db_commit,
+    db_exec,
+    db_last_id,
+    db_open,
+    db_query,
+    db_rollback,
     err,
     file_append,
     file_exists,
@@ -480,6 +488,79 @@ class TestAsError(unittest.TestCase):
         wrapped = as_error("plain message")
         self.assertIsInstance(wrapped, NewrError)
         self.assertEqual(wrapped.message, "plain message")
+
+
+class TestDb(unittest.TestCase):
+    """db helpers (SPEC.md section 12.5, M8a): open/exec/query,
+    transactions, last_id, close. Mirrored in tests/js/rt_tests.js."""
+
+    def test_open_exec_query_close(self):
+        h = db_open(":memory:")
+        self.assertEqual(db_exec(h, "CREATE TABLE t (id INTEGER PRIMARY "
+                                 "KEY AUTOINCREMENT, title TEXT NOT "
+                                 "NULL, done INTEGER NOT NULL)", []), 0)
+        self.assertEqual(db_exec(h, "INSERT INTO t (title, done) "
+                                 "VALUES (?, ?)",
+                                 ["beli susu", False]), 1)
+        self.assertEqual(db_last_id(h), 1)
+        rows = db_query(h, "SELECT id, title, done FROM t", [],
+                        ["id", "title", "done"],
+                        ["int", "str", "bool"])
+        self.assertEqual(rows, [[1, "beli susu", False]])
+        db_close(h)
+
+    def test_transaction_commit_and_rollback(self):
+        h = db_open(":memory:")
+        db_exec(h, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)",
+                [])
+        db_exec(h, "INSERT INTO t (v) VALUES (?)", ["keep"])
+        db_begin(h)
+        db_exec(h, "INSERT INTO t (v) VALUES (?)", ["drop"])
+        db_rollback(h)
+        rows = db_query(h, "SELECT v FROM t", [], ["v"], ["str"])
+        self.assertEqual(rows, [["keep"]])
+        db_begin(h)
+        db_exec(h, "INSERT INTO t (v) VALUES (?)", ["kept"])
+        db_commit(h)
+        rows = db_query(h, "SELECT v FROM t ORDER BY id", [],
+                        ["v"], ["str"])
+        self.assertEqual(rows, [["keep"], ["kept"]])
+        db_close(h)
+
+    def test_closed_handle_throws(self):
+        h = db_open(":memory:")
+        db_close(h)
+        with self.assertRaises(NewrError):
+            db_exec(h, "SELECT 1", [])
+        with self.assertRaises(NewrError):
+            db_close(h)
+
+    def test_missing_column_and_null(self):
+        h = db_open(":memory:")
+        db_exec(h, "CREATE TABLE t (id INTEGER, note TEXT)", [])
+        db_exec(h, "INSERT INTO t (id) VALUES (?)", [7])
+        with self.assertRaises(NewrError):
+            db_query(h, "SELECT id FROM t", [], ["id", "nope"],
+                     ["int", "str"])
+        with self.assertRaises(NewrError):
+            db_query(h, "SELECT id, note FROM t", [], ["id", "note"],
+                     ["int", "str"])
+        rows = db_query(h, "SELECT id, note FROM t", [],
+                        ["id", "note"], ["int", "str?"])
+        self.assertEqual(rows, [[7, None]])
+        db_close(h)
+
+    def test_file_database(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.db")
+            h = db_open(path)
+            db_exec(h, "CREATE TABLE t (v INTEGER)", [])
+            db_exec(h, "INSERT INTO t (v) VALUES (?)", [42])
+            db_close(h)
+            h = db_open(path)
+            rows = db_query(h, "SELECT v FROM t", [], ["v"], ["int"])
+            self.assertEqual(rows, [[42]])
+            db_close(h)
 
 
 if __name__ == "__main__":

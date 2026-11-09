@@ -88,6 +88,7 @@ from pathlib import Path
 
 from . import ast_nodes as A
 from .checker import check_program
+from .db_check import check_db
 from .discord_check import check_discord, discord_providers
 from .errors import Diagnostic, NewrError, Span
 from .init import VALID_TARGETS
@@ -319,7 +320,8 @@ def _check_full(program: A.Program) -> list[Diagnostic]:
     cannot be emitted."""
     providers = discord_providers(program)
     core = check_program(program, providers=providers)
-    return list(core.diagnostics) + check_discord(program)
+    return list(core.diagnostics) + check_discord(program) \
+        + check_db(program)
 
 
 def _diag_text(diag: Diagnostic, source: str) -> str:
