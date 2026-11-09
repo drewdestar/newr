@@ -123,9 +123,14 @@ Nothing here is an estimate except where it says so.
 
 ### Route A: PyPI + zipapp (today's route)
 
-- Download: the `.pyz` is 2,430,019 bytes measured. The pip package
-  would be about the same size plus metadata (UNVERIFIED, not
-  published yet).
+- Download: the clean `.pyz` is 675,375 bytes measured (10 Nov
+  2026, `scripts/build-zipapp.sh`, compressed; the old design-doc
+  figure of 2,430,019 bytes was the uncompressed staging size).
+  The pip package is 681,710 bytes as a wheel and 664,605 bytes
+  as an sdist (same date, `python -m build`, build 1.6.1).
+  Not published yet: `newr-lang` is still free on PyPI (404 on
+  the JSON API, rechecked 10 Nov 2026) and publishing needs a
+  PyPI account plus API token from the user.
 - Needs first: CPython 3.10+ installed (55 MB of stdlib on disk here;
   the Windows installer download is roughly 28 MB, UNVERIFIED).
   Then `pip install newr-lang` or download the `.pyz` and run
@@ -563,3 +568,51 @@ newr-research/m7-build), a manylinux_2_17 build for old
 glibc, and distribution via GitHub Releases (not decided yet).
 The Linux binary here was built against glibc 2.39 and is not
 expected to run on glibc 2.17 systems.
+
+## 12. M7 PyPI + clean zipapp build (10 Nov 2026, Linux x86_64)
+
+Built from tree 0.2.0 (commit 0e6f316, M8a db module) with
+`python -m build` 1.6.1 and `scripts/build-zipapp.sh`.
+Packaging files: `pyproject.toml` (setuptools backend, version
+single-sourced from `compiler.__version__`, console script
+`newr = compiler.cli:main`, Python `>=3.10`, no runtime
+dependencies) plus `MANIFEST.in` (sdist ships the seven
+`compiler/newr_rt.*` runtime files).
+
+Measured on this VM (Linux x86_64, Python 3.12.3):
+
+- PyPI name `newr-lang`: still FREE, rechecked live 10 Nov
+  2026 via the PyPI JSON API (404 `{"message": "Not Found"}`).
+- Clean `.pyz`: 675,375 bytes (about 0.64 MB), 34 entries,
+  built by `scripts/build-zipapp.sh` from a staging dir with
+  only `compiler/` plus `__main__.py`. The old design figure
+  of 2.4 MB was the uncompressed size; the naive full-tree
+  `.pyz` is 51.7 MB and is what the script exists to avoid.
+- Wheel `newr_lang-0.2.0-py3-none-any.whl`: 681,710 bytes,
+  38 entries, all seven `newr_rt.*` files present, entry point
+  `newr = compiler.cli:main`, metadata Name newr-lang,
+  Version 0.2.0, Requires-Python >=3.10, License-Expression
+  MIT. Sdist `newr_lang-0.2.0.tar.gz`: 664,605 bytes, same
+  seven runtime files, no `tests/` directory shipped.
+- `.pyz` smoke: `version` prints `newr 0.2.0`; `check`
+  passes for hello and shop (shop: 3 known baseline warnings);
+  `build` passes for all seven targets on shop, exit 0 each,
+  and the emitted files are byte-identical to the repo
+  launcher's output (`diff -r`, no differences). The runtime
+  files are copied next to emitted output from inside the zip,
+  so `importlib.resources` works from a zipapp. Emitted hello
+  from the `.pyz` runs and prints `Hello, world!`.
+- Installed wheel smoke (fresh venv, `pip install` from the
+  local wheel): `newr version` prints `newr 0.2.0`, `newr
+  check` passes, `newr build --target py` on hello runs to
+  `Hello, world!`, and on shop copies `newr_rt.py` next to
+  the output and emits code identical to the launcher apart
+  from the source-path header comment.
+
+Not published: uploading to PyPI needs a PyPI account plus
+API token from the user (not requested yet). The README
+install section stays future-tense until the first real
+publish. CI note: `.github/workflows/ci.yml` still builds
+its `.pyz` with the naive `python -m zipapp .` (51.7 MB);
+switching that job to `scripts/build-zipapp.sh` is a
+follow-up, not done in this step.

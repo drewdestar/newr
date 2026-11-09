@@ -1,0 +1,64 @@
+# newr packaging (M7 step 2: PyPI + clean zipapp).
+#
+# Build backend: setuptools, chosen because it is the backend already
+# present on every machine that has pip, it needs no extra tooling
+# beyond `python -m build`, and the compiler has no build-time code
+# generation to justify hatchling or flit. The package is pure
+# standard library, so there are no runtime dependencies.
+#
+# Version is single-sourced: `compiler/__init__.py` holds
+# `__version__ = "0.2.0"` and this file reads it via
+# `[tool.setuptools.dynamic]`, so `./newr version`, the wheel, and
+# the sdist can never disagree.
+#
+# The console script points at the real entry point, the same one the
+# `newr` launcher and `__main__.py` (zipapp) use:
+# `compiler.cli:main`.
+#
+# Included in the wheel/sdist: the `compiler` package only, plus the
+# seven `compiler/newr_rt.*` runtime files the emitters copy next to
+# emitted output (read via `importlib.resources`, so they work from
+# an installed wheel and from a zipapp alike). Tests, goldens,
+# conformance, benchmarks, stress, docs, and examples are NOT
+# shipped; that is what keeps the distribution small (see
+# scripts/build-zipapp.sh for the same clean rule on the .pyz).
+
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "newr-lang"
+dynamic = ["version"]
+description = "newr is a general-purpose programming language: one readable source, seven readable outputs"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "drewdestar" }]
+keywords = ["language", "compiler", "transpiler"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Compilers",
+]
+
+[project.urls]
+Homepage = "https://github.com/drewdestar/newr"
+Repository = "https://github.com/drewdestar/newr"
+
+[project.scripts]
+newr = "compiler.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "compiler.__version__" }
+
+[tool.setuptools]
+packages = ["compiler"]
+
+[tool.setuptools.package-data]
+compiler = ["newr_rt.*"]
