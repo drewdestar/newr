@@ -224,7 +224,7 @@ class TestScaffold(unittest.TestCase):
                 (Path(tmp) / "demo" / "newr.json").read_text(
                     encoding="utf-8"))
             self.assertEqual(data, {
-                "name": "demo", "version": "0.1.0",
+                "name": "demo", "version": "0.2.0",
                 "target": "js", "default_locale": "en",
             })
 

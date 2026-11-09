@@ -75,6 +75,11 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
                          or a directory (all .newr files under it);
                          with no paths, every .newr file in the
                          current directory
+  docs [--out <dir>]     generate the docs (stdlib API reference
+                         from compiler/modules.py plus one section
+                         per program in examples/ from its `///`
+                         doc comments); writes api.md and
+                         examples.md into docs/ by default
   help [command]         show this help, or help for one command
   version                print the newr version
   explain <code>         explain a diagnostic code (also: --explain <code>)
@@ -147,7 +152,7 @@ AND all Discord validation — it cannot be combined with emission
 """,
     "version": """Usage: newr version
 
-Print the newr version (currently 0.1.0).
+Print the newr version (currently 0.2.0).
 """,
     "explain": """Usage: newr explain <code>   (also: newr --explain <code>)
 
@@ -161,7 +166,7 @@ Show the general help, or help for one command.
 
 Rewrite .newr files in the canonical form (SPEC.md section 19): 2-space
 indent, single spaces around operators, literals and durations keep
-their source spelling, `#` comments are preserved, `print` is written
+their source spelling, `#` and `///` comments are preserved, `print` is written
 without parentheses, and the file ends with exactly one newline.
 Formatting is idempotent: fmt(fmt(x)) == fmt(x).
 
@@ -233,6 +238,19 @@ token to start. A file with no tests passes with "no tests".
 Exit 0 when every test passes, 4 when a program has a
 build error or any test fails, 2 when a file cannot be read or
 the target's toolchain is missing, 1 on a usage error.
+""",
+    "docs": """Usage: newr docs [--out <dir>]
+
+Generate the documentation for this checkout: the stdlib API
+reference from compiler/modules.py (SPEC.md section 12) and one
+section per program in examples/ from the `///` doc comments in
+the source (SPEC.md section 6). Writes api.md, and examples.md
+when an examples/ directory exists in the current directory.
+The default output directory is docs/.
+
+The generated files are deterministic: running the command twice
+produces identical bytes. Exit 0 on success, 2 when the output
+directory cannot be written, 1 on a usage error.
 """,
 }
 
@@ -912,6 +930,48 @@ def _cmd_init(args: list[str], *, json_mode: bool,
     return 0
 
 
+def _cmd_docs(args: list[str], *, json_mode: bool,
+              error_format_json: bool) -> int:
+    """`newr docs [--out <dir>]`: generate the documentation.
+
+    Writes the stdlib API reference (from compiler/modules.py) as
+    api.md, and one section per program in examples/ (from the
+    `///` doc comments in the source) as examples.md, into the
+    output directory (docs/ by default). See compiler/docs.py.
+    """
+    from .docs import generate_docs
+
+    out = Path("docs")
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--out" and i + 1 < len(args):
+            out = Path(args[i + 1])
+            i += 2
+        elif arg.startswith("--out="):
+            out = Path(arg.split("=", 1)[1])
+            i += 1
+        elif arg.startswith("-"):
+            raise _UsageError(f"unknown flag(s) for `newr docs`: {arg}")
+        else:
+            raise _UsageError(
+                f"unexpected argument for `newr docs`: {arg}")
+    try:
+        written = generate_docs(out, Path.cwd())
+    except OSError as exc:
+        raise _EnvError(f"cannot write docs to {out}: {exc}") from exc
+    data = {"files": [str(out / name) for name in written]}
+    if json_mode:
+        print(json.dumps(_envelope("docs", data, [])))
+        return 0
+    if error_format_json:
+        print("[]")
+        return 0
+    for name in written:
+        print(f"wrote {out / name}")
+    return 0
+
+
 def _cmd_check(args: list[str], *, json_mode: bool,
                error_format_json: bool) -> int:
     fast = "--fast" in args
@@ -1384,5 +1444,8 @@ def _dispatch(argv: list[str], *, json_mode: bool,
                          error_format_json=error_format_json)
     if cmd == "test":
         return _cmd_test(args, json_mode=json_mode,
+                         error_format_json=error_format_json)
+    if cmd == "docs":
+        return _cmd_docs(args, json_mode=json_mode,
                          error_format_json=error_format_json)
     raise _UsageError(f"unknown command `{cmd}`. Run `newr help`.")

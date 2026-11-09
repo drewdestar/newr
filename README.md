@@ -6,7 +6,7 @@ target languages — one readable source, seven readable outputs, with
 each target's libraries available. A Discord bot is one use of newr,
 through the `discord` module; the language itself is not bot-specific.
 
-Version 0.1.0. Python 3.10+. The compiler is Python standard library only.
+Version 0.2.0. Python 3.10+. The compiler is Python standard library only.
 
 ## The v1 story
 
@@ -37,7 +37,14 @@ newr check examples/hello.newr
 - M3: JavaScript emitter COMPLETE.
 - M4: Java + C# emitters COMPLETE — suite 902/902, conformance 74/74
   on all four targets (py, js, java, cs), cold re-evaluation CLEAN.
-- M5: Rust + Kotlin + Dart emitters IN PROGRESS.
+- M5: Rust + Kotlin + Dart emitters COMPLETE, suite 963/963,
+  conformance 74/74 on all seven targets (py, js, java, cs, rs, kt,
+  dart), cold re-evaluation CLEAN.
+- M6: the toolchain, `newr fmt` (canonical formatting), `newr init`
+  (project scaffold + `newr.json`), `newr test` (test functions and
+  test blocks), `newr fix` (safe E3001 renames), `newr docs`
+  (generated docs from `///` comments). Suite 1209/1209,
+  conformance 79/79 on all seven targets. Version 0.2.0.
 
 `newr build --target py|js|java|cs <file.newr>` emits readable code
 for the chosen target. See [BUILD_REPORT.md](BUILD_REPORT.md) for
@@ -63,13 +70,33 @@ artifact yet.
 ```sh
 newr check <file.newr>        # parse + resolve + check, print errors and warnings
 newr build --check <file.newr> # same checks; writes nothing
-newr build --target py|js|java|cs <file.newr> # emit readable code for the target
+newr build --target py|js|java|cs|rs|kt|dart <file.newr> # emit readable code for the target
+newr fmt <file.newr>          # rewrite in canonical form (see `newr help fmt`)
+newr fix <file.newr>          # apply safe fixes for errors that have one (see `newr help fix`)
+newr test <file.newr>         # run the file's tests (see `newr help test`)
+newr docs                     # generate docs/api.md and docs/examples.md (see `newr help docs`)
 ```
 
 `newr build` without `--check` or `--target` is a usage error.
 Exit codes: 0 success, 1 usage, 2 environment, 4 build error.
 (There is no exit code 3 in M1 — the spec reserves 3 for network errors,
 which no M1 command can produce.)
+
+## Documenting your code
+
+A `///` line at the start of a logical line documents the declaration
+directly below it:
+
+```newr
+/// Doubles a number.
+fn double(x: int) -> int:
+  return x * 2
+```
+
+A `///` block at the top of a file, followed by a blank line, is the
+file header. `newr docs` renders the comments into `docs/api.md`
+(the stdlib reference) and `docs/examples.md` (one section per
+example program). See [docs/guide.md](docs/guide.md).
 
 ## The language, briefly
 
@@ -111,7 +138,7 @@ See [SPEC.md](SPEC.md) for the full specification.
 ## Project layout
 
 ```
-SPEC.md            the language specification (v0.1.0, frozen at M0)
+SPEC.md            the language specification (v0.2.0)
 compiler/          the compiler front end (lexer, parser, AST, resolver, checker)
 tests/             front-end test suite (python -m unittest discover -s tests)
 examples/          .newr examples, plus the v0 golden outputs (hello.py, showcase.py)

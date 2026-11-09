@@ -1,7 +1,7 @@
 # newr — Language Specification v1
 
 **Status:** SPEC FROZEN (M0), 6 November 2026.
-**Version:** newr 0.1.0 (the language line; distinct from `discord-py-skills` 0.5.0).
+**Version:** newr 0.2.0 (the language line; distinct from `discord-py-skills` 0.5.0).
 **Authors:** chie (Muse) for drewdestar/newr (repo not yet created — LOCAL ONLY).
 
 This document is the contract M1–M6 build against. Changing it later needs a
@@ -526,12 +526,21 @@ information-theoretically ambiguous; the honest response is a precise
   (full list in §6.1). An identifier that starts with a digit is an error.
 - **Comments:** `#` to end of line. There is no block comment in v1
   (documented; add one only if demanded — a block comment is a lexer
-  feature, not a language feature). There is also **no doc-comment
-  syntax in v1** (no `///`, no `DocComment` token): a `#` comment
-  above a declaration is an ordinary comment, never carried into
-  emitted code as a docstring — the emitter's "doc comments →
-  docstrings" mapping is vacuous until the doc-comment syntax is
-  frozen (M6, §24 idea 14).
+  feature, not a language feature). **Doc comments are frozen in M6:**
+  a `///` line at the start of a logical line documents the
+  declaration or statement directly below it (the text after `///`,
+  one leading space stripped). Several `///` lines in a row join into
+  one doc. A blank line between the comment and the item breaks the
+  attachment. A `///` block at the very top of a file, followed by a
+  blank line, is the file header: it documents the file, not the
+  first item. `///` after code on the same line is not a doc comment
+  (it stays three division operators). A `#` comment above a
+  declaration is an ordinary comment, never a doc comment. Doc
+  comments are syntax only: they change no checking, resolution, or
+  emitted code, and `newr docs` renders them into Markdown (§19).
+  The stdlib's own members carry their doc text as `doc` strings in
+  `compiler/modules.py` (§12): the stdlib has no newr source
+  declarations to hang a `///` comment on.
 
 ### 6.1 Keywords (reserved)
 
@@ -1171,15 +1180,13 @@ finally:
   install` for shared modules).
 - Imported files are compiled with the importing file (one program, one
   build). The cache (§4.1) tracks the import graph.
-- **Manifest (`newr.json`) — DRAFT schema, compiler support in M4:**
+- **Manifest (`newr.json`), compiler support in M6 (Phase 2b):**
   `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str }` — `name` and
   `version` are required; `target`, `default_locale`, and `db_path`
   are optional. (Secrets NEVER go in it — the token stays in `.env`.)
-  The schema is a draft until M4 decides it (the M4/M6 decision in
-  §25 records the same deferral); v1 resolution needs no manifest —
-  relative paths only. `newr init` (M4) scaffolds it. (Recorded as "G9
-  partially applied; manifest deferred to M4 with reason" in
-  BUILD_REPORT.md.)
+  The schema is the one `newr init` scaffolds and `newr build` reads
+  (M6 Phase 2b); v1 resolution needs no manifest,
+  relative paths only. `newr init` (M6) scaffolds it.
 
 ## 12. Standard library
 
@@ -1187,7 +1194,10 @@ The stdlib is **modules**, not builtins-in-the-language. Core modules are
 available on every target; domain modules are available where their domain
 exists. The rule for adding a builtin later: it must be needed by at least
 two of the repo's own example programs, and it must have identical semantics
-on all shipped targets.
+on all shipped targets. Every member below is documented in
+`compiler/modules.py` (a `doc` string beside its signature) and rendered
+by `newr docs` into `docs/api.md`; the generated reference lists every
+member here with no omissions.
 
 ### 12.1 Core builtins (available without import)
 
@@ -1755,9 +1765,10 @@ a Node script in TS, a `main()` in Java/C#/Rust/Kotlin/Dart).
 | `newr fix` | Yes (M6, minimal) | Applies safe, unambiguous diagnostic fixes (§5.2). |
 | `newr --explain <code>` | Yes (M1) | Prints the long form of a diagnostic code (§16). |
 | `newr --error-format=json` | Yes (M1) | One JSON object per diagnostic, same fields (§16). |
-| `newr fmt` | **NOT in v1** — M4/M6 | Canonical formatting, idempotent, `fmt --check` for CI. |
-| `newr init` | **NOT in v1** — M4/M6 | Scaffolds a newr project (`main.newr` + `newr.json` + `locales/` + `.env.example` + `.gitignore`). |
-| `newr.json` | Schema defined in §11; **compiler support M4** | Project config `{name, version, target, default_locale, db_path}`. Secrets NEVER go in it — the token stays in `.env`. |
+| `newr fmt` | Yes (M6) | Canonical formatting, idempotent, `fmt --check` for CI. |
+| `newr init` | Yes (M6) | Scaffolds a newr project (`main.newr` + `newr.json` + `locales/` + `.env.example` + `.gitignore`). |
+| `newr.json` | Schema defined in §11; **compiler support M6** | Project config `{name, version, target, default_locale, db_path}`. Secrets NEVER go in it, the token stays in `.env`. |
+| `newr docs` | Yes (M6) | Generates the docs (§6, §12): the stdlib API reference from `compiler/modules.py` plus one section per program in `examples/` from its `///` doc comments. Writes `api.md` and `examples.md` into `docs/` by default. |
 | `newr test` | Yes (M6) | Built-in testing in the same language (§8.7, §24.2 #13): `fn test_*()` functions and `test "name":` blocks, run through one target's emitter in a temporary directory. Exit 0 when every test passes, 4 on a build error or any test failure, 2 on an unreadable file or missing toolchain, 1 on a usage error. |
 | `newr --help` / `newr help` | Yes | Usage for every command. |
 
@@ -1774,7 +1785,7 @@ configuration (deploy concern). Custom emoji / stickers. Threads /
 forums / scheduled events. Classes (structs cover the data case — §8.5).
 User-defined generics (v2 — §7.7; built-in generics are in v1). Full
 pattern exhaustiveness / usefulness (v2 — core `match` is in v1, §9.6).
-`json` module (§12.2, v1.1). `newr fix`/`fmt`/`init` (§19, M4/M6).
+`json` module (§12.2, v1.1). `newr fix`/`fmt`/`init`/`docs` (§19, M6).
 Subprocess/shell (§3.4). Regex (§12.3). Crypto builtins (§12.3). Threads
 / shared mutability (v1.1+ — §8.4). Reflection splicing / codegen
 (later — a narrow `reflect` API first). Full TCO (later — explicit
@@ -2088,7 +2099,7 @@ verifiable output) has a structural advantage GitHub itself now names.
 | 11 | Fast + incremental builds | **v1** (design); **M4** (cache) | §4.1. The cache design is frozen now; the simple form (rebuild everything — fast enough for small projects) ships in v1, the cache lands in M4. Benchmarks in M2. |
 | 12 | One language → many targets, same behavior (conformance corpus) | **v1** (architecture); **M2–M5** (emitters) | §18.1. The corpus is the definition of correct behavior; emitters land one at a time against it. |
 | 13 | Built-in testing (`newr test`, same language) | **Yes (M6)** | Decided in M6 Phase 2c: BOTH forms, `fn test_*()` functions and `test "name":` blocks (§8.7), one runner, in source order across both forms. |
-| 14 | Docs generated from code comments | **Deferred to M6** | Needs a frozen doc-comment syntax (the `///` convention, from C#/Rust) and the docs site. v1 freezes the language; M6 builds the docs pipeline on top of it. |
+| 14 | Docs generated from code comments | **Yes (M6)** | Frozen in M6 Phase 3: the `///` convention (from C#/Rust) is the doc-comment syntax (§6), the parser attaches doc comments to the item below (or to the file, for a leading block followed by a blank line), and `newr docs` generates `docs/api.md` (stdlib, from `compiler/modules.py`) plus `docs/examples.md` (examples, from `///` comments). |
 | 15 | No silent behavior | **v1** | §1.1.4. A non-negotiable, enforced by the checker (unknown lines are errors; no silent coercion). |
 | 16 | Truly complete stdlib (HTTP, JSON, dates, files), versioned with the language | **v1** (files, time, math, random, env); **v1.1** (HTTP, JSON, dates) | §12. Files/time/math/random/env ship in v1. HTTP needs a sandboxed `fetch` + allowlist (security review, §12.3); JSON needs a typed JSON value (no `any` in v1, §12.2); dates beyond `time.format` need a date type. All three are v1.1 with their reasons written — not dropped. The stdlib *is* versioned with the language from day one (it ships with the compiler). |
 | 17 | Safe-by-default concurrency (structured, no data races) | **Deferred to v1.1+** | v1 is single-threaded by default: `task` (discord module) is scheduled work, not concurrency; there are no threads and no shared mutable state (§8.4). Structured concurrency (async/await? actors? channels?) is a whole design decision: it touches the type system, the emitters (each target's concurrency model is different), and the "every path answers" check. It needs its own design document before a version is attached. It is the biggest open design question in this spec, and it is written here so it is not forgotten. |
@@ -2167,8 +2178,8 @@ to look:
    handlers) — proven per emitter, not assumed from the Python pattern.
 6. **Compile-time numbers** (§4.1) and **generated-code benchmark numbers**
    (§4.2) — no measurements exist yet; M2 records them honestly.
-7. **Zipapp-from-`npx` behavior** and the exact `newr.json` schema — decided
-   in M4/M6.
+7. **Zipapp-from-`npx` behavior**, still open. (The exact
+   `newr.json` schema was decided in M6 Phase 2b, by implementation.)
 8. **poise ↔ serenity pin for M5** — read poise's `Cargo.toml` before M5
    codegen starts (poise 0.7.1 is the live-checked version, §18).
 9. **npm distribution — RESOLVED, dropped (G13).** The `@drewdestar` npm

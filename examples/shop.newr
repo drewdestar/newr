@@ -1,6 +1,6 @@
-# shop.newr — ping + economy buy + button confirm, in newr v1.
-# Prices live in shop_items.newr; the shop itself lives here.
-# Build it with: newr build examples/shop.newr
+/// shop.newr, ping + economy buy + button confirm, in newr v1.
+/// Prices live in shop_items.newr; the shop itself lives here.
+/// Build it with: newr build examples/shop.newr
 
 import "shop_items.newr"
 

@@ -23,6 +23,7 @@ decision is recorded here and in the build report):
 
 from __future__ import annotations
 
+import bisect
 import re
 from types import MappingProxyType
 
@@ -92,6 +93,20 @@ class _Parser:
         # recursion (M-01): past MAX_NESTING_DEPTH the parser stops
         # with E1001 instead of crashing with RecursionError.
         self._depth = 0
+        # Raw byte offset where each 1-based line starts (spans are
+        # raw byte offsets, SPEC.md section 16, so this is computed
+        # on the source as given, not on the lexer's normalized
+        # copy). Used only by _collect_doc to tell whether a doc
+        # comment sits directly above its item.
+        self._line_starts = [0]
+        pos = 0
+        for line in source.split("\n")[:-1]:
+            pos += len(line.encode("utf-8")) + 1
+            self._line_starts.append(pos)
+
+    def _line_no(self, byte_offset: int) -> int:
+        """1-based line of a raw byte offset."""
+        return bisect.bisect_right(self._line_starts, byte_offset)
 
     # ------------------------------------------------------------ cursor
 
@@ -206,6 +221,91 @@ class _Parser:
                      help="indent the block body by 2 spaces")
         self.advance()
 
+    def _collect_file_doc(self) -> str | None:
+        """The file header: a leading `///` block (SPEC.md section 6,
+        M6) that documents the file itself.
+
+        A file header is a `///` block before the first item,
+        followed by a blank line (or end of file). When the first
+        item follows directly below the block, the block is that
+        item's doc instead: rewind so the normal loop attaches it.
+        Blank lines inside the header are kept (as blank lines in
+        the text). Returns None when there is no file header.
+        """
+        if not self.at("DOC_COMMENT"):
+            return None
+        save = self.pos
+        lines: list[tuple[int, str]] = []
+        while self.at("DOC_COMMENT"):
+            tok = self.cur
+            lines.append((self._line_no(tok.span.start_byte),
+                          tok.value or ""))
+            self.advance()
+            if self.at("NEWLINE"):
+                self.advance()
+            else:
+                break
+        if self.at("EOF"):
+            return self._join_doc_lines(lines)
+        item_line = self._line_no(self.cur.span.start_byte)
+        if item_line == lines[-1][0] + 1:
+            self.pos = save
+            return None
+        return self._join_doc_lines(lines)
+
+    @staticmethod
+    def _join_doc_lines(lines: list[tuple[int, str]]) -> str:
+        """Join (line, text) doc lines, keeping blank lines between
+        them."""
+        parts: list[str] = []
+        prev: int | None = None
+        for line_no, text in lines:
+            if prev is not None:
+                parts.append("\n" * (line_no - prev))
+            parts.append(text)
+            prev = line_no
+        return "".join(parts)
+
+    def _collect_doc(self) -> str | None:
+        """Collect consecutive `///` doc-comment lines (SPEC.md
+        section 6, M6) and return their text joined with "\\n".
+
+        A doc comment documents the item directly below it: the doc
+        is the trailing run of `///` lines ending on the line right
+        above the item. A blank line anywhere in the run, or between
+        the run and the item, breaks the attachment: only the lines
+        directly above the item count, the rest document nothing.
+        The lexer collapses blank lines into one NEWLINE token, so
+        adjacency is judged by line numbers, not by tokens. Returns
+        None when no `///` line sits directly above the next item.
+        """
+        if not self.at("DOC_COMMENT"):
+            return None
+        lines: list[tuple[int, str]] = []
+        while self.at("DOC_COMMENT"):
+            tok = self.cur
+            lines.append((self._line_no(tok.span.start_byte),
+                          tok.value or ""))
+            self.advance()
+            if self.at("NEWLINE"):
+                self.advance()
+            else:
+                break
+        if self.at("EOF") or self.at("DEDENT"):
+            return None
+        item_line = self._line_no(self.cur.span.start_byte)
+        doc_lines = []
+        expect = item_line - 1
+        for line_no, text in reversed(lines):
+            if line_no != expect:
+                break
+            doc_lines.append(text)
+            expect -= 1
+        if not doc_lines:
+            return None
+        doc_lines.reverse()
+        return "\n".join(doc_lines)
+
     def _parse_lines(self, line_fn) -> None:
         """Parse an indented key/value-style block (one line_fn per line)."""
         self._begin_block()
@@ -240,7 +340,19 @@ class _Parser:
                 self.err(self.cur,
                          "unexpected end of file; expected the end of "
                          "the block")
-            stmts.append(self._parse_stmt())
+            doc = self._collect_doc()
+            self._skip_newlines()
+            if self.at("DEDENT"):
+                self.advance()
+                return stmts
+            if self.at("EOF"):
+                self.err(self.cur,
+                         "unexpected end of file; expected the end of "
+                         "the block")
+            stmt = self._parse_stmt()
+            if doc is not None:
+                stmt.doc = doc
+            stmts.append(stmt)
             if self.at("NEWLINE"):
                 self.advance()
 
@@ -249,6 +361,9 @@ class _Parser:
     def parse_program(self) -> Program:
         start_byte = 0
         prog = Program(span=Span(self.filename, 0, 0))
+        self._skip_newlines()
+        prog.file_doc = self._collect_file_doc()
+        self._skip_newlines()
         while True:
             self._skip_newlines()
             if self.at("EOF"):
@@ -257,25 +372,43 @@ class _Parser:
                 self.err(self.cur,
                          "indented line outside any block",
                          help="top-level lines start at column 0")
-            self._parse_top_level(prog)
+            doc = self._collect_doc()
+            self._skip_newlines()
+            if self.at("EOF"):
+                break
+            self._parse_top_level(prog, doc)
             if self.at("NEWLINE"):
                 self.advance()
         end_byte = self.tokens[-1].span.end_byte
         prog.span = Span(self.filename, start_byte, end_byte)
         return prog
 
-    def _parse_top_level(self, prog: Program) -> None:
+    def _parse_top_level(self, prog: Program,
+                         doc: str | None = None) -> None:
+        node = self._parse_top_level_node(prog)
+        if doc is not None and node is not None:
+            node.doc = doc
+
+    def _parse_top_level_node(self, prog: Program):
         if self.at_kw("pub"):
             start = self.advance()
             nxt = self.cur
             if self.at_kw("fn"):
-                prog.functions.append(self._parse_fn(pub=True))
+                node = self._parse_fn(pub=True)
+                prog.functions.append(node)
+                return node
             elif self.at_kw("struct"):
-                prog.structs.append(self._parse_struct(pub=True))
+                node = self._parse_struct(pub=True)
+                prog.structs.append(node)
+                return node
             elif self.at_kw("enum"):
-                prog.enums.append(self._parse_enum(pub=True))
+                node = self._parse_enum(pub=True)
+                prog.enums.append(node)
+                return node
             elif self.at_kw("let") or self.at_kw("const"):
-                prog.stmts.append(self._parse_let_const(pub=True))
+                node = self._parse_let_const(pub=True)
+                prog.stmts.append(node)
+                return node
             else:
                 self.err(nxt, f"expected a declaration after `pub`, "
                               f"found {_describe(nxt)}",
@@ -283,32 +416,56 @@ class _Parser:
                               "`let`, or `const`")
             return
         if self.at_kw("import"):
-            prog.imports.append(self._parse_import())
+            node = self._parse_import()
+            prog.imports.append(node)
+            return node
         elif self.at_kw("fn"):
-            prog.functions.append(self._parse_fn())
+            node = self._parse_fn()
+            prog.functions.append(node)
+            return node
         elif self.at_kw("test"):
-            prog.test_blocks.append(self._parse_test_block(prog))
+            node = self._parse_test_block(prog)
+            prog.test_blocks.append(node)
+            return node
         elif self.at_kw("struct"):
-            prog.structs.append(self._parse_struct())
+            node = self._parse_struct()
+            prog.structs.append(node)
+            return node
         elif self.at_kw("enum"):
-            prog.enums.append(self._parse_enum())
+            node = self._parse_enum()
+            prog.enums.append(node)
+            return node
         elif self.at_kw("bot"):
             if prog.bot is not None:
                 self.err(self.cur, "only one `bot` block is allowed "
                                    "per file")
-            prog.bot = self._parse_bot()
+            node = self._parse_bot()
+            prog.bot = node
+            return node
         elif self.at_kw("command"):
-            prog.commands.append(self._parse_command())
+            node = self._parse_command()
+            prog.commands.append(node)
+            return node
         elif self.at_kw("event"):
-            prog.events.append(self._parse_event())
+            node = self._parse_event()
+            prog.events.append(node)
+            return node
         elif self.at_kw("task"):
-            prog.tasks.append(self._parse_task())
+            node = self._parse_task()
+            prog.tasks.append(node)
+            return node
         elif self.at_kw("strings"):
-            prog.strings.append(self._parse_strings())
+            node = self._parse_strings()
+            prog.strings.append(node)
+            return node
         elif self.at_kw("store"):
-            prog.stores.append(self._parse_store())
+            node = self._parse_store()
+            prog.stores.append(node)
+            return node
         else:
-            prog.stmts.append(self._parse_stmt())
+            node = self._parse_stmt()
+            prog.stmts.append(node)
+            return node
 
     # ------------------------------------------------------------ imports
 

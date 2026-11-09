@@ -99,6 +99,14 @@ def fn_of(params: list[Type], ret: Type) -> Type:
 @dataclass
 class Node:
     span: Span
+    # `///` doc comment attached by the parser (SPEC.md section 6,
+    # M6): the text of the doc-comment lines directly above this
+    # node, joined with "\n", or None when there is none. Doc
+    # comments are syntax only, never semantic, so this field is
+    # excluded from equality and from __init__ (init=False): no
+    # constructor call site changes, and no subclass field order
+    # changes (several subclasses have fields without defaults).
+    doc: str | None = field(default=None, compare=False, init=False)
 
 
 @dataclass
@@ -709,6 +717,12 @@ class StoreDecl(Decl):
 
 @dataclass
 class Program(Node):
+    # `///` file header (SPEC.md section 6, M6): the leading doc
+    # block at the top of the file, followed by a blank line (or
+    # end of file). None when the file has no header. Filled in by
+    # the parser; a block directly above the first item is that
+    # item's doc instead, not the file header.
+    file_doc: str | None = None
     imports: list[Import] = field(default_factory=list)
     structs: list[StructDecl] = field(default_factory=list)
     enums: list[EnumDecl] = field(default_factory=list)

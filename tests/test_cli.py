@@ -44,12 +44,12 @@ class TestHelpAndVersion(unittest.TestCase):
     def test_version_flag(self):
         r = run_cli("--version")
         self.assertEqual(r.returncode, 0)
-        self.assertIn("newr 0.1.0", r.stdout)
+        self.assertIn("newr 0.2.0", r.stdout)
 
     def test_version_subcommand(self):
         r = run_cli("version")
         self.assertEqual(r.returncode, 0)
-        self.assertIn("newr 0.1.0", r.stdout)
+        self.assertIn("newr 0.2.0", r.stdout)
 
     def test_help_for_one_command(self):
         r = run_cli("help", "check")
@@ -377,7 +377,7 @@ class TestMachineOutput(unittest.TestCase):
                               "warnings"])
             self.assertTrue(env["ok"])
             self.assertEqual(env["command"], "check")
-            self.assertEqual(env["newr"], "0.1.0")
+            self.assertEqual(env["newr"], "0.2.0")
             self.assertIsNone(env["error"])
 
     def test_json_envelope_error(self):

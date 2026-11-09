@@ -43,7 +43,7 @@ VALID_TARGETS = ("py", "js", "java", "cs", "rs", "kt", "dart")
 
 MANIFEST_FILENAME = "newr.json"
 
-PROJECT_VERSION = "0.1.0"
+PROJECT_VERSION = "0.2.0"
 
 DEFAULT_LOCALE = "en"
 

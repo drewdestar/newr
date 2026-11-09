@@ -1,9 +1,9 @@
-# showcase.newr — a bot written in the newr language.
-# It shows off several .newr features in one small file:
-# a bot description, four commands (one ephemeral, one with no
-# description so it defaults to its name), and both events.
-# Build it with: newr build examples/showcase.newr
-# Then run it with: DISCORD_TOKEN=... python examples/showcase.py
+/// showcase.newr, a bot written in the newr language.
+/// It shows off several .newr features in one small file:
+/// a bot description, four commands (one ephemeral, one with no
+/// description so it defaults to its name), and both events.
+/// Build it with: newr build examples/showcase.newr
+/// Then run it with: DISCORD_TOKEN=... python examples/showcase.py
 
 bot "ShowcaseBot":
   description: "A showcase bot that shows off the newr language"

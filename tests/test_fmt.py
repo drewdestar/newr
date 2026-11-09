@@ -45,11 +45,21 @@ def _strip_spans(node):
     """A copy of an AST with every Span replaced by None."""
     if is_dataclass(node) and not isinstance(node, type):
         values = {}
+        deferred = {}
         for f in fields(node):
             value = getattr(node, f.name)
-            values[f.name] = None if isinstance(value, Span) \
+            stripped = None if isinstance(value, Span) \
                 else _strip_spans(value)
-        return type(node)(**values)
+            # init=False fields (e.g. Node.doc, the `///` doc comment)
+            # are not constructor parameters: set them after.
+            if f.init:
+                values[f.name] = stripped
+            else:
+                deferred[f.name] = stripped
+        copy = type(node)(**values)
+        for name, stripped in deferred.items():
+            setattr(copy, name, stripped)
+        return copy
     if isinstance(node, list):
         return [_strip_spans(x) for x in node]
     if isinstance(node, tuple):

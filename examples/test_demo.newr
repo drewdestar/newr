@@ -1,8 +1,9 @@
-# test_demo.newr: a small program with tests (M6 Phase 2c).
-# Run it: newr build examples/test_demo.newr, then run the output.
-# Test it: newr test examples/test_demo.newr (add --target js, java,
-# cs, rs, kt, or dart to test through another emitter).
+/// test_demo.newr: a small program with tests (M6 Phase 2c).
+/// Run it: newr build examples/test_demo.newr, then run the output.
+/// Test it: newr test examples/test_demo.newr (add --target js, java,
+/// cs, rs, kt, or dart to test through another emitter).
 
+/// Doubles a number.
 fn double(x: int) -> int:
   return x * 2
 

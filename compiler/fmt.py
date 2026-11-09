@@ -66,7 +66,7 @@ _BINOP_PREC = {
     "+": 6, "-": 6, "*": 7, "/": 7, "%": 7, "**": 8,
 }
 _COMPARISONS = {"==", "!=", "<", "<=", ">", ">=", "in"}
-_SKIP_TOKEN_KINDS = {"NEWLINE", "INDENT", "DEDENT", "EOF"}
+_SKIP_TOKEN_KINDS = {"NEWLINE", "INDENT", "DEDENT", "EOF", "DOC_COMMENT"}
 
 
 def _escape_text(text: str) -> str:
@@ -195,7 +195,7 @@ class _Formatter:
             stripped = raw.strip()
             toks = by_line.get(i, [])
             if not toks:
-                if stripped.startswith("#"):
+                if stripped.startswith("#") or stripped.startswith("///"):
                     indent = len(raw) - len(raw.lstrip(" "))
                     self._comments.append((i, stripped, indent))
                 continue

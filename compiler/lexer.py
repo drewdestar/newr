@@ -253,6 +253,21 @@ class _Lexer:
                                end_col if end_col is not None else col + 1))
         self.tokens.append(Token(kind, value, span))
 
+    def _at_doc_comment_start(self) -> bool:
+        """True when the cursor is at a `///` doc comment.
+
+        A doc comment is three slashes at the start of a logical line
+        (only whitespace before it on the line) and outside brackets.
+        Anywhere else `///` stays three SLASH tokens, exactly as
+        before, so `a /// b` still parses (and fails) as division.
+        """
+        if self.source[self.pos:self.pos + 3] != "///":
+            return False
+        if self.paren_depth > 0:
+            return False
+        start = self.source.rfind("\n", 0, self.pos) + 1
+        return self.source[start:self.pos].strip(" \t") == ""
+
     # ------------------------------------------------------------ main loop
 
     def tokenize(self) -> list[Token]:
@@ -302,6 +317,24 @@ class _Lexer:
             if end == -1:
                 end = len(self.source)
             self._advance(end - self.pos)
+            return
+
+        if ch == "/" and self._at_doc_comment_start():
+            # `///` doc comment (SPEC.md section 6, M6): a line of its
+            # own, at the start of a logical line, documents the item
+            # directly below it. Consume to end of line and emit a
+            # DOC_COMMENT token carrying the text (one leading space
+            # stripped, so `/// text` and `///text` read the same).
+            end = self.source.find("\n", self.pos)
+            if end == -1:
+                end = len(self.source)
+            length = end - self.pos
+            text = self.source[self.pos + 3:end]
+            if text.startswith(" "):
+                text = text[1:]
+            self._advance(length)
+            self._emit("DOC_COMMENT", text, line, col,
+                       line, col + length)
             return
 
         if ch == '"':

@@ -1,7 +1,8 @@
-# shop_items.newr — price list for the shop bot (examples/shop.newr).
-# Imported with `import "shop_items.newr"` and used as
-# `shop_items.price_of(item)`.
+/// shop_items.newr, price list for the shop bot (examples/shop.newr).
+/// Imported with `import "shop_items.newr"` and used as
+/// `shop_items.price_of(item)`.
 
+/// The price of one item in gold. Unknown items cost 0.
 pub fn price_of(item: str) -> int:
   if item == "brick":
     return 118
