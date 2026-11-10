@@ -1,0 +1,17 @@
+# Imported struct construction (SPEC.md SS11): `module.Struct(...)`
+# builds the struct declared in the imported file, and its fields
+# read in the importing file. Promotes the M8d eval section 13 probe.
+import "lib/import_struct_helper.newr"
+
+let p = import_struct_helper.Product(id: 1, name: "Tea", price: 5000)
+let passed = true
+if p.name != "Tea":
+  passed = false
+if p.price != 5000:
+  passed = false
+if import_struct_helper.label(p) != "Tea - 5000":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,10 @@
+# Helper for import_struct.newr: a pub struct + a pub fn over it.
+# Lives in ok/lib/ so the harness (which globs ok/*.newr
+# non-recursively) never runs it standalone.
+pub struct Product:
+  id: int
+  name: str
+  price: int
+
+pub fn label(p: Product) -> str:
+  return p.name + " - " + str(p.price)

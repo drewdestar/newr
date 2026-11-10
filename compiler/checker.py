@@ -1059,9 +1059,21 @@ class Checker:
                              "`T?` values; a non-nullable value is never "
                              "`none`")
             return UNKNOWN
-        # Struct fields.
+        # Struct fields. An imported struct's fields resolve the
+        # same way: the type name is unqualified, so look through
+        # the imported module contexts for a struct of that name
+        # (first match wins; two imports defining the same struct
+        # name is already ambiguous at the type).
+        decl = None
         if self._ctx is not None and obj_type.name in self._ctx.structs:
             decl = self._ctx.structs[obj_type.name]
+        elif self._ctx is not None:
+            for target in self._ctx.imports.values():
+                if isinstance(target, _ModuleCtx) and \
+                        obj_type.name in target.structs:
+                    decl = target.structs[obj_type.name]
+                    break
+        if decl is not None:
             for f in decl.fields:
                 if f.name == name:
                     return f.type
@@ -1536,8 +1548,12 @@ class Checker:
                          "function")
         return ft.params[-1]
 
-    def _call_struct(self, name: str, expr: A.Call) -> Type:
-        decl = self._ctx.structs[name]
+    def _call_struct(self, name: str, expr: A.Call, decl=None) -> Type:
+        # The enum-variant call takes its declaration from the
+        # imported module the same way (`_call_enum_variant`
+        # `decl=`), so an imported struct builds with its own
+        # fields, not this file's.
+        decl = decl if decl is not None else self._ctx.structs[name]
         fields = [(f.name, f.type) for f in decl.fields]
         if expr.args:
             self._error(expr.args[0].span, "E3002",
@@ -1855,6 +1871,15 @@ class Checker:
                 for arg in expr.args:
                     self.synth(arg)
                 return UNKNOWN
+            # §20 twin: an imported struct builds through the module
+            # name, `shared.Product(...)`, the declaration comes
+            # from the imported module's context, like the
+            # fielded-variant branch in `_call_member`. The resolver
+            # already enforces `pub` (E3005), so no export rule is
+            # needed here.
+            if name in target.structs:
+                return self._call_struct(name, expr,
+                                         decl=target.structs[name])
             exported = list(target.functions) + list(target.top_lets) + \
                 list(target.structs) + list(target.enums)
             help = self._similar_help(name, exported)

@@ -137,10 +137,13 @@ only listens on all interfaces when the program says so explicitly.
 Per-target natives: Python stdlib http.server or a tiny WSGI host,
 JS Node http, Java built-in HttpServer, C# ASP.NET minimal API or
 HttpListener, Rust a small embedded server (axum or std-only), Kotlin
-Ktor or HttpServer, Dart shelf. The frontend target (JS in a browser)
-cannot serve; on that target `http.serve` is a checker error, and the
-program is split so the server part builds only for server targets
-(see section 5).
+Ktor or HttpServer, Dart shelf. The js target in newr is Node, not a
+browser: `http.serve` works on js (proven live in the M8d eval, which
+served `examples/hello_api_server.newr` under Node and fetched it with
+curl). There is no browser target in newr, so there is no target on
+which `http.serve` is a checker error; the frontend/backend split is a
+documented convention, not a checker rule (see section 5 and SPEC
+§22.4).
 
 ### 4.3 `ui`: widgets and layout
 
@@ -195,12 +198,18 @@ conformance program for that target says so.
 
 ### 4.4 `app`: manifest and packaging
 
-Draft surface:
-
-- `app.manifest(name: str, version: str, ...)` declares the app: name,
-  version, icon, permissions, entry point.
-- `newr build --target <t> --app` (a CLI flag, not a module call)
-  produces the installable artifact for that target.
+CORRECTED in the M8d eval (`newr-research/m8d-app-eval/EVAL.md`,
+sections 1 and 2): there is NO `app.manifest(...)` language call. The
+draft API below is withdrawn. `newr.json` already declares name and
+version (M6 Phase 2b), and the build already reads it; a language call
+would create two sources of truth for the same facts. The manifest
+file IS the declaration. M8d adds three optional keys to `newr.json`
+(`description`, `icon`, `id`, all validated by `load_manifest` with
+`ManifestError`, exit 1 on a bad manifest), and a `newr build --app`
+flag (a CLI flag, not a module call) that emits then packages one
+program for one explicit target into `dist/<name>-<target>/` plus a
+`BUILD-RECEIPT.json`. Full spec: SPEC §22. There is no `app` module in
+the language, and no new error code for it.
 
 Packaging per OS: Android apk via the Kotlin or Dart target (needs the
 Android SDK); Windows exe/msi via the C# target; macOS dmg via the Dart
@@ -210,7 +219,13 @@ plus the M7 playground hosting story. M7 already covers standalone
 binaries; M8 adds the manifest, the icon and permission declarations,
 and the per-OS artifact step. Signing and store submission (Play,
 App Store, Microsoft Store) are explicitly out of M8: they need the
-user's own developer accounts.
+user's own developer accounts. M8d claims only the per-target artifacts
+in SPEC §22.2: no apk, dmg, msi, deb, or AppImage is built on this VM
+(no toolchains or keys for them here), and the cs artifact is a
+self-contained publish directory, because a framework-dependent
+`dotnet publish` does NOT produce a runnable artifact on this VM (its
+apphost cannot find the runtime, which lives in `~/.dotnet`, not on
+PATH; verified live in the M8d eval).
 
 ## 5. Full-stack shape: one source, split by target
 
@@ -224,12 +239,28 @@ file doing everything:
 - `frontend.newr`: uses `http` (fetch) and `ui`, calls the backend,
   renders screens. Builds for js, dart, kt (client targets).
 
-The checker enforces the split: `http.serve` and `db` in a program
-built for a browser target is an error with a plain message, and
-`ui.show` in a program built for a server-only target is the same.
-Shared types are checked once and must match on both sides; a drift
-between frontend and backend types is a build error, not a runtime
-surprise.
+CORRECTED in the M8d eval (sections 1, 5.1, and 6): the checker does
+NOT enforce the split, and it cannot as written. No target reaches any
+module checker, `newr check` has no `--target` flag, and a program that
+calls `http.serve` on js checks clean. The split is a documented
+project convention in M8d (SPEC §22.4), not a compiler rule: the shop's
+README and SPEC say which file builds for which target, and the
+conformance suite builds each file for its intended targets only. The
+reason is that js is a Node target that serves, fetches, and renders,
+not a browser-only target, so a rule forbidding `http.serve` on js
+would forbid working programs.
+
+The js frontend is a Node server program, not a static page (eval
+§5.1, SPEC §22.3): it fetches the product list from the backend,
+serves the rendered page over `http.serve`, and a small static bridge
+script turns button clicks into requests to an `/action` route that
+dispatches by button index and re-renders. The static page is only the
+fallback if the bridge is cut. The py frontend is a native window via
+`ui.run`. Shared types are checked once and must match on both sides;
+a drift between frontend and backend types is a build error, not a
+runtime surprise. (One blocker, eval §5.3: shared structs must be
+constructible from an importing module, which today fails with
+`error[E3001]`; the Phase 0 fix lands before any shop code is written.)
 
 A single-file full-stack program (backend plus frontend in one file,
 compiler splits it) is the M9 goal, not M8. M8 proves the three-file
@@ -240,9 +271,9 @@ shape end to end first.
 | Target | db | http serve | http fetch | ui | app package |
 |---|---|---|---|---|---|
 | py | sqlite3 | yes | yes | tkinter 8.6 | AppImage, deb |
-| js | sql.js / IndexedDB | no (checker error) | yes | HTML sink (render only) | web |
+| js | sql.js / IndexedDB | yes (Node serves) | yes | HTML sink (render only) | web |
 | java | sqlite-jdbc | yes | yes | Swing | jar, deb |
-| cs | Microsoft.Data.Sqlite | yes | yes | Avalonia 12.1.6 | exe, msi |
+| cs | Microsoft.Data.Sqlite | yes | yes | Avalonia 12.1.6 | self-contained publish dir (framework-dependent does NOT run on this VM; no msi in M8d) |
 | rs | rusqlite | yes | yes | egui 0.37.0 + eframe | binary, AppImage |
 | kt | sqlite-jdbc / android sqlite | yes | yes | Swing | apk, jar |
 | dart | sqflite / sqlite3 | yes | yes | HTML sink (render only, Flutter deferred) | apk, dmg, web |
@@ -295,10 +326,17 @@ shape end to end first.
   native window on py/java/kt/cs/rs, HTML sink on js/dart,
   `ui.run` Elm-style loop with db/http state. E2014 is the ui code.
   Pins: Avalonia 12.1.6, egui 0.37.0, tkinter 8.6, Swing.
-- M8d `app` plus full-stack example: manifest, packaging flags, then
-  the three-file shop app (shared types, backend with db and http,
-  frontend with ui), verified live on at least one server target and
-  one client target.
+- M8d `app` plus full-stack example: manifest extension (three
+  optional `newr.json` keys, SPEC §22.1), `newr build --app` packaging
+  flag with `BUILD-RECEIPT.json` (SPEC §22.2), then the three-file shop
+  app (shared types, backend with db and http, frontend with ui;
+  js frontend is a Node server program with the bridge contract,
+  SPEC §22.3; split documented, not enforced, SPEC §22.4), verified
+  live on at least one server target and one client target. The eval
+  is in `newr-research/m8d-app-eval/EVAL.md` (verdict: conditionally
+  feasible). Phase 0 also fixes the imported-struct gap (eval §5.3)
+  and ports the `http_check.py` double-walk fix plus the `test_fmt.py`
+  `_strip_spans` fix from the M8c follow-ups.
 
 Each phase lands as real pull requests, one per module where feasible,
 the same way M5 is landing, so the achievement work (Pull Shark) keeps
@@ -358,8 +396,11 @@ Limits:
   user's machine or CI runners on those OSes.
 - No auth, no sessions, no Postgres/MySQL, no realtime (websockets),
   no file uploads in M8. Each is a named later item, not a silent gap.
-- The browser target cannot serve HTTP or write a plain sqlite file;
-  sql.js plus IndexedDB is the documented shape there.
+- There is no browser target in newr: js is a Node target that serves
+  HTTP and fetches (M8d eval §5.1, SPEC §22.4), so the "browser target
+  cannot serve" shape in earlier drafts does not apply. sql.js plus
+  IndexedDB remains the documented shape only if a browser target ever
+  lands.
 
 Open questions (to settle in the M8a research, before building):
 

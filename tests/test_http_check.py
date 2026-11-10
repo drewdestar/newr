@@ -602,6 +602,30 @@ fn main():
         self.assertIn("E2012", codes(d))
 
 
+class TestHttpTestBlocks(unittest.TestCase):
+    """A test block is lowered to a synthetic `_newr_test_<n>`
+    function sharing the body list: http_check must walk it once,
+    via test_blocks, not twice (M8c follow-up, ported from
+    ui_check.py)."""
+
+    def test_route_in_test_block_is_not_a_duplicate(self):
+        # Before the fix this read as a duplicate route: the
+        # functions loop registered it, then the test_blocks walk
+        # found it already registered.
+        src = (REQ_RESP + 'test "route in test":\n'
+               '  http.route("GET", "/todos", ' + INLINE_HANDLER
+               + ')\n')
+        self.assertEqual(errs(full(src)), [])
+
+    def test_bad_method_in_test_block_reports_once(self):
+        src = (REQ_RESP + 'test "bad method in test":\n'
+               '  http.route("FETCH", "/todos", ' + INLINE_HANDLER
+               + ')\n')
+        diags = errs(full(src))
+        self.assertEqual(len(diags), 1)
+        self.assertEqual(codes(diags), ["E2012"])
+
+
 class TestHttpCoreBoundary(unittest.TestCase):
     """The core checker never reports an http rule: it returns
     UNKNOWN for http calls, and http_check does the real work."""

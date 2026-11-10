@@ -134,7 +134,18 @@ class DbChecker:
     def run(self) -> list[Diagnostic]:
         prog = self.program
         for sub in [prog] + list(prog.modules.values()):
+            # A test block is lowered to a synthetic function
+            # `_newr_test_<n>` in sub.functions sharing the same
+            # body list, so skip it here: it is walked below via
+            # sub.test_blocks. Walking it twice would report every
+            # db error in a test block twice. (http_check.py has
+            # the same skip; unlike ui, db has no rule that depends
+            # on being inside a test block, so there is no _in_test
+            # flag to set here.)
+            test_fn_names = {tb.func_name for tb in sub.test_blocks}
             for fn in sub.functions:
+                if fn.name in test_fn_names:
+                    continue
                 self._walk_function(fn)
             for tb in sub.test_blocks:
                 self._reset_body_state()

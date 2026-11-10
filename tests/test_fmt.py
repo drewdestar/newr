@@ -43,13 +43,19 @@ CORPUS_EXCEPTIONS = {
 
 def _strip_spans(node):
     """A copy of an AST with every Span replaced by None."""
+    if isinstance(node, Span):
+        # Spans hide inside tuples too: a call's kwargs entries are
+        # (name, value, span), a try's catches are (name, span,
+        # body). The tuple branch below recurses element by element,
+        # and without this check a Span element would be copied
+        # instead of cleared, because Span itself is a dataclass.
+        return None
     if is_dataclass(node) and not isinstance(node, type):
         values = {}
         deferred = {}
         for f in fields(node):
             value = getattr(node, f.name)
-            stripped = None if isinstance(value, Span) \
-                else _strip_spans(value)
+            stripped = _strip_spans(value)
             # init=False fields (e.g. Node.doc, the `///` doc comment)
             # are not constructor parameters: set them after.
             if f.init:
@@ -317,6 +323,29 @@ class TestDeclarations(FormatTestCase):
                   "  return 0.0\n")
         self.assert_formats_to(source, source)
         self.assert_roundtrip(source)
+
+    def test_struct_literal_kwargs_roundtrip(self):
+        # _strip_spans must clear the spans inside kwargs tuples:
+        # formatting `Count(n:0, m:1)` inserts a space after the
+        # first colon, shifting the second kwarg name one byte, and
+        # the stripped parses must still be equal. Before the fix
+        # the kwarg name spans survived the strip (Span is a
+        # dataclass, so the tuple branch copied them), and the
+        # roundtrip failed on that 1-byte shift.
+        source = ("struct Count:\n"
+                  "  n: int\n"
+                  "  m: int\n"
+                  "\n"
+                  "let c = Count(n:0, m:1)\n")
+        self.assert_formats_to(
+            source,
+            source.replace("Count(n:0, m:1)", "Count(n: 0, m: 1)"))
+        self.assert_roundtrip(source)
+        self.assert_roundtrip(
+            "struct Count:\n"
+            "  n: int\n"
+            "\n"
+            "let c=Count(n: 0)\n")
 
     def test_bot_command_event_task(self):
         source = ('bot "MyBot":\n'

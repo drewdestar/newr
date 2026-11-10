@@ -1181,9 +1181,11 @@ finally:
 - Imported files are compiled with the importing file (one program, one
   build). The cache (§4.1) tracks the import graph.
 - **Manifest (`newr.json`), compiler support in M6 (Phase 2b):**
-  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str, "http_allowlist": list[str] }` — `name` and
-  `version` are required; `target`, `default_locale`, `db_path`, and
-  `http_allowlist` are optional. (Secrets NEVER go in it — the token stays in `.env`.)
+  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str, "http_allowlist": list[str], "description": str, "icon": str, "id": str }`, `name` and
+  `version` are required; `target`, `default_locale`, `db_path`,
+  `http_allowlist`, `description`, `icon`, and `id` are optional.
+  (Secrets NEVER go in it, the token stays in `.env`.) M8d adds
+  `description`, `icon`, and `id`; see §22.1 for the validation rules.
   The schema is the one `newr init` scaffolds and `newr build` reads
   (M6 Phase 2b); v1 resolution needs no manifest,
   relative paths only. `newr init` (M6) scaffolds it.
@@ -1680,8 +1682,8 @@ ui.show(hello)
   browser itself. `ui.run` never returns a value; the loop ends when
   the window closes. On js and dart `ui.run` renders once and
   returns; the interactive loop is a documented no-op on those
-  targets (the page is static HTML; a live shop frontend on js is
-  served by the backend and re-fetched, it does not loop locally).
+  targets (on js, an interactive frontend is a server program that
+  serves the rendered page, see §22.3; it does not loop locally).
 - **Per-target natives:** py tkinter 8.6 stdlib; js none (HTML sink,
   pure render); java/kt Swing (`javax.swing`) stdlib, needs the X11
   client libraries libXtst6, libXi6, libXrender1, libXt6 on the
@@ -2216,6 +2218,7 @@ a Node script in TS, a `main()` in Java/C#/Rust/Kotlin/Dart).
 |---|---|---|
 | `newr build` | `build [--target py\|js] [--check] [--fast] <file.newr> [-o <out>]` | `--target` selects the emitter (default `py`); without `--check` it emits (M2+). In M1 (no emitter yet) `build` without `--check` is an error telling the user to use `--check` — emitters land in M2. `--fast` emits with only parse + minimal checking (syntax + name resolution), with a warning that the output is not fully verified (§4.1). |
 | `newr build --check` | Parse + resolve + check (+ emit + verify from M2) | Writes nothing. Exit 0 on success, 4 on build error. |
+| `newr build --app` | M8d (Phase 1) | Emits then packages for one explicit target (see §22.2). `--app` without a target, or with `--check`/`--fast`, is a usage error. Output `dist/<name>-<target>/` plus `BUILD-RECEIPT.json`. No signing, no store submission. |
 | `newr check` | Parse + resolve + check, print errors + warnings | The "thinking" command (§5.1). Exit 0 if no errors (warnings allowed), 4 on error. |
 | `newr fix` | Yes (M6, minimal) | Applies safe, unambiguous diagnostic fixes (§5.2). |
 | `newr --explain <code>` | Yes (M1) | Prints the long form of a diagnostic code (§16). |
@@ -2414,6 +2417,255 @@ match mode:
 `env.args` includes the program name at index 0 (§12.2). The `match`
 is exhaustiveness-checked (§9.6); the pipeline passes the list as the
 first argument (§9.2); the ternary picks the default word (§9.2).
+
+## 22. App packaging: manifest, `newr build --app`, and the js server frontend (M8d)
+
+M8d adds app packaging to newr: a small manifest extension, one build
+flag, and a full-stack shop example. There is no `app` module in the
+language and no new diagnostic code. The design is evaluated in
+`newr-research/m8d-app-eval/EVAL.md`; this section pins what the build
+phase must implement.
+
+Prerequisite, from the eval §5.3: shared types in `shop_shared.newr`
+must be constructible from the backend and the frontend
+(`shared.Product(id: 1, name: "Tea", price: 5000)`). Today that fails
+with `error[E3001]: module 'shared' has no member 'Product'`, because
+the checker call path handles functions and top-level lets only, not
+structs. The fix mirrors the enum-variant precedent and lands in
+Phase 0, proven by the eval probe on py and js first. No shop code is
+written until the probe passes on both.
+
+### 22.1 The manifest: three optional keys
+
+`newr.json` is the app declaration (§11). M8d adds three optional
+top-level keys, all validated by `load_manifest` with `ManifestError`,
+the existing mechanism. A bad manifest is a usage error, exit 1,
+naming the file (verified live: a `target` of `bogus` fails with
+`newr: .../newr.json: 'target' must be one of py, js, java, cs, rs, kt,
+dart (got 'bogus')`, exit 1). No new diagnostic code is needed for the
+manifest: manifest problems are not checker diagnostics, and `newr
+check` ignores the manifest by contract (a broken manifest must not
+fail the check).
+
+- `description`: string, optional. One line describing the app.
+  Carried into the build receipt (§22.2) and printed by `newr build
+  --app`. No other consumer in M8d.
+- `icon`: string, optional, a path relative to the manifest directory.
+  Validated to exist at load time when present. Carried into the
+  receipt. No artifact consumes it in M8d: no OS installer in M8d
+  takes an icon. It is declared now so M9 installers can use it, and
+  the validation catches a wrong path early. Open question (§22.5):
+  if the build phase finds even this too thin, cut `icon` to M9
+  rather than shipping a field nothing reads.
+- `id`: string, optional, a reverse-domain identifier
+  (`com.example.shop`). Validated against
+  `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`. Carried into the receipt.
+  Needed later for apk, msi, and dmg metadata. No consumer in M8d.
+
+Deliberately NOT added in M8d:
+
+- `programs`: a list of entry points for a multi-program app. The shop
+  has two programs (backend, frontend), but each is built by its own
+  `newr build --app` invocation against the same project manifest, and
+  each produces its own artifact dir. One manifest per project, one
+  program per app build. A `programs` list would need init support, a
+  launcher story, and a multi-artifact receipt, all for a convenience
+  the shop does not need.
+- `permissions`: per-OS permission declarations need a per-OS model
+  that does not exist. Deferred to M9 with the installers.
+- `db_path` stays schema-only. The shop backend passes its sqlite path
+  in code (`db.open("shop.db")`). Do not expand manifest scope in M8d.
+- `app.manifest(...)` as a language call: rejected. `newr.json` already
+  declares name and version (M6 Phase 2b), and the build already reads
+  it. A language call would create two sources of truth for the same
+  facts, and the checker would need a rule to reconcile them. The
+  manifest file IS the declaration. The `app` name stays unreserved in
+  the language.
+
+### 22.2 `newr build --app`: one flag, emit then package
+
+`newr build <file> --target <t> --app` does the normal build first,
+then packages the emitted program for that target. The flag is
+meaningless without a target: `--app` with no `--target` and no manifest
+target is a usage error naming the missing target, because the packager
+is per-target and there is no default packaging target. `--app` with
+`--check` or `--fast` is a usage error: packaging needs a full emit.
+
+- The emit step is unchanged: the same files land in the same place as
+  a plain `newr build` (or under `-o` when given). Packaging reads
+  those files; it never re-emits.
+- The package step runs the per-target packager in a scratch dir under
+  `~/workspace` (never `/tmp`: it is a 512 MB tmpfs, and a cargo or
+  dotnet build can exceed it). The scratch dir is removed after a
+  successful package, kept on failure for diagnosis. Disk is tight on
+  the build VM (the eval measured a 7.5 GB `/home` overlay), so the
+  build phase cleans per-target scratch dirs as it goes.
+- Output layout: `dist/<name>-<target>/`, where `<name>` is the manifest
+  `name` (sanitized to `[a-z0-9_-]`, lowercased) or the program stem
+  when there is no manifest. Inside: the artifact (table below), plus
+  `BUILD-RECEIPT.json`. The receipt records name, version, target,
+  artifact relative path, artifact bytes, sha256, the source files with
+  their sha256, the toolchain versions that ran, and the build
+  timestamp. The receipt is the machine-readable proof that the
+  artifact came from this source; the build phase asserts it in tests.
+- `newr build --app` prints the artifact path and its size on success,
+  and exits non-zero with the packager's stderr on failure. A packager
+  failure is an exit-4 build error with a diagnostic naming the failing
+  command, never a traceback.
+- The packager never downloads a toolchain. If the toolchain is missing
+  (no PyInstaller venv, no dotnet, no cargo), the build fails with a
+  plain message naming what to install. Downloading toolchains is out
+  of M8d.
+- No signing, no store submission, no auto-upload. The artifact is an
+  unsigned local build.
+
+Per-target artifacts (the contract, verified live on this VM with the
+`hello.newr` program; probe detail in the eval §4):
+
+| Target | Artifact | Notes |
+| ------ | -------- | ----- |
+| py | `<name>.pyz` zipapp (stdlib `zipapp`) | Default py artifact. Needs python3 on the machine that runs it. PyInstaller onefile is a later opt-in, not the default: system Python has no PyInstaller, it lives only in the `m7-build/venv` venv. |
+| js | Directory: `<stem>.js` plus `newr_rt.js` plus `run.sh` | Copy only, no bundler. `run.sh` runs `node` on the emitted file. |
+| java | Fat jar, `<name>.jar` | `javac`, then `jar --create --file <name>.jar --main-class <Stem>`. Only `.class` files go in the jar. A db program must bundle sqlite-jdbc into the jar (fat jar, the recommendation) or ship it alongside with a `Class-Path` manifest entry. |
+| kt | Jar with runtime, `<name>.jar` | `kotlinc -include-runtime -d <name>.jar`. Same sqlite-jdbc bundling question as java, same fat-jar recommendation. |
+| cs | Self-contained publish dir, `<name>/` | `dotnet publish -c Release --self-contained -r linux-x64 -o <dir>`. Framework-dependent publish does NOT run on this VM: its apphost cannot find the runtime, because the runtime lives in `~/.dotnet`, which is not on PATH. Single-file `-p:PublishSingleFile=true` is the shape to prefer, to verify before claiming. RID is `linux-x64` only on this VM. |
+| rs | Binary, `<name>` | `rustc -O` when no Cargo.toml, else `cargo build --release` and take the binary from `target/release/<stem>`. The persistent `CARGO_TARGET_DIR` under `~/workspace` from M8b is required; never build in `/tmp`. |
+| dart | AOT binary, `<name>` | `dart compile exe <stem>.dart -o <name>`. No pubspec needed for a plain program; a db program needs `dart pub get` first. |
+
+### 22.3 The js frontend is a server (bridge contract)
+
+The js frontend is a Node server program, not a static page generator.
+A static page leaves the shop's Buy buttons inert in the browser:
+`ui.render` emits `<button data-action="N">`, and no generated code
+wires a click to anything. The js program runs under Node and does
+three things:
+
+1. On start it fetches the product list from the backend with
+   `http.get("http://127.0.0.1:8080/products")` and decodes it with
+   `json.decode` into `list[Product]`.
+2. It registers routes with `http.route` and serves with
+   `http.serve(8081)`. The `/` route builds the shop tree from the
+   fetched products (a column: title text, search input, a list of
+   product rows, cart total text), renders it with `ui.render`, wraps
+   it in a minimal HTML shell, and returns it. The `/action` route
+   takes a query `i`, the button index, dispatches it, and redirects
+   to `/`.
+3. The bridge script, a static string in the shell, wires clicks:
+   every element with `data-action` gets a click handler that fetches
+   `/action?i=N` and reloads the page. Every element with `data-input`
+   posts its value to `/action?i=N&v=...` on change. The script is
+   about 15 lines and has no knowledge of the shop; it only knows the
+   `data-action` and `data-input` attributes the render core already
+   emits (§12.8).
+
+**Button-index convention.** The view builds buttons in a stable order
+(product Buy buttons first, in product order, then Checkout), and the
+`/action` route dispatches on that order with an if/else chain. If the
+view changes the button order, the route must change with it. This is a
+documented convention, not a compiler guarantee: the build phase pins
+the button order in the frontend file's header comment, and adds a
+test that renders the page and asserts the button order matches the
+dispatch table. A checker rule that verifies the dispatch matches the
+view is M9 material, not M8d.
+
+Rejected alternatives, with reasons:
+
+- Static page (render once, write the file): the Buy buttons do
+  nothing in the browser. It is a screenshot, not a shop. Kept only
+  as the fallback if the bridge proves too big, and labelled as such.
+- `ui.run` server mode in the js runtime (the runtime owns dispatch):
+  more magical and less user code, but it needs new runtime semantics,
+  a port story, and a change to what `ui.run` means on js (M8c pinned
+  it as render-once-and-return). Deferred to M9. The server shape uses
+  only proven pieces: js `http.serve`, js `http.get`, `ui.render`, `db`
+  on the backend.
+- A form-based page (buttons as `<form>` posts): would need the render
+  core to emit forms, which changes the SPEC §12.8 byte format and
+  breaks M8c goldens. Rejected.
+
+**The py native frontend.** The same frontend file built for py uses
+`ui.run(view)`: the tkinter window, the re-invoke loop, and Buy
+handlers that call `http.post` to the backend and re-read the cart from
+the backend on every view invocation. This is the M8c counter pattern
+with a backend instead of a local db. The two frontends share the
+view-building code (the tree from a product list) but differ in entry:
+js serves, py shows a window. How one file holds both without
+conditional compilation is the build phase's first decision; the eval
+recommends two frontend files sharing a view-builder module, and if the
+build phase picks a four-file shop the docs must say so. The number
+three is not sacred; the contract is. See the open question in §22.5.
+
+The shop files, named to avoid collision with the existing
+`shop.newr` (the Discord shop bot) and `shop_items.newr` (its price
+list): `examples/shop_shared.newr` (the contract: `pub struct Product`,
+`pub struct CartLine`, and the route table as constants), `examples/shop_backend.newr`
+(`db` plus `http`, port 8080, serves `GET /products`, `POST /cart`,
+`GET /cart`), and the frontend file(s) per the decision above. The
+backend port 8080 and the frontend port 8081 are conventions, not
+compiler facts; the shop README must state them, and the pair test must
+use them.
+
+### 22.4 The frontend/backend split: documented, not enforced
+
+The split is a project convention in M8d, not a compiler rule (eval
+§6, option (c)). The shop's README and this section say which file
+builds for which target, and the conformance suite builds each file for
+its intended targets only. A user who builds the backend for js gets a
+Node server that works (js serves fine), and a user who builds the
+frontend for py gets a window that works.
+
+The reason is the js fact: js is not a browser-only target in newr, it
+is a Node target that serves, fetches, and renders. A rule that
+forbids `http.serve` on js would forbid the working js frontend server
+in §22.3. The draft app-track split assumed a browser js target that
+does not exist. If a real browser target ever lands (the M7 playground
+story), the split question reopens with a real target to key on. Until
+then, enforcement would forbid working programs to satisfy a doc
+sentence.
+
+The rejected enforcement options, for the record:
+
+- (a) Add `--target` to `newr check` and thread the target into the
+  module checkers, then add the split rules. Cost: the check pipeline
+  gains a target parameter, and every `newr check` invocation without
+  a target keeps the current lenient behavior. The js target is not
+  purely a browser target, so the rule must be about the program's
+  role, not the target name, which makes the rule murkier than the
+  draft admits.
+- (b) Enforce at emit time: the emitter refuses `http.serve` on js
+  with E4001, or `db.*` on js with E4001. This is the cheapest
+  enforcement, but E4001 is an emitter limitation, not a user error,
+  and the message would mislead. Rejected.
+
+### 22.5 Open questions (M8d)
+
+- Whether `icon` earns its place in the manifest: it has no consumer
+  in M8d. The build phase may cut it to M9.
+- Whether the shop frontend file should be one file or two (§22.3):
+  the eval recommends two files sharing a view-builder module, but the
+  build phase decides, and the docs must match the decision.
+- The exact `BUILD-RECEIPT.json` field list: §22.2 pins the fields,
+  but the build phase may add toolchain versions per target as it
+  learns them.
+- The bridge script text: §22.3 fixes the contract (data-action click,
+  data-input change, `/action?i=N`), but the exact script is written
+  in the build phase and tested by the pair test.
+- Whether `dotnet publish -p:PublishSingleFile=true` produces a
+  working single-file artifact for a newr program: the plain
+  self-contained publish is proven (71 MB, runs), the single-file form
+  is not yet run. The build phase must verify it before claiming it.
+- Whether the java/kt fat jar bundling of sqlite-jdbc works with the
+  emitted code: the plain jar is proven, the fat jar with an unpacked
+  dependency is not yet built. The packager must find sqlite-jdbc in
+  `~/jars` or fail plainly.
+- Whether `cargo build --release` for a db/http/ui program finishes in
+  reasonable time on this VM: debug builds are proven by the
+  conformance runner, release builds are not yet timed.
+- Signed installers (apk, dmg, msi, deb, AppImage, Play/App Store
+  submission): deferred, no toolchains or keys on this VM. The
+  per-target table in §22.2 is the whole packaging claim; anything
+  beyond it is a named deferral. Windows and macOS artifacts are not
+  claimed; the cs RID is linux-x64 only.
 
 ## 23. What newr takes from other languages — the design philosophy
 

@@ -406,5 +406,36 @@ class TestJsonDocs(unittest.TestCase):
             self.assertTrue(entry.get("sig"), f"json.{name} has no sig")
 
 
+class TestJsonTestBlocks(unittest.TestCase):
+    """A test block is lowered to a synthetic `_newr_test_<n>`
+    function sharing the body list: json_check must walk it once,
+    via test_blocks, not twice (M8d follow-up, ported from
+    ui_check.py via http_check.py)."""
+
+    def test_valid_json_in_test_block_has_no_errors(self):
+        src = ('test "json in test":\n'
+               '  let s = json.encode([1, 2, 3])\n'
+               '  let xs: list[int] = json.decode(s)\n'
+               '  print(xs)\n')
+        self.assertEqual(errs(full(src)), [])
+
+    def test_encode_enum_in_test_block_reports_once(self):
+        # Before the fix this reported twice: the functions loop
+        # walked the synthetic `_newr_test_0`, then the
+        # test_blocks walk found the encode again.
+        src = """enum Color:
+  Red
+  Green
+
+test "encode enum in test":
+  let c = Color.Red
+  let s = json.encode(c)
+  print(s)
+"""
+        diags = errs(full(src))
+        self.assertEqual(len(diags), 1)
+        self.assertEqual(codes(diags), ["E2013"])
+
+
 if __name__ == "__main__":
     unittest.main()

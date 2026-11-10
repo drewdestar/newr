@@ -405,5 +405,35 @@ class TestDbEmitAndRun(unittest.TestCase):
         self.assertNotIn("drop", out)
 
 
+class TestDbTestBlocks(unittest.TestCase):
+    """A test block is lowered to a synthetic `_newr_test_<n>`
+    function sharing the body list: db_check must walk it once,
+    via test_blocks, not twice (M8d follow-up, ported from
+    ui_check.py via http_check.py)."""
+
+    def test_valid_db_in_test_block_has_no_errors(self):
+        src = (TODO_STRUCT + 'test "db in test":\n'
+               + '  let h = db.open(":memory:")\n'
+               + '  db.exec(h, "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")\n'
+               + '  db.begin(h)\n'
+               + '  let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")\n'
+               + '  print(todos)\n'
+               + '  db.commit(h)\n'
+               + '  db.close(h)\n')
+        self.assertEqual(errs(full(src)), [])
+
+    def test_double_begin_in_test_block_reports_once(self):
+        # Before the fix this reported twice: the functions loop
+        # walked the synthetic `_newr_test_0`, then the
+        # test_blocks walk found the second begin again.
+        src = ('test "double begin in test":\n'
+               + '  let h = db.open(":memory:")\n'
+               + '  db.begin(h)\n'
+               + '  db.begin(h)\n')
+        diags = errs(full(src))
+        self.assertEqual(len(diags), 1)
+        self.assertEqual(codes(diags), ["E2011"])
+
+
 if __name__ == "__main__":
     unittest.main()
