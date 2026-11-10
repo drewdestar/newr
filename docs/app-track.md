@@ -229,15 +229,20 @@ PATH; verified live in the M8d eval).
 
 ## 5. Full-stack shape: one source, split by target
 
-A full-stack app in M8 is three programs sharing one contract, not one
+A full-stack app in M8 is five files sharing one contract, not one
 file doing everything:
 
 - `shared.newr`: the data shapes (structs) and the route table both
-  sides agree on. Imported by the other two.
+  sides agree on. Imported by the other four.
+- `view.newr`: the view builder both frontends import. It builds the
+  widget tree from a product list; it holds no state and no entry.
 - `backend.newr`: uses `db` and `http`, serves the routes, talks to
   sqlite. Builds for py, java, cs, rs, kt (server targets).
-- `frontend.newr`: uses `http` (fetch) and `ui`, calls the backend,
-  renders screens. Builds for js, dart, kt (client targets).
+- `frontend_js.newr`: the js server frontend. Uses `http` (fetch) and
+  `ui`, calls the backend, serves the rendered page. Builds for js.
+- `frontend_py.newr`: the py native frontend. Uses `http` (fetch) and
+  `ui`, calls the backend, shows a native window through `ui.run`.
+  Builds for py.
 
 CORRECTED in the M8d eval (sections 1, 5.1, and 6): the checker does
 NOT enforce the split, and it cannot as written. No target reaches any
@@ -263,7 +268,7 @@ constructible from an importing module, which today fails with
 `error[E3001]`; the Phase 0 fix lands before any shop code is written.)
 
 A single-file full-stack program (backend plus frontend in one file,
-compiler splits it) is the M9 goal, not M8. M8 proves the three-file
+compiler splits it) is the M9 goal, not M8. M8 proves the five-file
 shape end to end first.
 
 ## 6. Per-target map (summary)
@@ -328,8 +333,9 @@ shape end to end first.
   Pins: Avalonia 12.1.6, egui 0.37.0, tkinter 8.6, Swing.
 - M8d `app` plus full-stack example: manifest extension (three
   optional `newr.json` keys, SPEC §22.1), `newr build --app` packaging
-  flag with `BUILD-RECEIPT.json` (SPEC §22.2), then the three-file shop
-  app (shared types, backend with db and http, frontend with ui;
+  flag with `BUILD-RECEIPT.json` (SPEC §22.2), then the five-file shop
+  app (shared types, view builder, backend with db and http, js server
+  frontend and py native frontend with ui;
   js frontend is a Node server program with the bridge contract,
   SPEC §22.3; split documented, not enforced, SPEC §22.4), verified
   live on at least one server target and one client target. The eval

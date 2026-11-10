@@ -2549,7 +2549,11 @@ three things:
    product rows, cart total text), renders it with `ui.render`, wraps
    it in a minimal HTML shell, and returns it. The `/action` route
    takes a query `i`, the button index, dispatches it, and redirects
-   to `/`.
+   to `/`. The route disambiguates by the `v` query value: a request
+   carrying `v` is a search input change (redirect to `/?q=<v>`); a
+   request without `v` is a button tap. After a buy the search filter
+   resets: the redirect after a button tap goes to `/`, not to the
+   filtered page.
 3. The bridge script, a static string in the shell, wires clicks:
    every element with `data-action` gets a click handler that fetches
    `/action?i=N` and reloads the page. Every element with `data-input`
@@ -2589,18 +2593,25 @@ handlers that call `http.post` to the backend and re-read the cart from
 the backend on every view invocation. This is the M8c counter pattern
 with a backend instead of a local db. The two frontends share the
 view-building code (the tree from a product list) but differ in entry:
-js serves, py shows a window. How one file holds both without
-conditional compilation is the build phase's first decision; the eval
-recommends two frontend files sharing a view-builder module, and if the
-build phase picks a four-file shop the docs must say so. The number
-three is not sacred; the contract is. See the open question in §22.5.
+js serves, py shows a window. Decided in the build phase: the shop is
+five files, not one frontend file and not three files. The two
+frontends are separate files sharing one view-builder module
+(`shop_view.newr`): `shop_frontend_js.newr` serves,
+`shop_frontend_py.newr` shows a window. There is no conditional
+compilation: each file is one program with one entry.
 
 The shop files, named to avoid collision with the existing
 `shop.newr` (the Discord shop bot) and `shop_items.newr` (its price
 list): `examples/shop_shared.newr` (the contract: `pub struct Product`,
-`pub struct CartLine`, and the route table as constants), `examples/shop_backend.newr`
-(`db` plus `http`, port 8080, serves `GET /products`, `POST /cart`,
-`GET /cart`), and the frontend file(s) per the decision above. The
+`pub struct CartLine`, `pub struct CartRequest`, and the route table as
+constants), `examples/shop_view.newr` (the view builder both frontends
+import), `examples/shop_backend.newr` (`db` plus `http`, port 8080,
+serves `GET /products`, `POST /cart`, `GET /cart`, `POST /checkout`),
+`examples/shop_frontend_js.newr` (the Node server frontend, port 8081),
+and `examples/shop_frontend_py.newr` (the native window frontend).
+Search behavior: on js the search filters through `/?q=`, and a buy
+resets the filter (the redirect after a button tap goes to `/`); on py
+the search input is display-only. The
 backend port 8080 and the frontend port 8081 are conventions, not
 compiler facts; the shop README must state them, and the pair test must
 use them.
@@ -2641,9 +2652,6 @@ The rejected enforcement options, for the record:
 
 - Whether `icon` earns its place in the manifest: it has no consumer
   in M8d. The build phase may cut it to M9.
-- Whether the shop frontend file should be one file or two (§22.3):
-  the eval recommends two files sharing a view-builder module, but the
-  build phase decides, and the docs must match the decision.
 - The exact `BUILD-RECEIPT.json` field list: §22.2 pins the fields,
   but the build phase may add toolchain versions per target as it
   learns them.

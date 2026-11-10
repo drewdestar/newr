@@ -60,11 +60,136 @@ shop.newr, ping + economy buy + button confirm, in newr v1.
 Prices live in shop_items.newr; the shop itself lives here.
 Build it with: newr build examples/shop.newr
 
+## `shop_backend.newr`
+
+shop_backend.newr, the shop backend (M8d). db plus http, port
+8080. Run it from an empty directory so shop.db starts fresh;
+it seeds the three products only when the products table is
+empty. Serves GET /products, POST /cart, GET /cart, and
+POST /checkout. Prices always come from the products table,
+never from the client. No ui in this file. The route paths are
+written as literals here (they match the shop_shared constants
+exactly) because the emitters cannot emit an imported const
+reference yet (E4001); the constants stay the contract record.
+Each handler opens its own db connection and closes it before
+returning: the runtime binds a sqlite connection to the thread
+that opened it, and http.serve runs handlers on worker threads,
+so the top-level handle (opened on the main thread for the
+seed) cannot be used inside a handler.
+
+## `shop_frontend_js.newr`
+
+### import `(top-level statement)`
+
+shop_frontend_js.newr, the js server frontend (M8d). A Node
+server on port 8081. It fetches the product list from the
+backend once at start, serves the rendered shop page on GET /,
+and dispatches button taps and search changes on GET /action.
+Button order is PINNED: Buy buttons in product order
+(data-action 0, 1, 2), Checkout last (data-action 3); the
+search input is data-input 0. The /action route disambiguates
+by the v query value: a request carrying v is a search input
+change (redirect to /?q=<v>); a request without v is a button
+tap (i is the button index as a string, "0"/"1"/"2"/"3").
+After a buy the search filter resets to the full list. The
+bridge script is a static string in the shell: data-action
+clicks fetch /action?i=N and reload; data-input changes fetch
+/action?i=N&v=... and then navigate to /?q=<v>. Buy and
+checkout handlers passed to the view are no-ops: the server
+never invokes them, the /action route does the work instead.
+The /action path is written as a literal (it matches the
+shop_shared constant exactly) because the emitters cannot emit
+an imported const reference yet (E4001).
+Run the backend first (port 8080).
+
+### fn `noop_buy`
+
+No-op Buy handler for the view. The server never invokes it.
+Pub so the unused parameter is the handler contract, not a bug
+signal (SPEC 5.1: pub function parameters do not warn).
+
+### fn `noop_checkout`
+
+No-op Checkout handler for the view. The server never invokes it.
+
+### let `buy_handler`
+
+The view handlers, as let-bound lambdas. Let-bound (not inline)
+so the dart emitter can Future-wrap them: they call fns that
+fetch, and dart only allows a fetching lambda as a route handler
+argument or a let-bound lambda. Named fns passed directly would
+also work for the emit, but the java emitter passes them as bare
+method references, which do not compile against a Void-returning
+fn type; the let-bound lambda form compiles on java too.
+
+## `shop_frontend_py.newr`
+
+### import `(top-level statement)`
+
+shop_frontend_py.newr, the py native frontend (M8d). A native
+window via ui.run: the Buy handlers post to the backend and the
+view re-reads the products and the cart from the backend on
+every invocation, so the tree always shows the live state.
+The search input is display-only on py: its handler is a
+no-op (see shop_view.newr) and the query is always "", so the
+view always shows the full product list. If the backend is
+down, the view falls back to an empty product list and a total
+of 0 instead of crashing. Run the backend first (port 8080).
+
+### let `buy_handler`
+
+The view handlers, as let-bound lambdas. Let-bound (not inline)
+so the dart emitter can Future-wrap them: they call fns that
+fetch, and dart only allows a fetching lambda as a route handler
+argument or a let-bound lambda. Named fns passed directly would
+also work for the emit, but the java emitter passes them as bare
+method references, which do not compile against a Void-returning
+fn type; the let-bound lambda form compiles on java too.
+
 ## `shop_items.newr`
 
 ### fn `price_of`
 
 The price of one item in gold. Unknown items cost 0.
+
+## `shop_shared.newr`
+
+### struct `Product`
+
+shop_shared.newr, the shop contract (M8d). The data shapes and
+the route table both sides agree on. No statements, no db, no
+http, no ui. Imported by shop_backend.newr, shop_frontend_js.newr,
+shop_frontend_py.newr, and shop_view.newr.
+
+## `shop_view.newr`
+
+### import `(top-level statement)`
+
+shop_view.newr, the shop view builder (M8d). Builds the shop
+widget tree from a product list and a cart total.
+Button order is PINNED: the Buy buttons come in product order
+(data-action 0, 1, 2) and Checkout is last (data-action 3); the
+search input is data-input 0. The js frontend dispatches on
+this order, so if the order changes here, the dispatch there
+must change with it. See tests/test_shop_view.py, which renders
+this tree and asserts the order.
+Rows are built EXPLICITLY, not in a loop. The step-1 probe
+showed a single-expression int-returning lambda stored in a
+variable fails to compile on rs (the emitter types the literal
+as i32 against an i64 closure, E0271), so the loop form is not
+used until that emitter bug is fixed. See examples/shop_README.md.
+NOTE on types: newr type annotations take bare names only, so
+the imported structs are named Product and CartLine here, never
+shop_shared.Product (that form is a parse error in type
+position). Construction stays qualified: shop_shared.Product(...).
+
+### fn `search_noop`
+
+The search input handler. A no-op: on js the bridge script
+handles input changes through /action, and on py the search box
+is display-only. It is pub so the unused parameter is the
+handler contract, not a bug signal (SPEC 5.1: pub function
+parameters do not warn).
 
 ## `showcase.newr`
 

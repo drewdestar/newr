@@ -1,0 +1,77 @@
+/// shop_backend.newr, the shop backend (M8d). db plus http, port
+/// 8080. Run it from an empty directory so shop.db starts fresh;
+/// it seeds the three products only when the products table is
+/// empty. Serves GET /products, POST /cart, GET /cart, and
+/// POST /checkout. Prices always come from the products table,
+/// never from the client. No ui in this file. The route paths are
+/// written as literals here (they match the shop_shared constants
+/// exactly) because the emitters cannot emit an imported const
+/// reference yet (E4001); the constants stay the contract record.
+/// Each handler opens its own db connection and closes it before
+/// returning: the runtime binds a sqlite connection to the thread
+/// that opened it, and http.serve runs handlers on worker threads,
+/// so the top-level handle (opened on the main thread for the
+/// seed) cannot be used inside a handler.
+
+import "shop_shared.newr"
+
+struct HttpRequest:
+  method: str
+  path: str
+  headers: dict[str, str]
+  body: str
+  query: dict[str, str]
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let dbh = db.open("shop.db")
+db.exec(dbh, "CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY, name TEXT NOT NULL, price INTEGER NOT NULL, image_url TEXT NOT NULL)")
+db.exec(dbh, "CREATE TABLE IF NOT EXISTS cart(product_id INTEGER PRIMARY KEY, qty INTEGER NOT NULL, price INTEGER NOT NULL)")
+
+let seeded: list[Product] = db.query(dbh, "SELECT id, name, price, image_url FROM products")
+if len(seeded) == 0:
+  db.exec(dbh, "INSERT INTO products (id, name, price, image_url) VALUES (?, ?, ?, ?)", 1, "Tea", 5000, "https://example.com/tea.png")
+  db.exec(dbh, "INSERT INTO products (id, name, price, image_url) VALUES (?, ?, ?, ?)", 2, "Coffee", 7000, "https://example.com/coffee.png")
+  db.exec(dbh, "INSERT INTO products (id, name, price, image_url) VALUES (?, ?, ?, ?)", 3, "Cake", 12000, "https://example.com/cake.png")
+
+let list_products = fn(req: HttpRequest) -> HttpResponse:
+  print req.method + " " + req.path
+  let h = db.open("shop.db")
+  let products: list[Product] = db.query(h, "SELECT id, name, price, image_url FROM products")
+  db.close(h)
+  return HttpResponse(status: 200, headers: {"Content-Type": "application/json"}, body: json.encode(products))
+
+let add_to_cart = fn(req: HttpRequest) -> HttpResponse:
+  let request: CartRequest = json.decode(req.body)
+  let h = db.open("shop.db")
+  let found: list[Product] = db.query(h, "SELECT id, name, price, image_url FROM products WHERE id = ?", request.product_id)
+  if len(found) != 0:
+    let product = found.get(0, shop_shared.Product(id: 0, name: "", price: 0, image_url: "https://example.com/empty.png"))
+    db.exec(h, "INSERT INTO cart (product_id, qty, price) VALUES (?, ?, ?) ON CONFLICT(product_id) DO UPDATE SET qty = qty + ?", request.product_id, request.qty, product.price, request.qty)
+  let cart: list[CartLine] = db.query(h, "SELECT product_id, qty, price FROM cart")
+  db.close(h)
+  return HttpResponse(status: 200, headers: {"Content-Type": "application/json"}, body: json.encode(cart))
+
+let list_cart = fn(req: HttpRequest) -> HttpResponse:
+  print req.method + " " + req.path
+  let h = db.open("shop.db")
+  let cart: list[CartLine] = db.query(h, "SELECT product_id, qty, price FROM cart")
+  db.close(h)
+  return HttpResponse(status: 200, headers: {"Content-Type": "application/json"}, body: json.encode(cart))
+
+let do_checkout = fn(req: HttpRequest) -> HttpResponse:
+  print req.method + " " + req.path
+  let h = db.open("shop.db")
+  db.exec(h, "DELETE FROM cart")
+  let cart: list[CartLine] = db.query(h, "SELECT product_id, qty, price FROM cart")
+  db.close(h)
+  return HttpResponse(status: 200, headers: {"Content-Type": "application/json"}, body: json.encode(cart))
+
+http.route("GET", "/products", list_products)
+http.route("POST", "/cart", add_to_cart)
+http.route("GET", "/cart", list_cart)
+http.route("POST", "/checkout", do_checkout)
+http.serve(8080)
