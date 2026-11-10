@@ -187,6 +187,14 @@ class _Parser:
             return self.advance()
         self.err(self.cur, f"expected {what}, found {_describe(self.cur)}")
 
+    def expect_member_name(self, what: str = "a field or method name") -> Token:
+        # A keyword may be a member name after a dot: `ui.button(...)`
+        # is a call, not a discord `button` block. The dot makes the
+        # position unambiguous, so accept any KEYWORD token here.
+        if self.at("IDENT") or self.at("KEYWORD"):
+            return self.advance()
+        self.err(self.cur, f"expected {what}, found {_describe(self.cur)}")
+
     def _skip_newlines(self) -> None:
         while self.at("NEWLINE"):
             self.advance()
@@ -1989,13 +1997,13 @@ class _Parser:
             tok = self.cur
             if tok.kind == "DOT":
                 self.advance()
-                name_tok = self.expect_ident("a field or method name")
+                name_tok = self.expect_member_name()
                 expr = Member(span=self.span_from(expr.span.start_byte,
                                                   name_tok),
                               obj=expr, name=name_tok.value)
             elif tok.kind == "QDOT":
                 self.advance()
-                name_tok = self.expect_ident("a field or method name")
+                name_tok = self.expect_member_name()
                 # M1 AST amendment: `?.` builds a Member with
                 # optional=True (see ast_nodes.Member); the checker
                 # needs the flag to enforce the `?.` typing rule.

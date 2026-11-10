@@ -548,6 +548,26 @@ _PAIR_SERVER = "mod_http_server"
 _PAIR_CLIENT = "mod_http_client"
 
 
+#: The single-process timeout (SPEC.md SS12.8): a program that
+#: opens a GUI event loop, or otherwise never exits, fails its
+#: conformance run instead of hanging the suite. Compile steps
+#: (javac, rustc, kotlinc, `dart pub get`, `dotnet restore`) have
+#: no timeout: they are setup, not the program under test.
+_RUN_TIMEOUT = 60
+
+
+def _run(cmd, **kwargs):
+    """Run a program with the 60 second timeout. A timeout returns
+    a CompletedProcess with returncode 124 and the timeout noted
+    on stderr, so the caller reports FAIL instead of the suite
+    hanging."""
+    try:
+        return subprocess.run(cmd, timeout=_RUN_TIMEOUT, **kwargs)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, "",
+                                           "timed out after 60s")
+
+
 def run_conformance(target: str = "py") -> int:
     """Build + run every ok program; each must exit 0 and print
     `PASS` as its last line (the program self-verifies — the
@@ -578,12 +598,12 @@ def run_conformance(target: str = "py") -> int:
                 rt.read_text(encoding="utf-8"), encoding="utf-8")
             if target == "js":
                 cmd = ["node", str(Path(d) / main)]
-                r = subprocess.run(cmd, capture_output=True, text=True,
-                                   cwd=d)
+                r = _run(cmd, capture_output=True, text=True,
+                         cwd=d)
             elif target == "py":
                 cmd = [sys.executable, str(Path(d) / main)]
-                r = subprocess.run(cmd, capture_output=True, text=True,
-                                   cwd=d)
+                r = _run(cmd, capture_output=True, text=True,
+                         cwd=d)
             elif target == "java":
                 if JAVAC is None or JAVA is None:
                     print("SKIP java: no JDK found "
@@ -606,13 +626,13 @@ def run_conformance(target: str = "py") -> int:
                               "unavailable")
                         continue
                     cp = os.pathsep.join([str(d), *jars])
-                    r = subprocess.run([JAVA, "-cp", cp, path.stem],
-                                       capture_output=True, text=True,
-                                       cwd=d)
+                    r = _run([JAVA, "-cp", cp, path.stem],
+                             capture_output=True, text=True,
+                             cwd=d)
                 else:
-                    r = subprocess.run([JAVA, path.stem],
-                                       capture_output=True, text=True,
-                                       cwd=d)
+                    r = _run([JAVA, path.stem],
+                             capture_output=True, text=True,
+                             cwd=d)
             elif target == "rs":
                 if RUSTC is None:
                     print("SKIP rs: no rustc found "
@@ -625,7 +645,7 @@ def run_conformance(target: str = "py") -> int:
                         print("SKIP rs: no cargo found "
                               "(CARGO_HOME / ~/.cargo/bin / PATH)")
                         return 0
-                    r = subprocess.run(
+                    r = _run(
                         [CARGO, "run", "--quiet"],
                         capture_output=True, text=True, cwd=d)
                 else:
@@ -641,9 +661,9 @@ def run_conformance(target: str = "py") -> int:
                               f"{c.returncode}\n{c.stderr}")
                         failures += 1
                         continue
-                    r = subprocess.run([str(Path(d) / path.stem)],
-                                       capture_output=True, text=True,
-                                       cwd=d)
+                    r = _run([str(Path(d) / path.stem)],
+                             capture_output=True, text=True,
+                             cwd=d)
             elif target == "kt":
                 if KOTLINC is None or JAVA is None:
                     print("SKIP kt: no kotlinc/java found "
@@ -673,14 +693,14 @@ def run_conformance(target: str = "py") -> int:
                         [str(Path(d) / "app.jar"), *jars])
                     main_class = (path.stem[:1].upper()
                                   + path.stem[1:] + "Kt")
-                    r = subprocess.run([JAVA, "-cp", cp, main_class],
-                                       capture_output=True, text=True,
-                                       cwd=d)
+                    r = _run([JAVA, "-cp", cp, main_class],
+                             capture_output=True, text=True,
+                             cwd=d)
                 else:
-                    r = subprocess.run([JAVA, "-jar",
-                                        str(Path(d) / "app.jar")],
-                                       capture_output=True, text=True,
-                                       cwd=d)
+                    r = _run([JAVA, "-jar",
+                              str(Path(d) / "app.jar")],
+                             capture_output=True, text=True,
+                             cwd=d)
             elif target == "dart":
                 if DART is None:
                     print("SKIP dart: no dart found "
@@ -696,13 +716,13 @@ def run_conformance(target: str = "py") -> int:
                               f"{g.returncode}\n{g.stderr}")
                         failures += 1
                         continue
-                    r = subprocess.run([DART, "run", str(Path(d) / main)],
-                                       capture_output=True, text=True,
-                                       cwd=d)
+                    r = _run([DART, "run", str(Path(d) / main)],
+                             capture_output=True, text=True,
+                             cwd=d)
                 else:
-                    r = subprocess.run([DART, str(Path(d) / main)],
-                                       capture_output=True, text=True,
-                                       cwd=d)
+                    r = _run([DART, str(Path(d) / main)],
+                             capture_output=True, text=True,
+                             cwd=d)
             else:  # cs
                 if DOTNET is None:
                     print("SKIP cs: no dotnet found "
@@ -710,7 +730,7 @@ def run_conformance(target: str = "py") -> int:
                     return 0
                 env = dict(os.environ)
                 env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
-                r = subprocess.run(
+                r = _run(
                     [DOTNET, "run", "--project",
                      str(Path(d) / (path.stem + ".csproj"))],
                     capture_output=True, text=True, cwd=d, env=env)

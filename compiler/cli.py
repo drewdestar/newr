@@ -45,6 +45,7 @@ from .db_check import check_db
 from .discord_check import check_discord, discord_providers
 from .http_check import check_http
 from .json_check import check_json
+from .ui_check import check_ui
 from .errors import Diagnostic, NewrError, Span
 from .resolver import resolve_source
 
@@ -416,6 +417,17 @@ wrong number of arguments, a value that cannot be encoded as JSON
 expected type (annotate the let with the type to decode into), or a
 `json.decode` argument that is not a str. The diagnostic names the
 rule and the fix.""",
+    "E2014": """E2014: ui module rule violation.
+
+A rule of the ui module was broken: an unknown ui function, the wrong
+number of arguments, a non-Widget where a Widget is required, a
+button handler that is not `fn() -> none` or an input handler that is
+not `fn(str) -> none`, a `ui.run` argument that is not
+`fn() -> Widget`, a `ui.show` argument that is not a Widget, more
+than one window call (`show` or `run`) in a program, a `ui.render`
+argument that is not a Widget, an image URL that is not an http(s)
+string literal, or a `ui.show` or `ui.run` inside a test block. The diagnostic
+names the rule and the fix.""",
     "E3001": """E3001: undefined name.
 
 There is no binding with this name in scope. Check the spelling — the
@@ -583,6 +595,7 @@ def _run_pipeline(path: Path, *, fast: bool) -> tuple[
             allowlist = None
         diagnostics += check_http(resolved.program, allowlist=allowlist)
         diagnostics += check_json(resolved.program)
+        diagnostics += check_ui(resolved.program)
     return resolved.program, diagnostics, source
 
 

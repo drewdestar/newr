@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): escaping in attributes,
+# placeholder and value of an input, and src of an image.
+let passed = true
+if ui.render(ui.input("Type <here>", "a & b", fn(s: str) -> none: print(s))) != "<input placeholder=\"Type &lt;here&gt;\" value=\"a &amp; b\" data-input=\"0\">":
+  passed = false
+if ui.render(ui.image("https://example.com/a.png?x=1&y=2")) != "<img src=\"https://example.com/a.png?x=1&amp;y=2\" alt=\"\">":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

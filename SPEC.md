@@ -1238,6 +1238,7 @@ UNKNOWN for db calls (§2.1).
 | `db` | `open(path: str) -> int`, `exec(handle: int, sql: str, args...) -> int`, `query(handle: int, sql: str, args...) -> list[RowStruct]`, `begin(handle: int)`, `commit(handle: int)`, `rollback(handle: int)`, `last_id(handle: int) -> int`, `close(handle: int)` | SQLite, sync (§12.5). A domain module, not core: checked by `db_check.py`, not the core checker. |
 | `http` | `route(method: str, path: str, handler: fn) -> none`, `serve(port: int) -> none`, `serve(port: int, host: str) -> none`, `get(url: str) -> HttpResponse`, `post(url: str, body: str) -> HttpResponse`, `request(method: str, url: str, body: str) -> HttpResponse` (each fetch also takes an optional timeout in seconds, then optional headers) | HTTP server plus fetch client, sync (§12.6). A domain module, not core: checked by `http_check.py`, not the core checker. |
 | `json` | `encode(value) -> str`, `decode(text: str) -> T` | Typed JSON (§12.7). A domain module, not core: checked by `json_check.py`, not the core checker. |
+| `ui` | `text(s: str) -> Widget`, `button(label: str, on_tap: fn() -> none) -> Widget`, `input(placeholder: str, value: str, on_change: fn(str) -> none) -> Widget`, `list(items: list[Widget]) -> Widget`, `image(url: str) -> Widget`, `row(children: list[Widget]) -> Widget`, `column(children: list[Widget]) -> Widget`, `render(root: Widget) -> str`, `show(root: Widget) -> none`, `run(view: fn() -> Widget) -> none` | One small widget set (§12.8). A domain module, not core: checked by `ui_check.py`, not the core checker. `Widget` is an opaque builtin value type. |
 
 **`json` landed in v1 with M8b** (it was v1.1 in an earlier draft of
 this section). The v1.1 objection was that `json.parse` cannot be
@@ -1559,6 +1560,171 @@ let todos: list[Todo] = json.decode(text) # -> list[Todo]
   transactions (a `db.begin` inside an open transaction is a
   runtime error); the browser target for js; Android sqlite
   for kt.
+
+### 12.8 The `ui` module — one small widget set (M8c)
+
+`ui` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/ui_check.py` /
+`compiler/ui_limits.py`, and the core checker returns UNKNOWN for
+ui calls. It landed in v1 with M8c, per the app-track decision
+(`docs/app-track.md` §7). Shape (a) from the app-track: one small
+widget set, one common abstraction, each target renders it with its
+own native toolkit where one exists, and the language never exposes
+toolkit specifics. The user writes one program; the emitter picks
+the toolkit. There is no per-target widget code in user programs, no
+conditional compilation, and no toolkit imports in newr source.
+
+`Widget` is an opaque builtin value type, like the discord module's
+entity types. Only `ui.*` constructors produce a Widget. There is no
+Widget literal syntax and no field access on a Widget. Structs are
+value types and struct field assignment is an error (§7.8), so a
+widget tree is naturally immutable once built.
+
+```newr
+let hello = ui.column([
+  ui.text("Hello, newr"),
+  ui.button("Tap me", fn() -> none: print("tapped")),
+])
+print(ui.render(hello))
+ui.show(hello)
+```
+
+- **Surface.** `ui.text(s: str) -> Widget`,
+  `ui.button(label: str, on_tap: fn() -> none) -> Widget`,
+  `ui.input(placeholder: str, value: str, on_change: fn(str) -> none)
+  -> Widget`, `ui.list(items: list[Widget]) -> Widget`,
+  `ui.image(url: str) -> Widget`,
+  `ui.row(children: list[Widget]) -> Widget`,
+  `ui.column(children: list[Widget]) -> Widget`,
+  `ui.render(root: Widget) -> str`,
+  `ui.show(root: Widget) -> none`,
+  `ui.run(view: fn() -> Widget) -> none`. A handler is a let-bound
+  lambda or an inline single-expression lambda; a block-body lambda
+  passed directly as a call argument does NOT parse (E1001, the same
+  constraint as M8b http handlers).
+- **Render byte format, pinned.** `ui.render` returns an HTML string
+  for the tree, pure and deterministic: the same tree renders to the
+  same bytes on every target and every run. The format:
+  `ui.text(s)` renders `<p>ESC(s)</p>`;
+  `ui.button(label, handler)` renders
+  `<button data-action="N">ESC(label)</button>` where N is the
+  button's 0-based index in pre-order traversal of the whole tree;
+  `ui.input(placeholder, value, handler)` renders
+  `<input placeholder="ESC(placeholder)" value="ESC(value)"
+  data-input="N">` where N is the input's 0-based index in
+  pre-order traversal, attributes in exactly that order;
+  `ui.list(items)` renders `<ul><li>CHILD</li>...</ul>` with each
+  child wrapped in an `<li>`; `ui.image(url)` renders
+  `<img src="ESC(url)" alt="">`; `ui.row(children)` renders
+  `<div data-layout="row">CHILDREN</div>`; `ui.column(children)`
+  renders `<div data-layout="column">CHILDREN</div>`. ESC escapes
+  `&` to `&amp;`, `<` to `&lt;`, `>` to `&gt;`, `"` to `&quot;`,
+  in that order, in text content and attribute values alike. There
+  is no insignificant whitespace anywhere; children concatenate
+  directly. Output is UTF-8. Empty cases render with empty content:
+  an empty column is `<div data-layout="column"></div>`, an empty
+  list is `<ul></ul>`, empty text is `<p></p>`. The `data-action`
+  and `data-input` indices use separate counters, each in
+  pre-order (depth-first, left to right). `img` and `input` are void
+  elements: no closing tag, no self-closing slash.
+- **State and the event model.** Closures capture by value (§7.2,
+  §9.5), so a tap handler that assigns to a captured variable
+  mutates only its own snapshot: the assignment is a silent no-op
+  at runtime (proven by probe in the M8c eval: a let-bound lambda
+  assigning to an outer `let` passes `check` but prints `0`, not
+  `1`, on py and js). The draft app-track sentence "a tap handler
+  mutates state and the tree re-renders" is therefore wrong and is
+  corrected here. The model is a view function plus external state
+  (the Elm architecture, and it fits newr's value semantics
+  exactly): `ui.run(view)` where `view: fn() -> Widget`; the runtime
+  calls the view, renders the tree, waits for one event, calls the
+  event's handler, then calls the view again and re-renders. State
+  lives in the `db` module (§12.5) or an `http` backend (§12.6); a
+  tap handler performs effects (db calls, http posts, print) and
+  never assigns to a captured variable. After the handler returns,
+  the runtime re-invokes the view, which re-reads the state and
+  builds a fresh tree. The static form, `ui.show(root)`, needs no
+  state at all. A handler that assigns to a name from an enclosing
+  scope is valid newr and stays accepted, but it is a documented
+  pitfall, not an error; a checker warning for it is a follow-up,
+  only if a warning mechanism exists.
+- **Checker rules (E2014, one code for the module, the E2012
+  pattern).** U1: a `ui.*` call with the wrong number of arguments
+  or an argument of the wrong type is E2014, including a non-Widget
+  where a Widget is required and a `list[str]` where a
+  `list[Widget]` is required (collections are invariant, §7.2). U2:
+  `ui.button`'s handler must be `fn() -> none` and `ui.input`'s
+  handler must be `fn(str) -> none`; any other signature is E2014.
+  U3: `ui.run`'s argument must be `fn() -> Widget`; passing a
+  Widget to `ui.run`, or a view function to `ui.show`, is E2014.
+  U4: at most one of `ui.show` and `ui.run` may be called in a
+  program; a program has one window, so calling both, or calling
+  either twice, is E2014. U5: `ui.render` takes a Widget, not a view
+  function. U6: `ui.image`'s URL must be a string literal starting
+  with `http://` or `https://`; a non-literal or a non-HTTP URL is
+  E2014, and a runtime load failure is not an error (a native window
+  shows an empty placeholder, `ui.render` still emits the `<img>`
+  tag). U7: a handler must be a let-bound lambda variable or an
+  inline single-expression lambda; a block-body lambda as a call
+  argument is the existing parser error E1001, not E2014. A named
+  function with the right signature is also accepted as a handler
+  or as a view (the emitters can call it by name, which is easier
+  than a lambda); a named function with the wrong signature is
+  E2014, like a wrong lambda. U8: a
+  `ui.show` or `ui.run` call inside a `test` block is E2014, because
+  a test must terminate.
+- **`ui.show` blocks until the window closes on native targets**
+  (py, java, kt, cs, rs). On js and dart it writes the rendered
+  HTML to `<stem>.html` next to the program (or to the current
+  directory) and prints the path, then returns; it never opens a
+  browser itself. `ui.run` never returns a value; the loop ends when
+  the window closes. On js and dart `ui.run` renders once and
+  returns; the interactive loop is a documented no-op on those
+  targets (the page is static HTML; a live shop frontend on js is
+  served by the backend and re-fetched, it does not loop locally).
+- **Per-target natives:** py tkinter 8.6 stdlib; js none (HTML sink,
+  pure render); java/kt Swing (`javax.swing`) stdlib, needs the X11
+  client libraries libXtst6, libXi6, libXrender1, libXt6 on the
+  machine; cs Avalonia 12.1.6 plus Avalonia.Desktop 12.1.6 (NuGet,
+  net8.0); rs egui 0.37.0 plus eframe (crates.io); dart none in M8c
+  (render only, HTML sink). WinUI is Windows only and MAUI has no
+  official Linux desktop target, so neither is the C# target.
+  JavaFX is not in the JDK and needs an OpenJFX download, so Swing
+  is the java and kt target. Jetpack Compose needs Gradle and the
+  Compose plugin, not plain kotlinc, so it is deferred. Flutter is
+  NOT installed on the build VM and needs a 1.5 to 4 GB install plus
+  apt packages plus a conformance runner change, so Dart in M8c is
+  render-only and Flutter moves to a later phase.
+- **Conformance.** The conformance harness runs each ok program as a
+  subprocess and requires exit 0 plus `PASS` as the last line, with
+  no timeout on the single-process loop. A program that opens a GUI
+  event loop blocks forever, so `ui.show` and `ui.run` programs
+  cannot be conformance ok programs. The ok corpus is render-only
+  (`ui.render` plus exact-string comparison, about 20 programs) and
+  runs on all seven targets with the existing harness. Native windows
+  are verified by a separate harness, `conformance/ui_screenshots.py`,
+  which builds `hello_ui` per target, runs it under `xvfb-run -a`
+  with a 60 second timeout, and screenshots the window. The M8c
+  build also adds a 60 second timeout to the single-process loop
+  (a pre-existing gap: today a stray blocking program hangs the
+  suite with no timeout). HTML sink screenshots at 390, 768, and
+  1280 go through the parent agent's browser task; raw headless
+  Chromium is blocked on the build VM by Hatch policy and is not
+  retried.
+- **Not in M8c:** styling (colors, fonts, sizes, padding, spacing,
+  alignment); scroll containers, navigation, dialogs, menus,
+  checkboxes, radio buttons, sliders, tabs, tables, canvas or custom
+  drawing, animation, accessibility labels beyond what the native
+  toolkit provides by default; local image files (`ui.image` takes
+  URLs only); image loading in native windows (the py window shows
+  the URL as text in v1, no Pillow dependency); Flutter and Dart
+  native windows; JavaFX; Jetpack Compose; WinUI; MAUI; slint
+  (needs `.slint` files, a second UI language); tauri and dioxus
+  (both on alpha lines in M8c). Each is a named deferral, not an
+  oversight. The M8d shop needs nothing beyond the section 12.8
+  surface: a column holding a title text, a search input, a list of
+  product rows, and a cart total text, with each product row a row
+  holding an image, a text, and a button.
 
 ## 13. The `discord` module — one domain module
 
@@ -2431,6 +2597,7 @@ to look:
 | Generics (user-defined) | **Deferred to v2** | `list[T]`/`dict[str, T]`/`set[T]`/`T?`/`Result[T, E]` are generic from day one (§7.1); *user-defined* generic functions/types wait — they need a generic checker, which is v2 work (§7.7). |
 | HTTP `fetch` | **In v1, landed in M8b** | §12.6 — sandboxed `fetch` + allowlist, the §12.3 sketch implemented. |
 | `json` module | **In v1, landed in M8b** | §12.7 — typed JSON via expected-type inference, no `any` needed. |
+| `ui` module | **In v1, landed in M8c** | §12.8 — one small widget set, render core plus native windows, Elm-style view plus external state. |
 | Regex | **Deferred (no version)** | §12.3 — injection/DoS vector in a bot language; revisit with a timeout. |
 | Subcommands | **Deferred to v1.1** | §13.2. |
 | Command-name localization | **Deferred to v1.1** | §15. |

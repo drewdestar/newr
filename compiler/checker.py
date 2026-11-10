@@ -1178,7 +1178,7 @@ class Checker:
                                                 expr.span, as_value=True)
             if binding is None and (obj.name in MODULES
                                 or obj.name == "db"
-                                or obj.name in ("http", "json")):
+                                or obj.name in ("http", "json", "ui")):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
                 # `db` is a domain module like `discord`: it is not
@@ -1249,7 +1249,7 @@ class Checker:
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
         elif target is None and (bound in MODULES or bound == "db"
-                                 or bound == "http" or bound == "json"):
+                                 or bound == "http" or bound == "json" or bound == "ui"):
             # N-09/N-10: named modules are usable by name without an
             # import (SPEC.md SS12.2). `db` is a domain module: not
             # in MODULES, but the same fallback applies (SPEC.md
@@ -1264,6 +1264,8 @@ class Checker:
                 return UNKNOWN  # http module surface: not core's job
             if mod == "json":
                 return UNKNOWN  # json module surface: not core's job
+            if mod == "ui":
+                return UNKNOWN  # ui module surface: not core's job
             members = MODULES.get(mod, {})
             if name in members:
                 sig = members[name]
@@ -1557,7 +1559,7 @@ class Checker:
                                                 expected)
             if binding is None and (obj.name in MODULES
                                 or obj.name == "db"
-                                or obj.name in ("http", "json")):
+                                or obj.name in ("http", "json", "ui")):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
                 # `db` is a domain module: not in MODULES, but the
@@ -1704,7 +1706,7 @@ class Checker:
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
         elif target is None and (bound in MODULES or bound == "db"
-                                 or bound == "http" or bound == "json"):
+                                 or bound == "http" or bound == "json" or bound == "ui"):
             # N-09/N-10: named modules are usable by name without an
             # import (SPEC.md SS12.2); the import is optional. `db`
             # is a domain module: not in MODULES, but the same
@@ -1794,6 +1796,33 @@ class Checker:
                         exp = exp.params[0]
                     if exp is not None:
                         return exp
+                return UNKNOWN
+            if mod == "ui":
+                # M8c: the fixed ui return types live here, in the
+                # core checker, for the same reason as the db/http/
+                # json ones above. Constructors return Widget,
+                # `render` returns str, `show`/`run` return none.
+                # The rules themselves (arity, handler signatures,
+                # the one-window rule) live in ui_check, not here.
+                # The children argument (list/row/column: arg 0) is
+                # synthed with the expected `list[Widget]` type, so
+                # an empty `[]` there types instead of E2002; the
+                # type is only threaded, never enforced here --
+                # ui_check reports a non-Widget child as E2014.
+                children_idx = {"list": 0, "row": 0,
+                                "column": 0}.get(name)
+                for i, arg in enumerate(expr.args):
+                    if children_idx is not None and i == children_idx:
+                        self.synth(arg, Type("list", (Type("Widget"),)))
+                    else:
+                        self.synth(arg)
+                if name in ("text", "button", "input", "list", "image",
+                            "row", "column"):
+                    return Type("Widget")
+                if name == "render":
+                    return STR
+                if name in ("show", "run"):
+                    return NONE_TYPE
                 return UNKNOWN
             members = MODULES.get(mod, {})
             if name not in members:

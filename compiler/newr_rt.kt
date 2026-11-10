@@ -26,6 +26,10 @@
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import java.awt.event.FocusAdapter
+import java.awt.event.FocusEvent
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -56,6 +60,13 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ThreadLocalRandom
 import java.util.regex.Pattern
+import javax.swing.BoxLayout
+import javax.swing.JButton
+import javax.swing.JFrame
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JTextField
+import javax.swing.SwingUtilities
 
 object NewrRt {
 
@@ -2697,5 +2708,259 @@ object NewrRt {
                     headers: Map<String, String>? = null,
                     shape: Any?): Any? {
         return httpFetch(method, url, body, timeout, headers, shape)
+    }
+
+    // ------------------------------------------------------------ ui
+    // One small widget set (SPEC.md section 12.8), stdlib-only:
+    // Swing (javax.swing) for the native window, pure Kotlin for
+    // the render core. A Widget is an opaque value: a kind tag
+    // plus its fields. Handlers are Kotlin callables (the lambdas
+    // the emitter produces, or a named-function reference). The
+    // render core is pure and deterministic: no Swing, no I/O,
+    // byte-identical on every target (see SPEC.md SS12.8 for the
+    // format). `ui.show` builds one static window and blocks
+    // until it closes; `ui.run` re-invokes the view after every
+    // handler call and rebuilds the window from the new tree, so
+    // state must live outside the view (a db handle or an http
+    // backend), never in a captured variable.
+
+    /** A ui widget value: `kind` plus the fields that kind uses.
+     * Only the constructors below build one; programs never build
+     * a Widget by hand. A button carries its tap handler, an
+     * input its change handler; the other kinds leave both null.
+     * Handler result types are `Unit?`, not `Unit`: a let-bound
+     * newr `fn() -> none` handler has Kotlin type `() -> Unit?`
+     * (newr `none` is `Unit?` in _kt_type), so the runtime must
+     * accept it - a `() -> Unit` handler is a subtype of
+     * `() -> Unit?` by return-type covariance, so inline lambdas
+     * and named-function references still pass. */
+    class Widget(
+        val kind: String,
+        val text: String = "",
+        val label: String = "",
+        val tapHandler: (() -> Unit?)? = null,
+        val changeHandler: ((String) -> Unit?)? = null,
+        val placeholder: String = "",
+        val value: String = "",
+        val url: String = "",
+        val children: List<Widget> = emptyList(),
+    )
+
+    /** newr `ui.text(s)`. */
+    fun uiText(text: String): Widget {
+        return Widget("text", text = text)
+    }
+
+    /** newr `ui.button(label, handler)`. */
+    fun uiButton(label: String, handler: () -> Unit?): Widget {
+        return Widget("button", label = label, tapHandler = handler)
+    }
+
+    /** newr `ui.input(placeholder, value, handler)`. */
+    fun uiInput(placeholder: String, value: String,
+                handler: (String) -> Unit?): Widget {
+        return Widget("input", placeholder = placeholder, value = value,
+            changeHandler = handler)
+    }
+
+    /** newr `ui.list(children)`. */
+    fun uiList(children: List<Widget>): Widget {
+        return Widget("list", children = children)
+    }
+
+    /** newr `ui.image(url)`. */
+    fun uiImage(url: String): Widget {
+        return Widget("image", url = url)
+    }
+
+    /** newr `ui.row(children)`. */
+    fun uiRow(children: List<Widget>): Widget {
+        return Widget("row", children = children)
+    }
+
+    /** newr `ui.column(children)`. */
+    fun uiColumn(children: List<Widget>): Widget {
+        return Widget("column", children = children)
+    }
+
+    /** The SPEC.md SS12.8 escape: & then < > ", in that order,
+     * in text and attributes alike. */
+    private fun _uiEscape(s: String): String {
+        return s.replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace("\"", "&quot;")
+    }
+
+    /** newr `ui.render(w)`: the widget tree as deterministic HTML
+     * (SPEC.md SS12.8). No outer wrapper, no insignificant
+     * whitespace, UTF-8. Button and input indices are separate
+     * pre-order counters. */
+    fun uiRender(widget: Widget): String {
+        val counters = IntArray(2)
+        return _uiRenderWidget(widget, counters)
+    }
+
+    private fun _uiRenderWidget(w: Widget, counters: IntArray): String {
+        if (w.kind == "text") {
+            return "<p>" + _uiEscape(w.text) + "</p>"
+        }
+        if (w.kind == "button") {
+            val n = counters[0]
+            counters[0] = n + 1
+            return "<button data-action=\"" + n + "\">" +
+                _uiEscape(w.label) + "</button>"
+        }
+        if (w.kind == "input") {
+            val n = counters[1]
+            counters[1] = n + 1
+            return "<input placeholder=\"" + _uiEscape(w.placeholder) +
+                "\" value=\"" + _uiEscape(w.value) +
+                "\" data-input=\"" + n + "\">"
+        }
+        if (w.kind == "list") {
+            val sb = StringBuilder("<ul>")
+            for (c in w.children) {
+                sb.append("<li>")
+                sb.append(_uiRenderWidget(c, counters))
+                sb.append("</li>")
+            }
+            sb.append("</ul>")
+            return sb.toString()
+        }
+        if (w.kind == "image") {
+            return "<img src=\"" + _uiEscape(w.url) + "\" alt=\"\">"
+        }
+        if (w.kind == "row") {
+            val sb = StringBuilder("<div data-layout=\"row\">")
+            for (c in w.children) {
+                sb.append(_uiRenderWidget(c, counters))
+            }
+            sb.append("</div>")
+            return sb.toString()
+        }
+        if (w.kind == "column") {
+            val sb = StringBuilder("<div data-layout=\"column\">")
+            for (c in w.children) {
+                sb.append(_uiRenderWidget(c, counters))
+            }
+            sb.append("</div>")
+            return sb.toString()
+        }
+        throw NewrError("ui: unknown widget kind " + w.kind)
+    }
+
+    /** Build the Swing widgets for one tree under `parent`.
+     * `rerender` rebuilds the window after a handler runs
+     * (ui.run); it is null for ui.show, whose window is static. */
+    private fun _uiBuildSwing(parent: java.awt.Container, w: Widget,
+                              rerender: (() -> Unit)?) {
+        if (w.kind == "text") {
+            parent.add(JLabel(w.text))
+        } else if (w.kind == "button") {
+            val b = JButton(w.label)
+            b.addActionListener {
+                w.tapHandler?.invoke()
+                rerender?.invoke()
+            }
+            parent.add(b)
+        } else if (w.kind == "input") {
+            val field = JTextField(w.value, 20)
+            val fire = {
+                w.changeHandler?.invoke(field.text)
+                rerender?.invoke()
+            }
+            field.addActionListener { fire() }
+            field.addFocusListener(object : FocusAdapter() {
+                override fun focusLost(e: FocusEvent) {
+                    fire()
+                }
+            })
+            parent.add(field)
+        } else if (w.kind == "list") {
+            val panel = JPanel()
+            panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
+            for (c in w.children) {
+                _uiBuildSwing(panel, c, rerender)
+            }
+            parent.add(panel)
+        } else if (w.kind == "image") {
+            // Swing reads no remote image natively, and fetching
+            // the URL would need the network: show the URL as a
+            // placeholder label, so the widget is visible and
+            // honest about it. A load failure is not an error
+            // (SPEC.md SS12.8 U6).
+            parent.add(JLabel("[image: " + w.url + "]"))
+        } else if (w.kind == "row") {
+            val panel = JPanel()
+            panel.layout = BoxLayout(panel, BoxLayout.X_AXIS)
+            for (c in w.children) {
+                _uiBuildSwing(panel, c, rerender)
+            }
+            parent.add(panel)
+        } else if (w.kind == "column") {
+            val panel = JPanel()
+            panel.layout = BoxLayout(panel, BoxLayout.Y_AXIS)
+            for (c in w.children) {
+                _uiBuildSwing(panel, c, rerender)
+            }
+            parent.add(panel)
+        } else {
+            throw NewrError("ui: unknown widget kind " + w.kind)
+        }
+    }
+
+    /** newr `ui.show(w)`: one static native window, blocks until
+     * the window is closed. */
+    fun uiShow(widget: Widget) {
+        val latch = CountDownLatch(1)
+        SwingUtilities.invokeAndWait {
+            val frame = JFrame("newr")
+            frame.defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
+            frame.addWindowListener(object : WindowAdapter() {
+                override fun windowClosed(e: WindowEvent) {
+                    latch.countDown()
+                }
+            })
+            val body = frame.contentPane
+            body.layout = BoxLayout(body, BoxLayout.Y_AXIS)
+            _uiBuildSwing(body, widget, null)
+            frame.pack()
+            frame.isVisible = true
+        }
+        latch.await()
+    }
+
+    /** newr `ui.run(view)`: the Elm-style loop. Build the window
+     * from `view()`, and after every handler call re-invoke the
+     * view and rebuild the window from the new tree. State lives
+     * outside the view (a db or http backend); the view re-reads
+     * it each time. Blocks until the window closes. */
+    fun uiRun(view: () -> Widget) {
+        val latch = CountDownLatch(1)
+        lateinit var frame: JFrame
+        lateinit var body: JPanel
+        fun rerender() {
+            body.removeAll()
+            val tree = view()
+            _uiBuildSwing(body, tree) { rerender() }
+            body.revalidate()
+            body.repaint()
+            frame.pack()
+        }
+        SwingUtilities.invokeAndWait {
+            frame = JFrame("newr")
+            frame.defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
+            frame.addWindowListener(object : WindowAdapter() {
+                override fun windowClosed(e: WindowEvent) {
+                    latch.countDown()
+                }
+            })
+            body = JPanel()
+            body.layout = BoxLayout(body, BoxLayout.Y_AXIS)
+            frame.contentPane.add(body)
+            rerender()
+            frame.pack()
+            frame.isVisible = true
+        }
+        latch.await()
     }
 }

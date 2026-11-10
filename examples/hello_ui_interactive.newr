@@ -1,0 +1,22 @@
+/// hello_ui_interactive.newr, a db-backed counter (M8c). The state
+/// lives in the db, not in a captured variable: the view reads the
+/// count from the db on every render, and the button handler only
+/// updates the db. ui.run re-invokes the view after each handler.
+/// Build it with: newr build examples/hello_ui_interactive.newr
+struct Count:
+  n: int
+
+let dbh = db.open(":memory:")
+db.exec(dbh, "CREATE TABLE counter (n INTEGER NOT NULL)")
+db.exec(dbh, "INSERT INTO counter VALUES (0)")
+
+fn on_tap() -> none:
+  db.exec(dbh, "UPDATE counter SET n = n + 1")
+  print "tapped"
+
+fn view() -> Widget:
+  let rows: list[Count] = db.query(dbh, "SELECT n FROM counter")
+  let first = rows.get(0, Count(n: 0))
+  return ui.column([ui.text("Count: " + str(first.n)), ui.button("Tap", on_tap)])
+
+ui.run(view)

@@ -1,0 +1,13 @@
+# The ui module (SPEC.md section 12.8): an input renders with
+# placeholder, value, then data-input, in that order, as a void
+# element with no closing tag and no self-closing slash.
+let passed = true
+if ui.render(ui.input("Name", "", fn(s: str) -> none: print(s))) != "<input placeholder=\"Name\" value=\"\" data-input=\"0\">":
+  passed = false
+let two = ui.column([ui.input("A", "1", fn(s: str) -> none: print(s)), ui.input("B", "2", fn(s: str) -> none: print(s))])
+if ui.render(two) != "<div data-layout=\"column\"><input placeholder=\"A\" value=\"1\" data-input=\"0\"><input placeholder=\"B\" value=\"2\" data-input=\"1\"></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

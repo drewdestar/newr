@@ -1,0 +1,13 @@
+# The ui module (SPEC.md section 12.8): empty row and column,
+# alone and nested.
+let passed = true
+if ui.render(ui.column([])) != "<div data-layout=\"column\"></div>":
+  passed = false
+if ui.render(ui.row([])) != "<div data-layout=\"row\"></div>":
+  passed = false
+if ui.render(ui.column([ui.row([]), ui.column([])])) != "<div data-layout=\"column\"><div data-layout=\"row\"></div><div data-layout=\"column\"></div></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

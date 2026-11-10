@@ -61,10 +61,12 @@ _RT_HELPERS = frozenset({
     "strIndex", "strCmp", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
     "hashOf", "structHash", "jsonEncode", "jsonDecode", "httpRoute",
     "httpServe", "httpGet", "httpPost", "httpRequest", "httpFetch",
+    "uiText", "uiButton", "uiInput", "uiList", "uiImage", "uiRow",
+    "uiColumn", "uiRender", "uiShow", "uiRun",
 })
 _RT_CLASSES = frozenset({
     "NewrError", "NewrOverflowError", "NewrDivisionByZeroError",
-    "Result",
+    "Result", "Widget",
 })
 _KT_TYPES = frozenset({
     # Kotlin / JVM type names the emitter writes (a user struct/enum/
@@ -636,6 +638,11 @@ class _KtEmitter:
         elif t.name in ("user", "member", "guild", "channel", "role",
                         "interaction", "embed", "message"):
             base = self._kt_entity_type(t.name)
+        elif t.name == "Widget":
+            # The ui module's opaque value type (SPEC.md section
+            # 12.8): the runtime Widget class in NewrRt, the
+            # Kotlin twin of the Python emitter's newr_rt.Widget.
+            base = "NewrRt.Widget"
         else:
             # A struct or enum: the (possibly module-qualified) class.
             base = self._struct_kt_name(t.name)
@@ -1172,7 +1179,8 @@ class _KtEmitter:
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
-                                       or obj.name in ("db", "http", "json")):
+                                       or obj.name in ("db", "http", "json",
+                                                      "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -1606,7 +1614,8 @@ class _KtEmitter:
                     self._fail(
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
-            if obj.name in MODULES or obj.name in ("db", "http", "json"):
+            if obj.name in MODULES or obj.name in ("db", "http", "json",
+                                                  "ui"):
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(java=obj.name, kind="module",
@@ -3173,6 +3182,9 @@ class _KtEmitter:
         if real == "json":
             args = [self.emit_expr(a, 0) for a in node.args]
             return self._emit_json_call(node, args)
+        if real == "ui":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_ui_call(node, args)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
@@ -3473,6 +3485,22 @@ class _KtEmitter:
             return (f"(NewrRt.jsonDecode({args[0]}, {shape}) "
                     f"as {cast})", _PREC["primary"])
         self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): runtime helpers in
+        NewrRt.kt. The checker (ui_check) has already validated
+        the call, so the arity here is trusted. Constructors build
+        a `NewrRt.Widget`; `render` is the pure HTML core; `show`
+        and `run` open the Swing window (the Kotlin twin of the
+        Python reference in emitter.py / newr_rt.py)."""
+        name = node.func.name
+        if name in ("text", "button", "input", "list", "image", "row",
+                    "column", "render", "show", "run"):
+            self._need_rt(f"ui{name.capitalize()}")
+            return (f"NewrRt.ui{name.capitalize()}({', '.join(args)})",
+                    _PREC["primary"])
+        self._fail(f"module `ui` has no function `{name}`")
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:

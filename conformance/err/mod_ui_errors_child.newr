@@ -1,0 +1,3 @@
+# expect: E2014
+# Children must be widgets, not strings.
+ui.list(["a"])

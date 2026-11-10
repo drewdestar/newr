@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): a list renders as a ul
+# with one li per child, and an empty list as an empty ul.
+let passed = true
+if ui.render(ui.list([ui.text("a"), ui.text("b")])) != "<ul><li><p>a</p></li><li><p>b</p></li></ul>":
+  passed = false
+if ui.render(ui.list([])) != "<ul></ul>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

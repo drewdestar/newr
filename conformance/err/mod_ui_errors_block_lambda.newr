@@ -1,0 +1,6 @@
+# expect: E1001
+# A block-body lambda as a call argument does not parse (the M8b
+# handler rule): this is E1001, not E2014.
+ui.button("x", fn() -> none {
+  print("hi")
+})

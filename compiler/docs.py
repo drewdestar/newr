@@ -35,6 +35,7 @@ from . import __version__
 from .db_limits import DB_MEMBERS
 from .http_limits import HTTP_MEMBERS
 from .json_limits import JSON_MEMBERS
+from .ui_limits import UI_MEMBERS
 from .modules import BUILTINS, METHODS, MODULES
 from .parser import parse
 
@@ -155,6 +156,21 @@ def api_markdown() -> str:
     ]
     for name, entry in JSON_MEMBERS.items():
         lines += [f"### `json.{name}`", "",
+                  f"`{entry['sig']}`", "", entry["doc"], ""]
+    lines += [
+        "## ui module (SPEC.md section 12.8)",
+        "",
+        "One small widget set. Constructors build an immutable "
+        "widget tree; `render` returns a deterministic HTML string; "
+        "`show` opens a native window (or writes the HTML file on js "
+        "and dart); `run` is the interactive loop, re-invoking a "
+        "view function after each event, with state in the db module "
+        "or an http backend. A handler never assigns to a captured "
+        "variable (that assignment is a silent no-op).",
+        "",
+    ]
+    for name, entry in UI_MEMBERS.items():
+        lines += [f"### `ui.{name}`", "",
                   f"`{entry['sig']}`", "", entry["doc"], ""]
     lines += [
         "## Methods (SPEC.md section 12.4)",

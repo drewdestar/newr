@@ -1031,12 +1031,12 @@ class _Emitter:
                     return self._emit_module_call(func.name, node, binding)
                 if binding is None and (obj.name in MODULES
                                         or obj.name in ("db", "http",
-                                                       "json")):
+                                                       "json", "ui")):
                     # A named module used without an import (N-09/N-10).
-                    # `db`, `http`, and `json` are domain modules like
-                    # `discord`: they are not in MODULES, but the same
-                    # no-import fallback applies (SPEC.md sections
-                    # 12.5, 12.6, 12.7).
+                    # `db`, `http`, `json`, and `ui` are domain modules
+                    # like `discord`: they are not in MODULES, but the
+                    # same no-import fallback applies (SPEC.md sections
+                    # 12.5, 12.6, 12.7, 12.8).
                     fake = _Binding(py=obj.name, kind="named-module",
                                     module=obj.name)
                     return self._emit_module_call(func.name, node, fake)
@@ -1241,6 +1241,8 @@ class _Emitter:
             return self._emit_http_call(name, node)
         if real == "json":
             return self._emit_json_call(name, node)
+        if real == "ui":
+            return self._emit_ui_call(name, node)
         if real == "file":
             if name in ("read", "write", "append"):
                 self._need_rt(f"file_{name}")
@@ -1470,6 +1472,20 @@ class _Emitter:
             self._need_rt("json_decode")
             return f"json_decode({arg}, {shape})"
         self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, name: str, node: A.Call) -> str:
+        """`ui.*` calls (SPEC.md section 12.8): runtime helpers in
+        newr_rt.py. The checker (ui_check) has already validated
+        the call, so the arity here is trusted. Constructors build
+        a `newr_rt.Widget`; `render` is the pure HTML core; `show`
+        and `run` open the tkinter window (this is the py reference
+        emitter the other targets follow)."""
+        args = [self.emit_expr(a, 0) for a in node.args]
+        if name in ("text", "button", "input", "list", "image", "row",
+                    "column", "render", "show", "run"):
+            self._need_rt(f"ui_{name}")
+            return f"ui_{name}({', '.join(args)})"
+        self._fail(f"module `ui` has no function `{name}`")
 
     def _emit_enum_call(self, enum_name: str, variant: str,
                         node: A.Call) -> str:
@@ -2678,6 +2694,9 @@ class _Emitter:
             base = "None"
         elif t.name == "error":
             base = "newr_rt.NewrError"
+        elif t.name == "Widget":
+            self._need_rt_class()
+            base = "newr_rt.Widget"
         elif t.name == "duration":
             base = "int"  # seconds; durations only occur in task/timeout
         elif t.name == "list":

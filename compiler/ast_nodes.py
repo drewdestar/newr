@@ -57,7 +57,7 @@ DURATION = Type("duration")
 
 BUILTIN_TYPE_NAMES = {
     "int", "float", "str", "bool", "list", "dict", "set", "Result", "fn",
-    "error", "none", "duration",
+    "error", "none", "duration", "Widget",
 }
 
 # Discord entity types (SPEC.md §7.1). Their *fields* are owned by the

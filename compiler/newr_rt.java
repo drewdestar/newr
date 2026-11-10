@@ -10,7 +10,9 @@
 // `newr build --target java` copies it — byte-identical — next to
 // an emitted `.java` file when (and only when) that program uses a
 // helper from it. Do not edit a copied file by hand: edit this file
-// in the newr repo and rebuild.
+// in the newr repo and rebuild. The ui section at the end uses
+// Swing (java.desktop, still JDK stdlib) for its native window;
+// render-only programs never touch it.
 //
 // Semantics are pinned in BUILD_REPORT.md §21 (K2-K6, mirroring
 // the M2 pins P1-P12 and the M3 pins J1-J13). Every rule here is
@@ -23,6 +25,13 @@
 // calls helpers as `NewrRt.add(a, b)`; error classes are
 // `NewrRt.NewrError` and friends.
 
+import java.awt.Component;
+import java.awt.Container;
+import java.awt.HeadlessException;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -70,6 +79,14 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JTextField;
+import javax.swing.SwingUtilities;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -2814,5 +2831,384 @@ public class NewrRt {
             String body, long timeout, Map<String, String> headers,
             Object[] shape) {
         return httpFetch(method, url, body, timeout, headers, shape);
+    }
+
+    // ---------------------------------------------------------------- ui module
+    // One small widget set (SPEC.md section 12.8), stdlib-only:
+    // Swing for the native window, pure Java for the render core.
+    // A Widget is an opaque value: a kind tag plus its fields.
+    // Handlers are NewrRt Fn values (the lambdas the emitter
+    // produces, or a method reference for a named function). The
+    // render core is pure and deterministic: no Swing, no I/O,
+    // byte-identical to the py reference on every input (see
+    // SPEC.md SS12.8 for the format). `uiShow` builds one static
+    // window and blocks until it closes; `uiRun` re-invokes the
+    // view after every handler call and rebuilds the window from
+    // the new tree, so state must live outside the view (a db
+    // handle or an http backend), never in a captured variable.
+
+    /** A ui widget value: `kind` plus the fields that kind uses.
+     * Only the constructors below build one; programs never build
+     * a Widget by hand. */
+    public static class Widget {
+        public final String kind;
+        public final String text;
+        public final String label;
+        public final Fn0<Void> handler;
+        public final String placeholder;
+        public final String value;
+        public final Fn1<String, Void> inputHandler;
+        public final String url;
+        public final List<Widget> children;
+
+        public Widget(String kind, String text, String label,
+                Fn0<Void> handler, String placeholder, String value,
+                Fn1<String, Void> inputHandler, String url,
+                List<Widget> children) {
+            this.kind = kind;
+            this.text = text;
+            this.label = label;
+            this.handler = handler;
+            this.placeholder = placeholder;
+            this.value = value;
+            this.inputHandler = inputHandler;
+            this.url = url;
+            this.children = children == null ? List.of()
+                    : List.copyOf(children);
+        }
+    }
+
+    /** newr `ui.text(s)`. */
+    public static Widget uiText(String text) {
+        if (text == null) {
+            throw new NewrError("ui: text takes a string");
+        }
+        return new Widget("text", text, "", null, "", "", null, "",
+                List.of());
+    }
+
+    /** newr `ui.button(label, handler)`. */
+    public static Widget uiButton(String label, Fn0<Void> handler) {
+        if (label == null) {
+            throw new NewrError("ui: button label takes a string");
+        }
+        if (handler == null) {
+            throw new NewrError("ui: button handler must be callable");
+        }
+        return new Widget("button", "", label, handler, "", "", null,
+                "", List.of());
+    }
+
+    /** newr `ui.input(placeholder, value, handler)`. */
+    public static Widget uiInput(String placeholder, String value,
+            Fn1<String, Void> handler) {
+        if (placeholder == null || value == null) {
+            throw new NewrError(
+                    "ui: input takes strings for placeholder and value");
+        }
+        if (handler == null) {
+            throw new NewrError("ui: input handler must be callable");
+        }
+        return new Widget("input", "", "", null, placeholder, value,
+                handler, "", List.of());
+    }
+
+    private static List<Widget> _uiChildren(List<Widget> children,
+            String what) {
+        if (children == null) {
+            throw new NewrError("ui: " + what + " takes a list of widgets");
+        }
+        for (Widget child : children) {
+            if (child == null) {
+                throw new NewrError(
+                        "ui: " + what + " takes widgets, got null");
+            }
+        }
+        return children;
+    }
+
+    /** newr `ui.list(items)`. */
+    public static Widget uiList(List<Widget> children) {
+        return new Widget("list", "", "", null, "", "", null, "",
+                _uiChildren(children, "list"));
+    }
+
+    /** newr `ui.image(url)`. */
+    public static Widget uiImage(String url) {
+        if (url == null) {
+            throw new NewrError("ui: image url takes a string");
+        }
+        return new Widget("image", "", "", null, "", "", null, url,
+                List.of());
+    }
+
+    /** newr `ui.row(children)`. */
+    public static Widget uiRow(List<Widget> children) {
+        return new Widget("row", "", "", null, "", "", null, "",
+                _uiChildren(children, "row"));
+    }
+
+    /** newr `ui.column(children)`. */
+    public static Widget uiColumn(List<Widget> children) {
+        return new Widget("column", "", "", null, "", "", null, "",
+                _uiChildren(children, "column"));
+    }
+
+    /** The SPEC.md SS12.8 escape: & then < > ", in that order,
+     * in text and attributes alike. */
+    private static String _uiEscape(String s) {
+        return s.replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
+    /** newr `ui.render(w)`: the widget tree as deterministic HTML
+     * (SPEC.md SS12.8). No outer wrapper, no insignificant
+     * whitespace, UTF-8. Button and input indices are separate
+     * pre-order counters. */
+    public static String uiRender(Widget widget) {
+        if (widget == null) {
+            throw new NewrError("ui: render takes a widget");
+        }
+        int[] counters = new int[]{0, 0};
+        return _uiRenderWidget(widget, counters);
+    }
+
+    private static String _uiRenderWidget(Widget w, int[] counters) {
+        switch (w.kind) {
+            case "text":
+                return "<p>" + _uiEscape(w.text) + "</p>";
+            case "button": {
+                int n = counters[0]++;
+                return "<button data-action=\"" + n + "\">"
+                        + _uiEscape(w.label) + "</button>";
+            }
+            case "input": {
+                int n = counters[1]++;
+                return "<input placeholder=\"" + _uiEscape(w.placeholder)
+                        + "\" value=\"" + _uiEscape(w.value)
+                        + "\" data-input=\"" + n + "\">";
+            }
+            case "list": {
+                StringBuilder sb = new StringBuilder("<ul>");
+                for (Widget c : w.children) {
+                    sb.append("<li>");
+                    sb.append(_uiRenderWidget(c, counters));
+                    sb.append("</li>");
+                }
+                sb.append("</ul>");
+                return sb.toString();
+            }
+            case "image":
+                return "<img src=\"" + _uiEscape(w.url) + "\" alt=\"\">";
+            case "row": {
+                StringBuilder sb =
+                        new StringBuilder("<div data-layout=\"row\">");
+                for (Widget c : w.children) {
+                    sb.append(_uiRenderWidget(c, counters));
+                }
+                sb.append("</div>");
+                return sb.toString();
+            }
+            case "column": {
+                StringBuilder sb = new StringBuilder(
+                        "<div data-layout=\"column\">");
+                for (Widget c : w.children) {
+                    sb.append(_uiRenderWidget(c, counters));
+                }
+                sb.append("</div>");
+                return sb.toString();
+            }
+            default:
+                throw new NewrError(
+                        "ui: unknown widget kind " + w.kind);
+        }
+    }
+
+    private static void _uiAdd(Container parent, JComponent c) {
+        c.setAlignmentX(Component.LEFT_ALIGNMENT);
+        c.setAlignmentY(Component.TOP_ALIGNMENT);
+        parent.add(c);
+    }
+
+    private static void _uiBuildSwing(Container parent, Widget w,
+            Runnable rerender) {
+        switch (w.kind) {
+            case "text":
+                _uiAdd(parent, new JLabel(w.text));
+                break;
+            case "button": {
+                JButton button = new JButton(w.label);
+                button.addActionListener(e -> {
+                    w.handler.get();
+                    if (rerender != null) {
+                        rerender.run();
+                    }
+                });
+                _uiAdd(parent, button);
+                break;
+            }
+            case "input": {
+                JTextField field = new JTextField(w.value);
+                field.addActionListener(e -> {
+                    w.inputHandler.apply(field.getText());
+                    if (rerender != null) {
+                        rerender.run();
+                    }
+                });
+                // No native placeholder in Swing: the placeholder
+                // only shows in the HTML render (uiRender). The
+                // field starts with the value, empty when the
+                // program passes "". Enter and focus-out both
+                // commit, mirroring the py tkinter bindings.
+                field.addFocusListener(new FocusAdapter() {
+                    @Override
+                    public void focusLost(FocusEvent e) {
+                        w.inputHandler.apply(field.getText());
+                        if (rerender != null) {
+                            rerender.run();
+                        }
+                    }
+                });
+                _uiAdd(parent, field);
+                break;
+            }
+            case "list": {
+                JPanel frame = new JPanel();
+                frame.setLayout(new BoxLayout(frame, BoxLayout.Y_AXIS));
+                _uiAdd(parent, frame);
+                for (Widget child : w.children) {
+                    _uiBuildSwing(frame, child, rerender);
+                }
+                break;
+            }
+            case "image":
+                // Swing cannot load a remote image without the
+                // network, and a load failure is not an error
+                // (SPEC.md U6): show the URL as a placeholder
+                // label, so the widget is visible and honest
+                // about it, mirroring the py reference.
+                _uiAdd(parent, new JLabel("[image: " + w.url + "]"));
+                break;
+            case "row": {
+                JPanel frame = new JPanel();
+                frame.setLayout(new BoxLayout(frame, BoxLayout.X_AXIS));
+                _uiAdd(parent, frame);
+                for (Widget child : w.children) {
+                    _uiBuildSwing(frame, child, rerender);
+                }
+                break;
+            }
+            case "column": {
+                JPanel frame = new JPanel();
+                frame.setLayout(new BoxLayout(frame, BoxLayout.Y_AXIS));
+                _uiAdd(parent, frame);
+                for (Widget child : w.children) {
+                    _uiBuildSwing(frame, child, rerender);
+                }
+                break;
+            }
+            default:
+                throw new NewrError(
+                        "ui: unknown widget kind " + w.kind);
+        }
+    }
+
+    /** newr `ui.show(w)`: one static native window, blocks until
+     * the window is closed. */
+    public static void uiShow(Widget widget) {
+        if (widget == null) {
+            throw new NewrError("ui: show takes a widget");
+        }
+        CountDownLatch done = new CountDownLatch(1);
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JFrame frame = new JFrame("newr");
+                frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+                frame.addWindowListener(new WindowAdapter() {
+                    @Override
+                    public void windowClosed(WindowEvent e) {
+                        done.countDown();
+                    }
+                });
+                JPanel body = new JPanel();
+                body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+                frame.getContentPane().add(body);
+                _uiBuildSwing(body, widget, null);
+                frame.pack();
+                frame.setVisible(true);
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof HeadlessException) {
+                throw new NewrError(
+                        "ui: a display is needed to show a window");
+            }
+            throw new NewrError("ui: cannot show a window: " + cause);
+        }
+        try {
+            done.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** newr `ui.run(view)`: the Elm-style loop. Build the window
+     * from `view()`, and after every handler call re-invoke the
+     * view and rebuild the window from the new tree. State lives
+     * outside the view (a db or http backend); the view re-reads
+     * it each time. Blocks until the window is closed. */
+    public static void uiRun(Fn0<Widget> view) {
+        if (view == null) {
+            throw new NewrError("ui: run takes a view function");
+        }
+        CountDownLatch done = new CountDownLatch(1);
+        final Runnable[] rerenderBox = new Runnable[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                JFrame frame = new JFrame("newr");
+                frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+                frame.addWindowListener(new WindowAdapter() {
+                    @Override
+                    public void windowClosed(WindowEvent e) {
+                        done.countDown();
+                    }
+                });
+                JPanel body = new JPanel();
+                body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+                frame.getContentPane().add(body);
+                rerenderBox[0] = () -> {
+                    body.removeAll();
+                    Widget tree = view.get();
+                    if (tree == null) {
+                        throw new NewrError(
+                                "ui: a view must return a widget");
+                    }
+                    _uiBuildSwing(body, tree, rerenderBox[0]);
+                    body.revalidate();
+                    body.repaint();
+                    frame.pack();
+                };
+                rerenderBox[0].run();
+                frame.setVisible(true);
+            });
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof HeadlessException) {
+                throw new NewrError(
+                        "ui: a display is needed to show a window");
+            }
+            throw new NewrError("ui: cannot show a window: " + cause);
+        }
+        try {
+            done.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 }

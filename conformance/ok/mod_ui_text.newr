@@ -1,0 +1,9 @@
+# The ui module (SPEC.md section 12.8): one text widget renders
+# as a paragraph, no outer wrapper.
+let passed = true
+if ui.render(ui.text("Hello")) != "<p>Hello</p>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

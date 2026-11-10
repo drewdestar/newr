@@ -64,7 +64,7 @@ _RT_HELPERS = frozenset({
 })
 _RT_CLASSES = frozenset({
     "NewrError", "NewrOverflowError", "NewrDivisionByZeroError",
-    "Result", "NewrHttp", "NewrJson",
+    "Result", "NewrHttp", "NewrJson", "Widget",
 })
 _DART_CORE_TYPES = frozenset({
     "String", "Object", "int", "double", "bool", "num", "List",
@@ -862,6 +862,13 @@ class _DartEmitter:
             return "Object?"
         if t.name == "error":
             return "NewrError" + q
+        if t.name == "Widget":
+            # The opaque ui value type (SPEC.md section 12.8): the
+            # `Widget` class in newr_rt.dart. The marker forces the
+            # runtime import when a Widget appears in a type
+            # position with no ui call in the same file.
+            self._need_rt("uiText")
+            return "Widget" + q
         if t.name == "list":
             return f"List<{self._dart_type(t.params[0])}>" + q
         if t.name == "dict":
@@ -1444,7 +1451,7 @@ class _DartEmitter:
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
                                        or obj.name in ("db", "http",
-                                                      "json")):
+                                                      "json", "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -1900,7 +1907,7 @@ class _DartEmitter:
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
             if obj.name in MODULES or obj.name in ("db", "http",
-                                                   "json"):
+                                                   "json", "ui"):
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(dart=obj.name, kind="module",
@@ -3498,6 +3505,8 @@ class _DartEmitter:
             return self._emit_http_call(node)
         if real == "json":
             return self._emit_json_call(node)
+        if real == "ui":
+            return self._emit_ui_call(node)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.dart,
                                            node.func.name, args)
@@ -4068,6 +4077,34 @@ class _DartEmitter:
             return (f"NewrJson.decode<{dart_t}>({arg}, {shape})",
                     _PREC["primary"])
         self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): the helpers live
+        in newr_rt.dart as `NewrRt.ui*` static methods, and the
+        `Widget` class there is the opaque widget value. The
+        checker (ui_check) has already validated the call, so the
+        arity here is trusted. Constructors build a Widget;
+        `render` is the pure HTML core; `show` and `run` write
+        the HTML sink on dart (no native window in M8c)."""
+        name = node.func.name
+        methods = {
+            "text": "uiText",
+            "button": "uiButton",
+            "input": "uiInput",
+            "list": "uiList",
+            "image": "uiImage",
+            "row": "uiRow",
+            "column": "uiColumn",
+            "render": "uiRender",
+            "show": "uiShow",
+            "run": "uiRun",
+        }
+        if name in methods:
+            args = [self.emit_expr(a, 0) for a in node.args]
+            self._need_rt(methods[name])
+            return (f"NewrRt.{methods[name]}({', '.join(args)})",
+                    _PREC["primary"])
+        self._fail(f"module `ui` has no function `{name}`")
 
     def _emit_json_class(self) -> list[str]:
         """The `NewrJson` helper class, emitted into a file that

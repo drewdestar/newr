@@ -25,6 +25,7 @@
 
 const fs = require("node:fs");
 const http = require("node:http");
+const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 
@@ -2007,6 +2008,206 @@ function httpRequest(method, url, body, timeout = 10n, headers = null,
   return httpFetch(method, url, body, timeout, headers, shape);
 }
 
+// ------------------------------------------------------------------ ui module
+// One small widget set (SPEC.md section 12.8): no native toolkit on
+// js, so the render core is the whole surface and `show` / `run`
+// write the HTML sink. A Widget is an opaque value: a kind tag plus
+// its fields. Handlers are plain JS functions (the lambdas the
+// emitter produces). The render core is pure and deterministic: no
+// I/O, byte-identical to the py reference (see SPEC.md SS12.8 for
+// the format). `ui.show` writes the rendered HTML to `<stem>.html`
+// next to the program and prints the path, then returns; `ui.run`
+// calls the view once, renders, and writes the same sink. The
+// interactive loop is a documented no-op on js (SPEC.md SS12.8).
+
+class Widget {
+  // A ui widget value: `kind` plus the fields that kind uses.
+  // Only the constructors below build one; programs never build a
+  // Widget by hand.
+  constructor(kind, fields = {}) {
+    this.kind = kind;
+    this.text = fields.text ?? "";
+    this.label = fields.label ?? "";
+    this.handler = fields.handler ?? null;
+    this.placeholder = fields.placeholder ?? "";
+    this.value = fields.value ?? "";
+    this.url = fields.url ?? "";
+    this.children = fields.children ?? [];
+  }
+}
+
+function uiText(text) {
+  // newr `ui.text(s)`.
+  if (typeof text !== "string") {
+    throw new NewrError(`ui: text takes a string, got ${typeof text}`);
+  }
+  return new Widget("text", { text });
+}
+
+function uiButton(label, handler) {
+  // newr `ui.button(label, handler)`.
+  if (typeof label !== "string") {
+    throw new NewrError(
+      `ui: button label takes a string, got ${typeof label}`);
+  }
+  if (typeof handler !== "function") {
+    throw new NewrError("ui: button handler must be callable");
+  }
+  return new Widget("button", { label, handler });
+}
+
+function uiInput(placeholder, value, handler) {
+  // newr `ui.input(placeholder, value, handler)`.
+  if (typeof placeholder !== "string" || typeof value !== "string") {
+    throw new NewrError("ui: input takes strings for placeholder and value");
+  }
+  if (typeof handler !== "function") {
+    throw new NewrError("ui: input handler must be callable");
+  }
+  return new Widget("input", { placeholder, value, handler });
+}
+
+function uiList(children) {
+  // newr `ui.list(children)`.
+  return new Widget("list", { children: _uiChildren(children, "list") });
+}
+
+function uiImage(url) {
+  // newr `ui.image(url)`.
+  if (typeof url !== "string") {
+    throw new NewrError(`ui: image url takes a string, got ${typeof url}`);
+  }
+  return new Widget("image", { url });
+}
+
+function uiRow(children) {
+  // newr `ui.row(children)`.
+  return new Widget("row", { children: _uiChildren(children, "row") });
+}
+
+function uiColumn(children) {
+  // newr `ui.column(children)`.
+  return new Widget("column", { children: _uiChildren(children, "column") });
+}
+
+function _uiChildren(children, what) {
+  if (!Array.isArray(children)) {
+    throw new NewrError(`ui: ${what} takes a list of widgets`);
+  }
+  for (const child of children) {
+    if (!(child instanceof Widget)) {
+      throw new NewrError(
+        `ui: ${what} takes widgets, got ${typeof child}`);
+    }
+  }
+  return children.slice();
+}
+
+function _uiEscape(s) {
+  // The SPEC.md SS12.8 escape: & then < > ", in that order,
+  // in text and attributes alike.
+  return s.split("&").join("&amp;").split("<").join("&lt;")
+    .split(">").join("&gt;").split('"').join("&quot;");
+}
+
+function uiRender(widget) {
+  // newr `ui.render(w)`: the widget tree as deterministic HTML
+  // (SPEC.md SS12.8). No outer wrapper, no insignificant
+  // whitespace, UTF-8. Button and input indices are separate
+  // pre-order counters.
+  if (!(widget instanceof Widget)) {
+    throw new NewrError("ui: render takes a widget");
+  }
+  const counters = { button: 0, input: 0 };
+  return _uiRenderWidget(widget, counters);
+}
+
+function _uiRenderWidget(w, counters) {
+  const kind = w.kind;
+  if (kind === "text") {
+    return `<p>${_uiEscape(w.text)}</p>`;
+  }
+  if (kind === "button") {
+    const n = counters.button;
+    counters.button += 1;
+    return `<button data-action="${n}">${_uiEscape(w.label)}</button>`;
+  }
+  if (kind === "input") {
+    const n = counters.input;
+    counters.input += 1;
+    return `<input placeholder="${_uiEscape(w.placeholder)}" `
+      + `value="${_uiEscape(w.value)}" data-input="${n}">`;
+  }
+  if (kind === "list") {
+    let inner = "";
+    for (const c of w.children) {
+      inner += `<li>${_uiRenderWidget(c, counters)}</li>`;
+    }
+    return `<ul>${inner}</ul>`;
+  }
+  if (kind === "image") {
+    return `<img src="${_uiEscape(w.url)}" alt="">`;
+  }
+  if (kind === "row") {
+    let inner = "";
+    for (const c of w.children) {
+      inner += _uiRenderWidget(c, counters);
+    }
+    return `<div data-layout="row">${inner}</div>`;
+  }
+  if (kind === "column") {
+    let inner = "";
+    for (const c of w.children) {
+      inner += _uiRenderWidget(c, counters);
+    }
+    return `<div data-layout="column">${inner}</div>`;
+  }
+  throw new NewrError(`ui: unknown widget kind ${JSON.stringify(kind)}`);
+}
+
+function _uiHtmlPath() {
+  // `<stem>.html` next to the program (the emitted `.js` file),
+  // or in the current directory when the program path is unknown.
+  const main = process.argv[1];
+  if (typeof main === "string" && main.length > 0) {
+    const base = path.basename(main).replace(/\.js$/, "");
+    return path.join(path.dirname(main), `${base}.html`);
+  }
+  return path.join(process.cwd(), "newr.html");
+}
+
+function _uiWriteHtml(widget) {
+  const outPath = _uiHtmlPath();
+  fs.writeFileSync(outPath, uiRender(widget), "utf-8");
+  console.log(outPath);
+}
+
+function uiShow(widget) {
+  // newr `ui.show(w)`: write the rendered HTML to `<stem>.html`
+  // next to the program and print the path, then return. It never
+  // opens a browser itself.
+  if (!(widget instanceof Widget)) {
+    throw new NewrError("ui: show takes a widget");
+  }
+  _uiWriteHtml(widget);
+  return null;
+}
+
+function uiRun(view) {
+  // newr `ui.run(view)`: call the view once, render, write the
+  // same HTML sink, print the path, return. The interactive loop
+  // is a documented no-op on js (SPEC.md SS12.8).
+  if (typeof view !== "function") {
+    throw new NewrError("ui: run takes a view function");
+  }
+  const tree = view();
+  if (!(tree instanceof Widget)) {
+    throw new NewrError("ui: a view must return a widget");
+  }
+  _uiWriteHtml(tree);
+  return null;
+}
+
 module.exports = {
   INT64_MIN,
   INT64_MAX,
@@ -2075,4 +2276,15 @@ module.exports = {
   httpPost,
   httpRequest,
   httpFetch,
+  Widget,
+  uiText,
+  uiButton,
+  uiInput,
+  uiList,
+  uiImage,
+  uiRow,
+  uiColumn,
+  uiRender,
+  uiShow,
+  uiRun,
 };

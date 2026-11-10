@@ -1,0 +1,3 @@
+# expect: E2014
+# A view function goes to ui.run, not ui.show.
+ui.show(fn() -> Widget: ui.text("x"))

@@ -1,0 +1,14 @@
+# The ui module (SPEC.md section 12.8): input handlers may be an
+# inline lambda or a named function, and the value passes through
+# to the render.
+fn on_input(s: str) -> none:
+  print s
+let passed = true
+if ui.render(ui.input("Name", "ada", fn(s: str) -> none: print(s))) != "<input placeholder=\"Name\" value=\"ada\" data-input=\"0\">":
+  passed = false
+if ui.render(ui.input("Name", "ada", on_input)) != "<input placeholder=\"Name\" value=\"ada\" data-input=\"0\">":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

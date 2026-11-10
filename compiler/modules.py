@@ -97,7 +97,7 @@ BUILTINS: dict[str, dict] = {
 # resolver as a name.
 RESERVED_BUILTIN_NAMES = set(BUILTINS) | {
     "math", "time", "random", "file", "env", "t", "discord", "db", "http",
-    "json", "log",
+    "json", "ui", "log",
 }
 
 # ---------------------------------------------------------------- core modules

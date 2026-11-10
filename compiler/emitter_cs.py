@@ -327,6 +327,10 @@ class _CSEmitter:
         # This file uses `json.*` (set by `_emit_json_call`), the
         # `NewrJson` helper class is emitted into the file only then.
         self._file_uses_json: bool = False
+        self.uses_ui: bool = False
+        # This file uses `ui.*` (set by `_emit_ui_call`), the
+        # `NewrUi` helper class is emitted into the file only then.
+        self._file_uses_ui: bool = False
         self.rt_helpers: set[str] = set()
         # Module-level declarations of the file being emitted.
         self.fns: dict[str, A.FnDecl] = {}
@@ -516,6 +520,10 @@ class _CSEmitter:
         self.uses_json = True
         self._file_uses_json = True
 
+    def _need_ui(self):
+        self.uses_ui = True
+        self._file_uses_ui = True
+
     def _render_imports(self) -> list[str]:
         """The `using` block: `System` and
         `System.Collections.Generic` are unconditional (emitted code
@@ -540,7 +548,16 @@ class _CSEmitter:
             lines.append("using System.Threading;")
             lines.append("using System.Threading.Tasks;")
             lines.append("using System.IO;")
-        if self.uses_http or self.uses_json:
+        if self.uses_ui:
+            # Avalonia (the ui toolkit, SPEC.md section 12.8): the
+            # inline NewrUi helper builds controls in code, no XAML.
+            lines.append("using Avalonia;")
+            lines.append("using Avalonia.Controls;")
+            lines.append("using Avalonia.Controls.ApplicationLifetimes;")
+            lines.append("using Avalonia.Input;")
+            lines.append("using Avalonia.Layout;")
+            lines.append("using Avalonia.Themes.Fluent;")
+        if self.uses_http or self.uses_json or self.uses_ui:
             # The inline NewrHttp/NewrJson helpers use JSON parsing,
             # reflection for struct construction, and text encoding.
             lines.append("using System.Text;")
@@ -646,6 +663,11 @@ class _CSEmitter:
         if t.name in ("user", "member", "guild", "channel", "role",
                       "interaction", "embed", "message"):
             return self._cs_entity_type(t.name)
+        if t.name == "Widget":
+            # The ui module's opaque value type (SPEC.md section
+            # 12.8): the Widget model class inside the inline
+            # NewrUi helper, emitted only when a program uses ui.
+            return "NewrUi.Widget"
         # A struct or enum: the (possibly module-qualified) class.
         return self._struct_cs_name(t.name)
 
@@ -1164,7 +1186,7 @@ class _CSEmitter:
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
                                        or obj.name in ("db", "http",
-                                                       "json")):
+                                                       "json", "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -2311,12 +2333,26 @@ class _CSEmitter:
         fn_type = self._type_of(node)
         cast = fn_target if _is_fn(fn_target) else fn_type
         cast_text = self._cs_fn_type(cast)
+        # A `-> none` lambda is `Func<object>` in C# (there is no
+        # void-returning Func), and a void body does not convert
+        # to it — `() => Console.WriteLine(...)` is CS0029/CS1662
+        # (proven by probe: a plain `let h = fn() -> none:
+        # print("tapped")` failed to build). A none-returning
+        # lambda is therefore emitted as a block that runs the body
+        # as a statement and returns null. This is what makes ui
+        # handlers (`fn() -> none: print(...)`) compile at all.
+        ret_none = node.return_type is None or \
+            _is_none(node.return_type)
         if node.expr_body is not None:
             body, hoists = self._emit_expr_with_hoists(node.expr_body)
             self._fn_used = saved_used
             self._pop_scope()
             if not hoists:
-                arrow = f"({params_text}) => {body}"
+                if ret_none:
+                    arrow = (f"({params_text}) => {{ {body}; "
+                             f"return null; }}")
+                else:
+                    arrow = f"({params_text}) => {body}"
                 if fn_target is not None and _is_fn(fn_target):
                     return arrow, _PREC["primary"]
                 return f"(({cast_text}) ({arrow}))", _PREC["primary"]
@@ -2328,20 +2364,27 @@ class _CSEmitter:
             lines = [f"{cast_text} {name} = ({params_text}) => {{"]
             for h in hoists:
                 lines.append("  " + h)
-            lines.append(f"  return {body};")
+            if ret_none:
+                lines.append(f"  {body};")
+                lines.append("  return null;")
+            else:
+                lines.append(f"  return {body};")
             lines.append("};")
             self._hoists_add(lines)
             return name, _PREC["primary"]
         # Block body: hoist a const arrow.
         name = self._new_lambda_name()
         self._fn_ctx.append({"return_type": node.return_type,
-                             "ensures": [], "in_handler": False})
+                             "ensures": [], "in_handler": False,
+                             "in_lambda": True})
         body_lines = self._emit_block(node.body or [], 1)
         self._fn_ctx.pop()
         self._fn_used = saved_used
         self._pop_scope()
         lines = [f"{cast_text} {name} = ({params_text}) => {{"]
         lines.extend(body_lines if body_lines else ["  ;"])
+        if ret_none:
+            lines.append("  return null;")
         lines.append("};")
         self._hoists_add(lines)
         return name, _PREC["primary"]
@@ -2827,6 +2870,11 @@ class _CSEmitter:
         is_void = ret_type is None or _is_none(ret_type)
         if stmt.value is None:
             if not ensures:
+                if ctx.get("in_lambda") and is_void:
+                    # A bare `return;` inside a block-body lambda
+                    # whose type is Func<object>: a void return does
+                    # not convert, so return null instead.
+                    return [f"{p}return null;"]
                 return [f"{p}return;"]
             lines = [f"{p}_newrResult = null;"]
             lines.extend(self._ensures_check_lines(ensures, indent))
@@ -3220,6 +3268,8 @@ class _CSEmitter:
         if real == "json":
             args = [self.emit_expr(a, 0) for a in node.args]
             return self._emit_json_call(node, args)
+        if real == "ui":
+            return self._emit_ui_call(node)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
@@ -3513,6 +3563,389 @@ class _CSEmitter:
             return (f"NewrJson.Decode<{self._cs_boxed_type(t)}>"
                     f"({args[0]}, {shape})", _PREC["primary"])
         self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): the helpers live
+        in the `NewrUi` class emitted into this file (see
+        `_emit_ui_class`), inline, not in newr_rt.cs, because the
+        runtime file is dependency-free and a program that never
+        uses `ui` must not need Avalonia. The checker (ui_check)
+        has already validated the call, so the arity here is
+        trusted. Constructors build a `NewrUi.Widget`; `render`
+        is the pure HTML core; `show` and `run` open the Avalonia
+        window. Handler arguments are the fn values the
+        call-site emitter already produced, with one C# wrinkle
+        Java does not have: a `void` method (a named `fn() ->
+        none`) and a `void` lambda body do NOT convert to
+        `Func<object>`, so a named function used as a handler is
+        wrapped in a lambda that calls it and returns null (the
+        inline-lambda case is fixed in `_emit_lambda` instead,
+        where every none-returning lambda is wrapped the same
+        way). A let-bound lambda variable already has the
+        `Func<object>` / `Func<string, object>` type, so it
+        passes through unwrapped; a named view function returns
+        a Widget, so its method group converts to
+        `Func<NewrUi.Widget>` directly."""
+        name = node.func.name
+        self._need_ui()
+        if name not in ("text", "button", "input", "list", "image",
+                        "row", "column", "render", "show", "run"):
+            self._fail(f"module `ui` has no function `{name}`")
+        # Handler argument index per call: button takes its
+        # handler second, input third, run takes the view first.
+        handler_idx = {"button": 1, "input": 2, "run": 0}.get(name)
+        args: list[str] = []
+        for i, arg in enumerate(node.args):
+            if i == handler_idx and isinstance(arg, A.Name):
+                binding = self._lookup(arg.name)
+                if binding is not None and binding.kind == "fn":
+                    # A named function as a handler or view: wrap
+                    # it, because a void method group does not
+                    # convert to Func<object>. The fn type's params
+                    # (all but the last, which is the return type)
+                    # give the wrapper's arity.
+                    fn_type = binding.type
+                    n_params = (len(fn_type.params) - 1
+                                if fn_type is not None
+                                and _is_fn(fn_type) else 0)
+                    params = [self._new_temp_name()
+                              for _ in range(n_params)]
+                    plist = ", ".join(params)
+                    target = self.emit_expr(arg, 0)
+                    if fn_type is not None and _is_fn(fn_type) \
+                            and _is_none(fn_type.params[-1]):
+                        args.append(
+                            f"({plist}) => {{ {target}({plist}); "
+                            f"return null; }}")
+                    else:
+                        args.append(
+                            f"({plist}) => {target}({plist})")
+                    continue
+            args.append(self.emit_expr(arg, 0))
+        method = {"text": "Text", "button": "Button",
+                  "input": "Input", "list": "List",
+                  "image": "Image", "row": "Row",
+                  "column": "Column", "render": "Render",
+                  "show": "Show", "run": "Run"}[name]
+        return (f"NewrUi.{method}({', '.join(args)})",
+                _PREC["primary"])
+
+    def _emit_ui_class(self) -> list[str]:
+        """The `NewrUi` helper class, emitted into a file that uses
+        `ui.*` (at indent 1, nested in the program class). The
+        Widget model class plus the constructors, the pure HTML
+        render core (byte-identical to the Python reference in
+        newr_rt.py, SPEC.md section 12.8), and the Avalonia
+        window: `Show` builds one static window and blocks until
+        it closes; `Run` re-invokes the view after every handler
+        call and rebuilds the window content from the new tree.
+        The class is public, not private like NewrHttp/NewrJson:
+        Widget values leak into public signatures (a top-level
+        `let w: Widget` is a public static field, a `fn view()
+        -> Widget` is a public static method), and a private
+        nested type there is CS0052. The window is built in code
+        (no XAML files): the App subclass adds the Fluent theme
+        in Initialize and builds the window in
+        OnFrameworkInitializationCompleted. An image widget shows
+        a placeholder label with the URL (the Python reference
+        does the same; a load failure is not an error, SPEC.md
+        section 12.8 U6). State lives outside the view (a db
+        handle or an http backend); the view re-reads it each
+        time, so the handlers never capture mutable state."""
+        return [
+            "  public static class NewrUi {",
+            "    public sealed class Widget {",
+            "      public string Kind { get; }",
+            "      public string Text { get; }",
+            "      public string Label { get; }",
+            "      public Func<object> ButtonHandler { get; }",
+            "      public Func<string, object> InputHandler { get; }",
+            "      public string Placeholder { get; }",
+            "      public string Value { get; }",
+            "      public string Url { get; }",
+            "      public List<Widget> Children { get; }",
+            "",
+            "      private Widget(string kind, string text,",
+            "          string label, Func<object> buttonHandler,",
+            "          Func<string, object> inputHandler,",
+            "          string placeholder, string value, string url,",
+            "          List<Widget> children) {",
+            "        Kind = kind;",
+            "        Text = text;",
+            "        Label = label;",
+            "        ButtonHandler = buttonHandler;",
+            "        InputHandler = inputHandler;",
+            "        Placeholder = placeholder;",
+            "        Value = value;",
+            "        Url = url;",
+            "        Children = children;",
+            "      }",
+            "",
+            "      internal static Widget MakeText(string text) {",
+            "        return new Widget(\"text\", text, \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeButton(string label,",
+            "          Func<object> handler) {",
+            "        return new Widget(\"button\", \"\", label, handler,",
+            "            null, \"\", \"\", \"\", new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeInput(string placeholder,",
+            "          string value, Func<string, object> handler) {",
+            "        return new Widget(\"input\", \"\", \"\", null, handler,",
+            "            placeholder, value, \"\", new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeList(List<Widget> children) {",
+            "        return new Widget(\"list\", \"\", \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>(children));",
+            "      }",
+            "",
+            "      internal static Widget MakeImage(string url) {",
+            "        return new Widget(\"image\", \"\", \"\", null, null,",
+            "            \"\", \"\", url, new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeRow(List<Widget> children) {",
+            "        return new Widget(\"row\", \"\", \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>(children));",
+            "      }",
+            "",
+            "      internal static Widget MakeColumn(",
+            "          List<Widget> children) {",
+            "        return new Widget(\"column\", \"\", \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>(children));",
+            "      }",
+            "    }",
+            "",
+            "    public static Widget Text(string text) {",
+            "      return Widget.MakeText(text);",
+            "    }",
+            "",
+            "    public static Widget Button(string label,",
+            "        Func<object> handler) {",
+            "      return Widget.MakeButton(label, handler);",
+            "    }",
+            "",
+            "    public static Widget Input(string placeholder,",
+            "        string value, Func<string, object> handler) {",
+            "      return Widget.MakeInput(placeholder, value, handler);",
+            "    }",
+            "",
+            "    public static Widget List(List<Widget> children) {",
+            "      return Widget.MakeList(children);",
+            "    }",
+            "",
+            "    public static Widget Image(string url) {",
+            "      return Widget.MakeImage(url);",
+            "    }",
+            "",
+            "    public static Widget Row(List<Widget> children) {",
+            "      return Widget.MakeRow(children);",
+            "    }",
+            "",
+            "    public static Widget Column(List<Widget> children) {",
+            "      return Widget.MakeColumn(children);",
+            "    }",
+            "",
+            "    public static string Escape(string s) {",
+            "      return s.Replace(\"&\", \"&amp;\").Replace(\"<\", \"&lt;\")",
+            "          .Replace(\">\", \"&gt;\").Replace(\"\\\"\", \"&quot;\");",
+            "    }",
+            "",
+            "    public static string Render(Widget w) {",
+            "      int buttons = 0;",
+            "      int inputs = 0;",
+            "      return RenderWidget(w, ref buttons, ref inputs);",
+            "    }",
+            "",
+            "    private static string RenderWidget(Widget w,",
+            "        ref int buttons, ref int inputs) {",
+            "      switch (w.Kind) {",
+            "        case \"text\":",
+            "          return \"<p>\" + Escape(w.Text) + \"</p>\";",
+            "        case \"button\": {",
+            "          int n = buttons++;",
+            "          return \"<button data-action=\\\"\" + n + \"\\\">\"",
+            "              + Escape(w.Label) + \"</button>\";",
+            "        }",
+            "        case \"input\": {",
+            "          int n = inputs++;",
+            "          return \"<input placeholder=\\\"\"",
+            "              + Escape(w.Placeholder) + \"\\\" value=\\\"\"",
+            "              + Escape(w.Value) + \"\\\" data-input=\\\"\"",
+            "              + n + \"\\\">\";",
+            "        }",
+            "        case \"list\": {",
+            "          StringBuilder sb = new StringBuilder();",
+            "          sb.Append(\"<ul>\");",
+            "          foreach (Widget c in w.Children) {",
+            "            sb.Append(\"<li>\");",
+            "            sb.Append(RenderWidget(c, ref buttons,",
+            "                ref inputs));",
+            "            sb.Append(\"</li>\");",
+            "          }",
+            "          sb.Append(\"</ul>\");",
+            "          return sb.ToString();",
+            "        }",
+            "        case \"image\":",
+            "          return \"<img src=\\\"\" + Escape(w.Url)",
+            "              + \"\\\" alt=\\\"\\\">\";",
+            "        case \"row\": {",
+            "          StringBuilder sb = new StringBuilder();",
+            "          sb.Append(\"<div data-layout=\\\"row\\\">\");",
+            "          foreach (Widget c in w.Children) {",
+            "            sb.Append(RenderWidget(c, ref buttons,",
+            "                ref inputs));",
+            "          }",
+            "          sb.Append(\"</div>\");",
+            "          return sb.ToString();",
+            "        }",
+            "        case \"column\": {",
+            "          StringBuilder sb = new StringBuilder();",
+            "          sb.Append(\"<div data-layout=\\\"column\\\">\");",
+            "          foreach (Widget c in w.Children) {",
+            "            sb.Append(RenderWidget(c, ref buttons,",
+            "                ref inputs));",
+            "          }",
+            "          sb.Append(\"</div>\");",
+            "          return sb.ToString();",
+            "        }",
+            "        default:",
+            "          throw new InvalidOperationException(",
+            "              \"ui: unknown widget kind \" + w.Kind);",
+            "      }",
+            "    }",
+            "",
+            "    private static Func<Widget> _view;",
+            "    private static Widget _root;",
+            "    private static Window _window;",
+            "    private static bool _rerendering;",
+            "",
+            "    public static void Show(Widget root) {",
+            "      _view = null;",
+            "      _root = root;",
+            "      AppBuilder.Configure<UiApp>().UsePlatformDetect()",
+            "          .StartWithClassicDesktopLifetime(",
+            "              Array.Empty<string>());",
+            "    }",
+            "",
+            "    public static void Run(Func<Widget> view) {",
+            "      _view = view;",
+            "      _root = null;",
+            "      AppBuilder.Configure<UiApp>().UsePlatformDetect()",
+            "          .StartWithClassicDesktopLifetime(",
+            "              Array.Empty<string>());",
+            "    }",
+            "",
+            "    private static void Rerender() {",
+            "      if (_window == null || _view == null || _rerendering) {",
+            "        return;",
+            "      }",
+            "      _rerendering = true;",
+            "      try {",
+            "        _window.Content = Build(_view(), Rerender);",
+            "      } finally {",
+            "        _rerendering = false;",
+            "      }",
+            "    }",
+            "",
+            "    private static Control Build(Widget w, Action rerender) {",
+            "      switch (w.Kind) {",
+            "        case \"text\":",
+            "          return new TextBlock { Text = w.Text };",
+            "        case \"button\": {",
+            "          Button b = new Button { Content = w.Label };",
+            "          Func<object> handler = w.ButtonHandler;",
+            "          b.Click += (_, _) => {",
+            "            handler();",
+            "            if (rerender != null) {",
+            "              rerender();",
+            "            }",
+            "          };",
+            "          return b;",
+            "        }",
+            "        case \"input\": {",
+            "          TextBox t = new TextBox {",
+            "            PlaceholderText = w.Placeholder, Text = w.Value };",
+            "          Func<string, object> handler = w.InputHandler;",
+            "          t.KeyDown += (_, e) => {",
+            "            if (e.Key == Key.Return) {",
+            "              handler(t.Text ?? \"\");",
+            "              if (rerender != null) {",
+            "                rerender();",
+            "              }",
+            "            }",
+            "          };",
+            "          t.LostFocus += (_, _) => {",
+            "            handler(t.Text ?? \"\");",
+            "            if (rerender != null) {",
+            "              rerender();",
+            "            }",
+            "          };",
+            "          return t;",
+            "        }",
+            "        case \"list\": {",
+            "          StackPanel p = new StackPanel {",
+            "            Orientation = Orientation.Vertical };",
+            "          foreach (Widget c in w.Children) {",
+            "            p.Children.Add(Build(c, rerender));",
+            "          }",
+            "          return p;",
+            "        }",
+            "        case \"image\":",
+            "          return new TextBlock {",
+            "            Text = \"[image: \" + w.Url + \"]\" };",
+            "        case \"row\": {",
+            "          StackPanel p = new StackPanel {",
+            "            Orientation = Orientation.Horizontal };",
+            "          foreach (Widget c in w.Children) {",
+            "            p.Children.Add(Build(c, rerender));",
+            "          }",
+            "          return p;",
+            "        }",
+            "        case \"column\": {",
+            "          StackPanel p = new StackPanel {",
+            "            Orientation = Orientation.Vertical };",
+            "          foreach (Widget c in w.Children) {",
+            "            p.Children.Add(Build(c, rerender));",
+            "          }",
+            "          return p;",
+            "        }",
+            "        default:",
+            "          throw new InvalidOperationException(",
+            "              \"ui: unknown widget kind \" + w.Kind);",
+            "      }",
+            "    }",
+            "",
+            "    private sealed class UiApp : Application {",
+            "      public UiApp() {",
+            "      }",
+            "",
+            "      public override void Initialize() {",
+            "        Styles.Add(new FluentTheme());",
+            "      }",
+            "",
+            "      public override void OnFrameworkInitializationCompleted() {",
+            "        if (ApplicationLifetime",
+            "            is IClassicDesktopStyleApplicationLifetime desktop) {",
+            "          Window window = new Window {",
+            "            Title = \"newr\", Width = 400, Height = 300 };",
+            "          if (_view != null) {",
+            "            _window = window;",
+            "            window.Content = Build(_view(), Rerender);",
+            "          } else {",
+            "            window.Content = Build(_root, null);",
+            "          }",
+            "          desktop.MainWindow = window;",
+            "        }",
+            "        base.OnFrameworkInitializationCompleted();",
+            "      }",
+            "    }",
+            "  }",
+        ]
 
     def _emit_db_class(self) -> list[str]:
         """The `NewrDb` helper class, emitted into a file that uses
@@ -5360,12 +5793,20 @@ class _CSEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_json_class())
+        if self._file_uses_ui:
+            if body:
+                body.append("")
+            body.extend(self._emit_ui_class())
         # Top-level statements: Main() for the entry file, a static
         # constructor for a file module.
         if program.stmts:
             if body:
                 body.append("")
             if is_main:
+                if self._file_uses_ui:
+                    # Avalonia windows want an STA entry point
+                    # (the proof's Program.cs carries it too).
+                    body.append("  [STAThread]")
                 body.append("  public static void Main(string[] args) {")
                 body.extend(stmt_lines)
                 body.append("  }")
@@ -5423,6 +5864,9 @@ class _CSEmitter:
             # package in the csproj too (the gate reads only the
             # main emitter — see emit_program_cs).
             self.uses_sqlite = self.uses_sqlite or sub_em.uses_sqlite
+            # Same for a `ui.*` call in a file module: the Avalonia
+            # packages in the csproj come from the main emitter.
+            self.uses_ui = self.uses_ui or sub_em.uses_ui
         return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -7286,6 +7730,14 @@ def emit_program_cs(program: A.Program, *, main_path: str,
     # Main and is built separately (see _emit_deploy_file).
     # newr_rt.cs is listed conditionally: the caller copies it
     # next to the output only when the program uses the runtime.
+    # CS9057 is suppressed for ui programs only: Avalonia 12.1.6
+    # ships Roslyn 4.14 analyzers, and SDK 8.0.427 runs Roslyn
+    # 4.11, so a code-only Avalonia app (an Application subclass
+    # in .cs, no XAML) warns on every build — proven by probe: a
+    # hand-written code-only app warns the same way, while the
+    # proof's XAML app builds with 0 warnings. The analyzers
+    # still run; only the version-skew warning is silenced.
+    nowarn = "CS8981;CS9057" if em.uses_ui else "CS8981"
     csproj_lines = [
         "<Project Sdk=\"Microsoft.NET.Sdk\">",
         "  <PropertyGroup>",
@@ -7293,7 +7745,7 @@ def emit_program_cs(program: A.Program, *, main_path: str,
         "    <TargetFramework>net8.0</TargetFramework>",
         "    <Nullable>disable</Nullable>",
         "    <ImplicitUsings>disable</ImplicitUsings>",
-        "    <NoWarn>CS8981</NoWarn>",
+        f"    <NoWarn>{nowarn}</NoWarn>",
         f"    <AssemblyName>{stem}</AssemblyName>",
         "  </PropertyGroup>",
     ]
@@ -7314,6 +7766,27 @@ def emit_program_cs(program: A.Program, *, main_path: str,
         csproj_lines += [
             "    <PackageReference Include=\"Microsoft.Data.Sqlite\" "
             "Version=\"8.0.0\" />",
+            "  </ItemGroup>",
+        ]
+    if em.uses_ui:
+        # Avalonia 12.1.6 plus Avalonia.Desktop 12.1.6 plus
+        # Avalonia.Themes.Fluent 12.1.6 (SPEC.md section 12.8):
+        # the three references of the official template set,
+        # proven on the build VM (M8c Avalonia proof). Fluent is
+        # required: the Avalonia package alone does not contain
+        # FluentTheme. Restore needs the packages in the global
+        # packages cache or reachable from nuget.org; on this VM
+        # the proof seeded a local feed and cache (see the M8c
+        # Avalonia proof), which `dotnet restore` uses when
+        # NUGET_PACKAGES points at it.
+        csproj_lines += [
+            "  <ItemGroup>",
+            "    <PackageReference Include=\"Avalonia\" "
+            "Version=\"12.1.6\" />",
+            "    <PackageReference Include=\"Avalonia.Desktop\" "
+            "Version=\"12.1.6\" />",
+            "    <PackageReference Include=\"Avalonia.Themes.Fluent\" "
+            "Version=\"12.1.6\" />",
             "  </ItemGroup>",
         ]
     if program.bot is not None:

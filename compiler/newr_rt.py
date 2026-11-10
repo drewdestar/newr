@@ -1109,3 +1109,240 @@ def http_request(method: str, url: str, body: str, timeout: int = 10,
     """newr `http.request(method, url, body[, timeout[, headers]])`:
     the generic fetch primitive."""
     return http_fetch(method, url, body, timeout, headers, shape)
+
+
+# ------------------------------------------------------------ ui module
+# One small widget set (SPEC.md section 12.8), stdlib-only:
+# tkinter for the native window, pure Python for the render core.
+# A Widget is an opaque value: a kind tag plus its fields. Handlers
+# are plain Python callables (the lambdas the emitter produces).
+# The render core is pure and deterministic: no tkinter, no I/O,
+# byte-identical on every target (see SPEC.md SS12.8 for the format).
+# `ui.show` builds one static window and blocks in mainloop;
+# `ui.run` re-invokes the view after every handler call and rebuilds
+# the window from the new tree, so state must live outside the view
+# (a db handle or an http backend), never in a captured variable.
+
+class Widget:
+    """A ui widget value: `kind` plus the fields that kind uses.
+    Only the constructors below build one; programs never build a
+    Widget by hand."""
+
+    def __init__(self, kind: str, text: str = "", label: str = "",
+                 handler=None, placeholder: str = "", value: str = "",
+                 url: str = "", children=()):
+        self.kind = kind
+        self.text = text
+        self.label = label
+        self.handler = handler
+        self.placeholder = placeholder
+        self.value = value
+        self.url = url
+        self.children = tuple(children)
+
+
+def ui_text(text: str) -> Widget:
+    """newr `ui.text(s)`."""
+    if not isinstance(text, str):
+        raise NewrError(f"ui: text takes a string, got {type(text)}")
+    return Widget("text", text=text)
+
+
+def ui_button(label: str, handler) -> Widget:
+    """newr `ui.button(label, handler)`."""
+    if not isinstance(label, str):
+        raise NewrError(f"ui: button label takes a string, got {type(label)}")
+    if not callable(handler):
+        raise NewrError("ui: button handler must be callable")
+    return Widget("button", label=label, handler=handler)
+
+
+def ui_input(placeholder: str, value: str, handler) -> Widget:
+    """newr `ui.input(placeholder, value, handler)`."""
+    if not isinstance(placeholder, str) or not isinstance(value, str):
+        raise NewrError("ui: input takes strings for placeholder and value")
+    if not callable(handler):
+        raise NewrError("ui: input handler must be callable")
+    return Widget("input", placeholder=placeholder, value=value,
+                  handler=handler)
+
+
+def ui_list(children) -> Widget:
+    """newr `ui.list(children)`."""
+    return Widget("list", children=_ui_children(children, "list"))
+
+
+def ui_image(url: str) -> Widget:
+    """newr `ui.image(url)`."""
+    if not isinstance(url, str):
+        raise NewrError(f"ui: image url takes a string, got {type(url)}")
+    return Widget("image", url=url)
+
+
+def ui_row(children) -> Widget:
+    """newr `ui.row(children)`."""
+    return Widget("row", children=_ui_children(children, "row"))
+
+
+def ui_column(children) -> Widget:
+    """newr `ui.column(children)`."""
+    return Widget("column", children=_ui_children(children, "column"))
+
+
+def _ui_children(children, what: str) -> tuple:
+    if not isinstance(children, (list, tuple)):
+        raise NewrError(f"ui: {what} takes a list of widgets")
+    for child in children:
+        if not isinstance(child, Widget):
+            raise NewrError(f"ui: {what} takes widgets, got {type(child)}")
+    return tuple(children)
+
+
+def _ui_escape(s: str) -> str:
+    """The SPEC.md SS12.8 escape: & then < > ", in that order,
+    in text and attributes alike."""
+    return (s.replace("&", "&amp;").replace("<", "&lt;")
+             .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def ui_render(widget: Widget) -> str:
+    """newr `ui.render(w)`: the widget tree as deterministic HTML
+    (SPEC.md SS12.8). No outer wrapper, no insignificant
+    whitespace, UTF-8. Button and input indices are separate
+    pre-order counters."""
+    if not isinstance(widget, Widget):
+        raise NewrError("ui: render takes a widget")
+    counters = {"button": 0, "input": 0}
+    return _ui_render_widget(widget, counters)
+
+
+def _ui_render_widget(w: Widget, counters: dict) -> str:
+    kind = w.kind
+    if kind == "text":
+        return f"<p>{_ui_escape(w.text)}</p>"
+    if kind == "button":
+        n = counters["button"]
+        counters["button"] += 1
+        return (f"<button data-action=\"{n}\">"
+                f"{_ui_escape(w.label)}</button>")
+    if kind == "input":
+        n = counters["input"]
+        counters["input"] += 1
+        return (f"<input placeholder=\"{_ui_escape(w.placeholder)}\" "
+                f"value=\"{_ui_escape(w.value)}\" data-input=\"{n}\">")
+    if kind == "list":
+        inner = "".join(f"<li>{_ui_render_widget(c, counters)}</li>"
+                        for c in w.children)
+        return f"<ul>{inner}</ul>"
+    if kind == "image":
+        return f"<img src=\"{_ui_escape(w.url)}\" alt=\"\">"
+    if kind == "row":
+        inner = "".join(_ui_render_widget(c, counters) for c in w.children)
+        return f"<div data-layout=\"row\">{inner}</div>"
+    if kind == "column":
+        inner = "".join(_ui_render_widget(c, counters) for c in w.children)
+        return f"<div data-layout=\"column\">{inner}</div>"
+    raise NewrError(f"ui: unknown widget kind {kind!r}")
+
+
+def _ui_tk():
+    """tkinter, imported lazily so a render-only program never
+    touches the GUI stack."""
+    try:
+        import tkinter as tk
+    except ImportError as exc:
+        raise NewrError(
+            "ui: tkinter is needed to show a window") from exc
+    return tk
+
+
+def _ui_build_tk(tk, parent, w: Widget, rerender) -> None:
+    """Build the tkinter widgets for one tree under `parent`.
+    `rerender` rebuilds the window after a handler runs (ui.run);
+    it is None for ui.show, whose window is static."""
+    kind = w.kind
+    if kind == "text":
+        tk.Label(parent, text=w.text).pack(anchor="w")
+    elif kind == "button":
+        def _on_click(handler=w.handler):
+            handler()
+            if rerender is not None:
+                rerender()
+        tk.Button(parent, text=w.label,
+                  command=_on_click).pack(anchor="w")
+    elif kind == "input":
+        var = tk.StringVar(value=w.value)
+        entry = tk.Entry(parent, textvariable=var)
+        # No native placeholder in tkinter: the placeholder only
+        # shows in the HTML render (ui.render). The entry starts
+        # with the value, empty when the program passes "".
+        entry.pack(anchor="w", fill="x")
+
+        def _on_input(_event=None, handler=w.handler, var=var):
+            handler(var.get())
+            if rerender is not None:
+                rerender()
+        entry.bind("<Return>", _on_input)
+        entry.bind("<FocusOut>", _on_input)
+    elif kind == "list":
+        frame = tk.Frame(parent)
+        frame.pack(anchor="w", fill="x")
+        for child in w.children:
+            _ui_build_tk(tk, frame, child, rerender)
+    elif kind == "image":
+        # tkinter reads GIF/PPM natively only, and fetching the URL
+        # would need the network: show the URL as a placeholder
+        # label, so the widget is visible and honest about it.
+        tk.Label(parent, text=f"[image: {w.url}]").pack(anchor="w")
+    elif kind == "row":
+        frame = tk.Frame(parent)
+        frame.pack(anchor="w", fill="x")
+        for child in w.children:
+            cell = tk.Frame(frame)
+            cell.pack(side="left", anchor="n")
+            _ui_build_tk(tk, cell, child, rerender)
+    elif kind == "column":
+        frame = tk.Frame(parent)
+        frame.pack(anchor="w", fill="x")
+        for child in w.children:
+            _ui_build_tk(tk, frame, child, rerender)
+    else:
+        raise NewrError(f"ui: unknown widget kind {kind!r}")
+
+
+def ui_show(widget: Widget) -> None:
+    """newr `ui.show(w)`: one static native window, blocks in the
+    tkinter mainloop until the window is closed."""
+    if not isinstance(widget, Widget):
+        raise NewrError("ui: show takes a widget")
+    tk = _ui_tk()
+    root = tk.Tk()
+    root.title("newr")
+    _ui_build_tk(tk, root, widget, None)
+    root.mainloop()
+
+
+def ui_run(view) -> None:
+    """newr `ui.run(view)`: the Elm-style loop. Build the window
+    from `view()`, and after every handler call re-invoke the view
+    and rebuild the window from the new tree. State lives outside
+    the view (a db or http backend); the view re-reads it each
+    time. Blocks in the tkinter mainloop until the window closes."""
+    if not callable(view):
+        raise NewrError("ui: run takes a view function")
+    tk = _ui_tk()
+    root = tk.Tk()
+    root.title("newr")
+    body = tk.Frame(root)
+    body.pack(fill="both", expand=True)
+
+    def rerender():
+        for child in body.winfo_children():
+            child.destroy()
+        tree = view()
+        if not isinstance(tree, Widget):
+            raise NewrError("ui: a view must return a widget")
+        _ui_build_tk(tk, body, tree, rerender)
+
+    rerender()
+    root.mainloop()

@@ -1,0 +1,5 @@
+/// hello_ui.newr, a column with text, a button, and an input, shown
+/// in a native window (M8c). Static: ui.show, no loop, no state.
+/// Build it with: newr build examples/hello_ui.newr
+let hello = ui.column([ui.text("Hello, newr"), ui.button("Tap me", fn() -> none: print("tapped")), ui.input("Type here", "", fn(s: str) -> none: print(s))])
+ui.show(hello)

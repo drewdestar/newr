@@ -56,10 +56,12 @@ _RT_HELPERS = frozenset({
     "eq", "range", "print", "input", "ok", "err",
     "jsonEncode", "jsonDecode", "httpRoute", "httpServe",
     "httpGet", "httpPost", "httpRequest", "httpFetch",
+    "uiText", "uiButton", "uiInput", "uiList", "uiImage", "uiRow",
+    "uiColumn", "uiRender", "uiShow", "uiRun",
 })
 _RT_CLASSES = frozenset({
     "NewrError", "NewrOverflowError", "NewrDivisionByZeroError",
-    "Result",
+    "Result", "Widget",
 })
 _DISCORD_JS = frozenset({
     "Client", "GatewayIntentBits", "Events", "SlashCommandBuilder",
@@ -869,7 +871,8 @@ class _JSEmitter:
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
-                                      or obj.name in ("db", "http", "json")):
+                                      or obj.name in ("db", "http", "json",
+                                                      "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference. `db` is a domain module
@@ -877,7 +880,8 @@ class _JSEmitter:
                     # same no-import fallback applies (SPEC.md
                     # section 12.5); `http` and `json` are domain
                     # modules the same way (SPEC.md sections 12.6,
-                    # 12.7).
+                    # 12.7); `ui` is a domain module the same way
+                    # (SPEC.md section 12.8).
                     fake = _Binding(js=obj.name, kind="module",
                                     module=obj.name)
                     return self._emit_module_call(node, fake)
@@ -2341,6 +2345,8 @@ class _JSEmitter:
             return self._emit_http_call(node, args)
         if real == "json":
             return self._emit_json_call(node, args)
+        if real == "ui":
+            return self._emit_ui_call(node, args)
         return self._emit_module_call_text(real, binding.js,
                                            node.func.name, args)
 
@@ -2532,7 +2538,8 @@ class _JSEmitter:
                 self._fail(f"internal: dict type without two params: "
                            f"`{t}`")
             return f'["dict", {self._shape_literal(t.params[1])}]'
-        if t.name in ("fn", "Result", "set", "error", "duration"):
+        if t.name in ("fn", "Result", "set", "error", "duration",
+                      "Widget"):
             self._fail(f"internal: type `{t}` has no JSON shape")
         decl = self._struct_decl(t.name)
         js_name = self._struct_js_name(t.name)
@@ -2622,6 +2629,21 @@ class _JSEmitter:
             self._need_rt("jsonDecode")
             return f"jsonDecode({args[0]}, {shape})", _PREC["primary"]
         self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): runtime helpers in
+        newr_rt.js. The checker (ui_check) has already validated
+        the call, so the arity here is trusted. Constructors build
+        a runtime Widget; `render` is the pure HTML core; `show`
+        and `run` write the HTML sink (SPEC.md section 12.8)."""
+        name = node.func.name
+        if name in ("text", "button", "input", "list", "image", "row",
+                    "column", "render", "show", "run"):
+            self._need_rt(f"ui{name.capitalize()}")
+            return (f"ui{name.capitalize()}({', '.join(args)})",
+                    _PREC["primary"])
+        self._fail(f"module `ui` has no function `{name}`")
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:

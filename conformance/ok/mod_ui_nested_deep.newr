@@ -1,0 +1,10 @@
+# The ui module (SPEC.md section 12.8): deep nesting, a column
+# in a column holding a row holding a list.
+let passed = true
+let tree = ui.column([ui.column([ui.row([ui.list([ui.text("deep")])])])])
+if ui.render(tree) != "<div data-layout=\"column\"><div data-layout=\"column\"><div data-layout=\"row\"><ul><li><p>deep</p></li></ul></div></div></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

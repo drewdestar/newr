@@ -304,6 +304,70 @@ Encodes a value as JSON text. The value may be a struct, a list, a dict, a str, 
 
 Decodes JSON text into the expected type at the call site, for example `let todos: list[Todo] = json.decode(text)`. The expected type may be a struct, a list, a dict, a str, an int, a float, a bool, or a nullable of any of those. A JSON `null` decodes to `none` only for a nullable expected type. Struct fields match by name; a missing field throws, an extra field is ignored. A JSON number with a fraction into an `int` field throws; a JSON integer into a `float` field is fine. Trailing data after the JSON value throws, and an empty string throws. Duplicate keys: last wins.
 
+## ui module (SPEC.md section 12.8)
+
+One small widget set. Constructors build an immutable widget tree; `render` returns a deterministic HTML string; `show` opens a native window (or writes the HTML file on js and dart); `run` is the interactive loop, re-invoking a view function after each event, with state in the db module or an http backend. A handler never assigns to a captured variable (that assignment is a silent no-op).
+
+### `ui.text`
+
+`text(s: str) -> Widget`
+
+A label with plain text. The render core HTML-escapes the text. Renders as `<p>text</p>`.
+
+### `ui.button`
+
+`button(label: str, on_tap: fn() -> none) -> Widget`
+
+A button with a label and a tap handler. The handler is a let-bound lambda or an inline single-expression lambda (a block-body lambda cannot be written as a call argument, E1001). The handler takes no arguments and returns none. Renders as `<button data-action="N">label</button>`, where N is the button's 0-based index in pre-order traversal of the tree.
+
+### `ui.input`
+
+`input(placeholder: str, value: str, on_change: fn(str) -> none) -> Widget`
+
+One line of text with a placeholder, the current value, and an on-change handler receiving the new text. The view supplies the current value from state on every re-render; there is no two-way binding. Renders as `<input placeholder="..." value="..." data-input="N">`, where N is the input's 0-based index in pre-order traversal of the tree.
+
+### `ui.list`
+
+`list(items: list[Widget]) -> Widget`
+
+A vertical list of widgets, normally rows. Each child is wrapped in an `<li>`. Renders as `<ul><li>...</li>...</ul>`.
+
+### `ui.image`
+
+`image(url: str) -> Widget`
+
+An image by URL. The URL must be a string literal starting with `http://` or `https://`. `ui.render` emits an `<img>` tag and never fetches the URL, so render tests need no network. A native window shows an empty placeholder when the load fails. Renders as `<img src="..." alt="">`.
+
+### `ui.row`
+
+`row(children: list[Widget]) -> Widget`
+
+Horizontal layout: the children in a row, in order. No spacing, alignment, or sizing arguments in v1. Renders as `<div data-layout="row">...</div>`.
+
+### `ui.column`
+
+`column(children: list[Widget]) -> Widget`
+
+Vertical layout: the children in a column, in order. No spacing, alignment, or sizing arguments in v1. Renders as `<div data-layout="column">...</div>`.
+
+### `ui.render`
+
+`render(root: Widget) -> str`
+
+Renders a widget tree to a deterministic HTML string. Pure: no window, no network, no side effects. The same tree renders to the same bytes on every target and every run (SPEC.md section 12.8 pins the byte format). This is the conformance-testable core of the module.
+
+### `ui.show`
+
+`show(root: Widget) -> none`
+
+Opens the tree in a native window where a toolkit exists (py, java, kt, cs, rs) and blocks until the window closes. On js and dart it writes the rendered HTML to a file next to the program and prints the path, then returns. At most one of `show` and `run` may be called in a program; a program has one window.
+
+### `ui.run`
+
+`run(view: fn() -> Widget) -> none`
+
+The interactive loop. Takes a view function, not a tree: the runtime calls the view, renders the tree, dispatches one event to its handler, then calls the view again and re-renders. State lives outside the tree (in the db module or an http backend); a handler never assigns to a captured variable (that assignment is a silent no-op, SPEC.md section 12.8). The loop ends when the window closes. On js and dart it renders once and returns; the interactive loop is a documented no-op on those targets.
+
 ## Methods (SPEC.md section 12.4)
 
 Methods on values. The receiver type is shown first.

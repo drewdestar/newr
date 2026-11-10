@@ -1142,6 +1142,128 @@ class NewrRt {
   /// newr `file.exists(path)`.
   static bool fileExists(String path) => File(path).existsSync();
 
+  // ---------------------------------------------------------------- ui
+
+  /// newr `ui.text(s)` (SPEC.md section 12.8): builds a Widget.
+  static Widget uiText(String text) => Widget('text', text: text);
+
+  /// newr `ui.button(label, handler)`: builds a Widget. The
+  /// handler runs only on a native target; on dart the tree is
+  /// render-only, so the handler is stored and never called.
+  static Widget uiButton(String label, void Function() handler) =>
+      Widget('button', label: label, handler: handler);
+
+  /// newr `ui.input(placeholder, value, handler)`: builds a
+  /// Widget. The handler runs only on a native target; on dart
+  /// the tree is render-only, so the handler is stored and never
+  /// called.
+  static Widget uiInput(String placeholder, String value,
+          void Function(String) handler) =>
+      Widget('input',
+          placeholder: placeholder, value: value, handler: handler);
+
+  /// newr `ui.list(items)`: builds a Widget.
+  static Widget uiList(List<Widget> children) =>
+      Widget('list', children: List<Widget>.unmodifiable(children));
+
+  /// newr `ui.image(url)`: builds a Widget.
+  static Widget uiImage(String url) => Widget('image', url: url);
+
+  /// newr `ui.row(children)`: builds a Widget.
+  static Widget uiRow(List<Widget> children) =>
+      Widget('row', children: List<Widget>.unmodifiable(children));
+
+  /// newr `ui.column(children)`: builds a Widget.
+  static Widget uiColumn(List<Widget> children) => Widget('column',
+      children: List<Widget>.unmodifiable(children));
+
+  /// The SPEC.md section 12.8 escape: `&` then `<` `>` `"`, in
+  /// that order, in text content and attribute values alike.
+  static String _uiEscape(String s) => s
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+
+  /// newr `ui.render(w)`: the widget tree as deterministic HTML
+  /// (SPEC.md section 12.8). No outer wrapper, no insignificant
+  /// whitespace, UTF-8. Button and input indices are separate
+  /// pre-order counters.
+  static String uiRender(Widget widget) {
+    final counters = <int>[0, 0];
+    return _uiRenderWidget(widget, counters);
+  }
+
+  static String _uiRenderWidget(Widget w, List<int> counters) {
+    switch (w.kind) {
+      case 'text':
+        return '<p>${_uiEscape(w.text)}</p>';
+      case 'button':
+        final n = counters[0];
+        counters[0] = n + 1;
+        return '<button data-action="$n">${_uiEscape(w.label)}</button>';
+      case 'input':
+        final n = counters[1];
+        counters[1] = n + 1;
+        return '<input placeholder="${_uiEscape(w.placeholder)}" '
+            'value="${_uiEscape(w.value)}" data-input="$n">';
+      case 'list':
+        final inner = w.children
+            .map((c) => '<li>${_uiRenderWidget(c, counters)}</li>')
+            .join();
+        return '<ul>$inner</ul>';
+      case 'image':
+        return '<img src="${_uiEscape(w.url)}" alt="">';
+      case 'row':
+        final inner =
+            w.children.map((c) => _uiRenderWidget(c, counters)).join();
+        return '<div data-layout="row">$inner</div>';
+      case 'column':
+        final inner =
+            w.children.map((c) => _uiRenderWidget(c, counters)).join();
+        return '<div data-layout="column">$inner</div>';
+      default:
+        throw NewrError('ui: unknown widget kind ${w.kind}');
+    }
+  }
+
+  /// The HTML sink path for `ui.show` / `ui.run` on dart: the
+  /// program stem with `.html`, next to the program file
+  /// (Platform.script is the emitted `.dart` file when run with
+  /// `dart` or `dart run`). Falls back to `newr.html` in the
+  /// current directory when the script path is unavailable.
+  static String _uiHtmlPath() {
+    try {
+      final script = Platform.script.toFilePath();
+      if (script.endsWith('.dart')) {
+        return '${script.substring(0, script.length - 5)}.html';
+      }
+      return '$script.html';
+    } catch (_) {
+      return 'newr.html';
+    }
+  }
+
+  /// newr `ui.show(w)` on dart: render once, write the HTML to
+  /// `<stem>.html` next to the program, print the path, return.
+  /// It never opens a browser itself. There is no native window
+  /// on dart in M8c (SPEC.md section 12.8).
+  static void uiShow(Widget widget) {
+    final path = _uiHtmlPath();
+    File(path).writeAsStringSync(uiRender(widget));
+    stdout.writeln(path);
+  }
+
+  /// newr `ui.run(view)` on dart: call the view once, render,
+  /// write the same HTML sink, print the path, return. The
+  /// interactive loop is a documented no-op on dart (SPEC.md
+  /// section 12.8).
+  static void uiRun(Widget Function() view) {
+    final path = _uiHtmlPath();
+    File(path).writeAsStringSync(uiRender(view()));
+    stdout.writeln(path);
+  }
+
   // ---------------------------------------------------------------- env
 
   /// `env.get(name)` / `env.get(name, default)`: null when the
@@ -1260,4 +1382,30 @@ class Result<T, E> {
       // and 0.0 as equal, so their hash codes must agree too
       // (the equals/hashCode contract).
       _isOk ? NewrRt.hashOf(_value) : NewrRt.hashOf(_error);
+}
+
+/// newr `Widget` (SPEC.md section 12.8): an opaque ui value, a
+/// `kind` tag plus the fields that kind uses. Only the
+/// `NewrRt.ui*` constructors build one; programs never build a
+/// Widget by hand. A top-level class (not nested in NewrRt -
+/// Dart has no nested classes); the emitter writes `Widget`
+/// directly.
+class Widget {
+  final String kind;
+  final String text;
+  final String label;
+  final Function? handler;
+  final String placeholder;
+  final String value;
+  final String url;
+  final List<Widget> children;
+
+  const Widget(this.kind,
+      {this.text = '',
+      this.label = '',
+      this.handler,
+      this.placeholder = '',
+      this.value = '',
+      this.url = '',
+      this.children = const <Widget>[]});
 }

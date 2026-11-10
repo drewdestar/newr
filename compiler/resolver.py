@@ -67,7 +67,7 @@ RESERVED_HANDLER_BINDINGS = {
 
 #: Named (stdlib / domain) modules available in v1 (SPEC.md §11, §12).
 NAMED_MODULES = {"math", "time", "random", "file", "env", "discord", "db",
-                 "http", "json"}
+                 "http", "json", "ui"}
 
 #: Handler bindings per context (SPEC.md §13.4–§13.5). Select handlers add
 #: ``values``; modal handlers add their field names.

@@ -346,5 +346,96 @@ class TestCoreJsonBoundary(unittest.TestCase):
         self.assertIn('"json"', reserved[:300])
 
 
+def _ui_literal_lines(path: Path) -> list[tuple[int, str]]:
+    out = []
+    for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(),
+                            start=1):
+        if '"ui"' in line:
+            out.append((i, line.strip()))
+    return out
+
+
+class TestCoreUiBoundary(unittest.TestCase):
+    """The ui twin of the db boundary (SPEC.md SS2.1, SS12.8):
+    the core checker never imports anything ui, and the literal
+    "ui" occurs in core only at the documented exemption sites."""
+
+    def test_checker_import_does_not_load_ui_modules(self):
+        for mod in ("compiler.ui_check", "compiler.ui_limits"):
+            sys.modules.pop(mod, None)
+        import compiler.checker  # noqa: F401
+        self.assertNotIn("compiler.ui_check", sys.modules)
+        self.assertNotIn("compiler.ui_limits", sys.modules)
+
+    def test_checker_source_has_no_ui_import(self):
+        path = _root() / "compiler" / "checker.py"
+        src = path.read_text(encoding="utf-8")
+        for line in src.splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("import ", "from ")):
+                self.assertNotIn("ui_", stripped,
+                                 f"core checker imports a ui module: {line!r}")
+
+    def test_ui_check_is_the_only_ui_limits_importer(self):
+        # ui_check.py imports the ui limits (and docs.py renders
+        # the surface from them into api.md); the core checker does
+        # not.
+        path = _root() / "compiler" / "ui_check.py"
+        src = path.read_text(encoding="utf-8")
+        self.assertIn("ui_limits", src)
+        docs = (_root() / "compiler" / "docs.py").read_text(
+            encoding="utf-8")
+        self.assertIn("ui_limits", docs)
+
+    def test_checker_ui_literal_only_at_bypass_sites(self):
+        # SPEC.md SS2.1 + SS12.2 + SS12.8: `ui` is usable by name
+        # without an import, and the core checker returns UNKNOWN
+        # for ui calls (the rules live in ui_check.py). The name
+        # occurs at exactly six sites: two UNKNOWN bypasses (`if
+        # mod == "ui": return UNKNOWN`) and four no-import fallback
+        # guards (the N-09/N-10 pattern, mirroring the emitters)
+        # that route a bare `ui` to the bypass — never a ui
+        # rule. The fallback lines start with "or obj.name" (the
+        # `or obj.name in ("http", "json", "ui")` guard), "elif
+        # target is None" (the `bound in MODULES` guard), or "or
+        # bound" (the continuation of that guard naming http/json/ui).
+        hits = _ui_literal_lines(_root() / "compiler" / "checker.py")
+        self.assertEqual(len(hits), 6, hits)
+        bypasses = [line for _n, line in hits
+                    if line == 'if mod == "ui":']
+        self.assertEqual(len(bypasses), 2, hits)
+        fallbacks = [line for _n, line in hits
+                     if line != 'if mod == "ui":']
+        self.assertEqual(len(fallbacks), 4, hits)
+        for line in fallbacks:
+            self.assertTrue(
+                line.startswith(("or obj.name",
+                                 "elif target is None",
+                                 "or bound")),
+                line)
+
+    def test_resolver_ui_literal_only_at_exemption_sites(self):
+        path = _root() / "compiler" / "resolver.py"
+        hits = _ui_literal_lines(path)
+        # The NAMED_MODULES registry only; ui needs no W1002-style
+        # exemption (no implicit import). The registry spans two
+        # lines, so the check is on the assignment block, not the
+        # hit line alone.
+        self.assertEqual(len(hits), 1, hits)
+        src = path.read_text(encoding="utf-8")
+        registry = src.split("NAMED_MODULES", 1)[1].split("}", 1)[0]
+        self.assertIn('"ui"', registry)
+
+    def test_modules_ui_literal_only_in_reserved_names(self):
+        # SPEC.md SS2.1: the one occurrence is the RESERVED_BUILTIN_NAMES
+        # entry (a module name a program may not redefine).
+        path = _root() / "compiler" / "modules.py"
+        hits = _ui_literal_lines(path)
+        self.assertEqual(len(hits), 1, hits)
+        src = path.read_text(encoding="utf-8")
+        reserved = src.split("RESERVED_BUILTIN_NAMES", 1)[1]
+        self.assertIn('"ui"', reserved[:300])
+
+
 if __name__ == "__main__":
     unittest.main()

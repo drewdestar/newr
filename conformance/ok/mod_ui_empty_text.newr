@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): empty text renders as
+# an empty paragraph, and a single space is kept, never trimmed.
+let passed = true
+if ui.render(ui.text("")) != "<p></p>":
+  passed = false
+if ui.render(ui.text(" ")) != "<p> </p>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -605,6 +605,11 @@ class _JavaEmitter:
             return "Object"
         if t.name == "error":
             return "NewrRt.NewrError"
+        if t.name == "Widget":
+            # The ui module's opaque value type (SPEC.md section
+            # 12.8): the runtime Widget class in NewrRt.java, the
+            # Java twin of the py emitter's `newr_rt.Widget`.
+            return "NewrRt.Widget"
         if t.name == "list":
             return f"List<{self._java_boxed_type(t.params[0])}>"
         if t.name == "dict":
@@ -844,6 +849,21 @@ class _JavaEmitter:
             # binding is its Java name. A module-level fn used as a
             # value is a method reference (`Main::fn`).
             if binding.kind == "fn":
+                if _is_fn(fn_target) and _is_none(fn_target.params[-1]):
+                    # A `none`-returning fn is a void method, and a
+                    # method reference to it is NOT a FnN<...,
+                    # Void> ("void cannot be converted to Void"):
+                    # wrap it in a lambda that returns null (the
+                    # same rule as none lambdas in _emit_lambda).
+                    params = fn_target.params[:-1]
+                    pnames = [f"_newr_p{i}"
+                              for i in range(len(params))]
+                    call_args = ", ".join(pnames)
+                    params_text = ", ".join(pnames)
+                    return (f"({params_text}) -> {{ "
+                            f"{self.output_stem}.{binding.java}"
+                            f"({call_args}); return null; }}",
+                            _PREC["primary"])
                 return f"{self.output_stem}::{binding.java}", \
                     _PREC["primary"]
             return binding.value, _PREC["primary"]
@@ -1140,13 +1160,15 @@ class _JavaEmitter:
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
-                                      or obj.name in ("db", "http", "json")):
+                                      or obj.name in ("db", "http", "json",
+                                                     "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
-                    # and the reference. `db` is a domain module
-                    # like `discord`: it is not in MODULES, but the
-                    # same no-import fallback applies (SPEC.md
-                    # section 12.5).
+                    # and the reference. `db`, `http`, `json`, and
+                    # `ui` are domain modules like `discord`: they
+                    # are not in MODULES, but the same no-import
+                    # fallback applies (SPEC.md sections 12.5, 12.6,
+                    # 12.7, 12.8).
                     fake = _Binding(java=obj.name, kind="module",
                                     module=obj.name)
                     return self._emit_module_call(node, fake)
@@ -2215,12 +2237,28 @@ class _JavaEmitter:
         fn_type = self._type_of(node)
         cast = fn_target if _is_fn(fn_target) else fn_type
         cast_text = self._java_fn_type(cast)
+        # A `none`-returning lambda has Java type FnN<..., Void>,
+        # and a void expression is NOT a value for Void: `() ->
+        # System.out.println(x)` and `() -> { ...; }` both fail
+        # with "void cannot be converted to Void" (the ui corpus
+        # is the first to use none lambdas as values). A none
+        # lambda must therefore be a block ending in `return
+        # null;` (J8's Void twin: the value of a none lambda is
+        # always null).
+        ret = node.return_type
+        if ret is None and _is_fn(fn_type):
+            ret = fn_type.params[-1]
+        returns_none = _is_none(ret)
         if node.expr_body is not None:
             body, hoists = self._emit_expr_with_hoists(node.expr_body)
             self._fn_used = saved_used
             self._pop_scope()
             if not hoists:
-                arrow = f"({params_text}) -> {body}"
+                if returns_none:
+                    arrow = (f"({params_text}) -> {{ {body}; "
+                             f"return null; }}")
+                else:
+                    arrow = f"({params_text}) -> {body}"
                 if fn_target is not None and _is_fn(fn_target):
                     return arrow, _PREC["primary"]
                 return f"(({cast_text}) ({arrow}))", _PREC["primary"]
@@ -2232,20 +2270,35 @@ class _JavaEmitter:
             lines = [f"final {cast_text} {name} = ({params_text}) -> {{"]
             for h in hoists:
                 lines.append("  " + h)
-            lines.append(f"  return {body};")
+            if returns_none:
+                lines.append(f"  {body};")
+                lines.append("  return null;")
+            else:
+                lines.append(f"  return {body};")
             lines.append("};")
             self._hoists_add(lines)
             return name, _PREC["primary"]
         # Block body: hoist a const arrow.
         name = self._new_lambda_name()
         self._fn_ctx.append({"return_type": node.return_type,
-                             "ensures": [], "in_handler": False})
+                             "ensures": [], "in_handler": False,
+                             "in_lambda": True})
         body_lines = self._emit_block(node.body or [], 1)
         self._fn_ctx.pop()
         self._fn_used = saved_used
         self._pop_scope()
         lines = [f"final {cast_text} {name} = ({params_text}) -> {{"]
-        lines.extend(body_lines if body_lines else ["  ;"])
+        if returns_none:
+            # A bare `return;` inside became `return null;` in
+            # _emit_return; append the trailing one unless the
+            # block already ends in a return.
+            last = next((line.strip() for line in reversed(body_lines)
+                         if line.strip()), "")
+            lines.extend(body_lines if body_lines else ["  ;"])
+            if not last.startswith("return "):
+                lines.append("  return null;")
+        else:
+            lines.extend(body_lines if body_lines else ["  ;"])
         lines.append("};")
         self._hoists_add(lines)
         return name, _PREC["primary"]
@@ -2729,6 +2782,12 @@ class _JavaEmitter:
         is_void = ret_type is None or _is_none(ret_type)
         if stmt.value is None:
             if not ensures:
+                if ctx.get("in_lambda") and is_void:
+                    # A bare `return;` in a none lambda: the
+                    # lambda's Java type is FnN<..., Void>, and a
+                    # bare return is "missing return value" there
+                    # (see _emit_lambda).
+                    return [f"{p}return null;"]
                 return [f"{p}return;"]
             lines = [f"{p}_newrResult = null;"]
             lines.extend(self._ensures_check_lines(ensures, indent))
@@ -3101,6 +3160,13 @@ class _JavaEmitter:
                         f"({self.emit_expr(node.args[0], 0)})",
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
+        if real == "ui":
+            # The ui emitter emits its own args: the handler
+            # positions carry their fn type as context, so an
+            # inline lambda needs no cast and a named fn is
+            # wrapped when it returns none (see _emit_lambda and
+            # _emit_name).
+            return self._emit_ui_call(node)
         args = [self.emit_expr(a, 0) for a in node.args]
         if real == "db":
             return self._emit_db_call(node, args)
@@ -3418,6 +3484,44 @@ class _JavaEmitter:
             return (f"({cast}) NewrRt.jsonDecode({args[0]}, {shape})",
                     _PREC["primary"])
         self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): runtime helpers in
+        NewrRt.java. The checker (ui_check) has already validated
+        the call, so the arity here is trusted. Constructors build
+        a `NewrRt.Widget`; `render` is the pure HTML core; `show`
+        and `run` open the Swing window (the py reference emitter
+        opens tkinter; this is its Java twin). Handler and view
+        arguments are emitted with their fn type as context, so
+        an inline lambda needs no cast, a let-bound lambda
+        variable passes as its FnN value, and a named function
+        is a method reference (or a null-returning wrapper when
+        it returns none, see _emit_name)."""
+        name = node.func.name
+        if name in ("text", "button", "input", "list", "image", "row",
+                    "column", "render", "show", "run"):
+            if name == "button":
+                args = [self.emit_expr(node.args[0], 0),
+                        self.emit_expr(
+                            node.args[1], 0,
+                            fn_target=fn_of([], Type("none")))]
+            elif name == "input":
+                args = [self.emit_expr(node.args[0], 0),
+                        self.emit_expr(node.args[1], 0),
+                        self.emit_expr(
+                            node.args[2], 0,
+                            fn_target=fn_of([Type("str")],
+                                            Type("none")))]
+            elif name == "run":
+                args = [self.emit_expr(
+                    node.args[0], 0,
+                    fn_target=fn_of([], Type("Widget")))]
+            else:
+                args = [self.emit_expr(a, 0) for a in node.args]
+            self._need_rt(f"ui{name.capitalize()}")
+            return (f"NewrRt.ui{name.capitalize()}"
+                    f"({', '.join(args)})", _PREC["primary"])
+        self._fail(f"module `ui` has no function `{name}`")
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:

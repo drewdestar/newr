@@ -1,0 +1,10 @@
+# The ui module (SPEC.md section 12.8): nesting composes, a
+# column holding a row and a list.
+let passed = true
+let tree = ui.column([ui.row([ui.text("a"), ui.text("b")]), ui.list([ui.text("c")])])
+if ui.render(tree) != "<div data-layout=\"column\"><div data-layout=\"row\"><p>a</p><p>b</p></div><ul><li><p>c</p></li></ul></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -49,7 +49,7 @@ from pathlib import Path
 import re
 
 from . import ast_nodes as A
-from .ast_nodes import Type, fn_of
+from .ast_nodes import NONE_TYPE, STR, Type, fn_of
 from .emitter import EmitterError, EmitResult
 from .errors import Span
 from .modules import BUILTINS, METHODS, MODULES
@@ -328,6 +328,15 @@ class _RsEmitter:
         self.uses_json: bool = False
         self._file_uses_http: bool = False
         self._file_uses_json: bool = False
+        # The same pair for `ui.*` (M8c): `uses_ui_window` gates
+        # the Cargo.toml (only `ui.show` / `ui.run` need eframe;
+        # render-only programs stay on plain rustc, see
+        # `emit_program_rs`), `_file_uses_ui` gates the inline
+        # `newr_ui` render module and `_file_uses_ui_window`
+        # gates the inline `newr_ui_window` eframe module.
+        self.uses_ui_window: bool = False
+        self._file_uses_ui: bool = False
+        self._file_uses_ui_window: bool = False
         self.rt_helpers: set[str] = set()
         # Module-level declarations of the file being emitted.
         self.fns: dict[str, A.FnDecl] = {}
@@ -633,6 +642,11 @@ class _RsEmitter:
                     f"{self._rs_boxed_type(t.params[1])}>")
         if t.name == "fn":
             return self._rs_fn_type(t)
+        if t.name == "Widget":
+            # The ui module's opaque value type (SPEC.md SS12.8):
+            # the `newr_ui::Widget` enum in the inline helper
+            # module (see `_emit_ui_mod`).
+            return "newr_ui::Widget"
         if t.name == "duration":
             return "i64"
         if t.name in ("user", "member", "guild", "channel", "role",
@@ -1442,6 +1456,11 @@ class _RsEmitter:
                 # The same for `http.*` / `json.*` (M8b).
                 self.uses_http = self.uses_http or sub_em.uses_http
                 self.uses_json = self.uses_json or sub_em.uses_json
+                # The same for `ui.show` / `ui.run` (M8c): a window
+                # call in a file module needs egui + eframe in the
+                # Cargo.toml too.
+                self.uses_ui_window = (self.uses_ui_window
+                                       or sub_em.uses_ui_window)
             return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -2074,7 +2093,8 @@ class _RsEmitter:
                 if binding is None and (obj.name in MODULES
                                        or obj.name == "db"
                                        or obj.name == "http"
-                                       or obj.name == "json"):
+                                       or obj.name == "json"
+                                       or obj.name == "ui"):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -2527,7 +2547,8 @@ class _RsEmitter:
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
             if obj.name in MODULES or obj.name == "db" \
-                    or obj.name == "http" or obj.name == "json":
+                    or obj.name == "http" or obj.name == "json" \
+                    or obj.name == "ui":
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(rs=obj.name, kind="module",
@@ -3884,6 +3905,11 @@ class _RsEmitter:
         if real == "json":
             args = [self.emit_expr(a, 0) for a in node.args]
             return self._emit_json_call(node, args)
+        if real == "ui":
+            # `_emit_ui_call` emits its own args (with
+            # `_emit_value`, so handler lambdas get their fn-type
+            # cast and Widget/String names are cloned).
+            return self._emit_ui_call(node)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.rs,
                                            node.func.name, args)
@@ -4276,6 +4302,56 @@ class _RsEmitter:
                     f"&({args[2]}), {timeout}, &({headers}), {make})",
                     _PREC["primary"])
         self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): the helpers live in
+        the `newr_ui` module emitted into this file (see
+        `_emit_ui_mod`), inline, not in newr_rt.rs, following the
+        `newr_http` / `newr_json` precedent, and `show` / `run`
+        live in `newr_ui_window` (see `_emit_ui_window_mod`),
+        because they need eframe and the runtime file is std-only.
+        The checker (ui_check) has already validated the call, so
+        the arity here is trusted. Constructors build a
+        `newr_ui::Widget`; `render` is the pure HTML core; `show`
+        and `run` open the eframe window (the py reference emitter
+        is the tkinter twin of this)."""
+        name = node.func.name
+        self._file_uses_ui = True
+        # The expected argument types, in order (a handler or view
+        # is a fn type, so `_emit_value` casts a lambda to it and a
+        # named function arrives as an `Arc` over its fn pointer).
+        _UI_PARAMS: dict[str, list[Type]] = {
+            "text": [STR],
+            "button": [STR, Type("fn", (NONE_TYPE,))],
+            "input": [STR, STR,
+                      Type("fn", (STR, NONE_TYPE))],
+            "list": [Type("list", (Type("Widget"),))],
+            "image": [STR],
+            "row": [Type("list", (Type("Widget"),))],
+            "column": [Type("list", (Type("Widget"),))],
+            "render": [Type("Widget")],
+            "show": [Type("Widget")],
+            "run": [Type("fn", (Type("Widget"),))],
+        }
+        if name not in _UI_PARAMS:
+            self._fail(f"module `ui` has no function `{name}`")
+        params = _UI_PARAMS[name]
+        args = [self._emit_value(a, p, fn_target=p if _is_fn(p)
+                                 else None)
+                for a, p in zip(node.args, params)]
+        args += [self.emit_expr(a, 0)
+                 for a in node.args[len(params):]]
+        if name in ("text", "button", "input", "list", "image",
+                    "row", "column", "render"):
+            return (f"newr_ui::ui_{name}({', '.join(args)})",
+                    _PREC["primary"])
+        # `show` / `run` open a window: the eframe module and the
+        # egui + eframe crates (the Cargo.toml gate reads
+        # `uses_ui_window`, see `emit_program_rs`).
+        self._file_uses_ui_window = True
+        self.uses_ui_window = True
+        return (f"newr_ui_window::ui_{name}({', '.join(args)})",
+                _PREC["primary"])
 
     def _emit_json_call(self, node: A.Call,
                         args: list[str]) -> tuple[str, int]:
@@ -5062,6 +5138,270 @@ class _RsEmitter:
             "",
             "  pub fn http_request<Resp>(method: &str, url: &str, body: &str, timeout_secs: i64, headers: &crate::newr_rt::Dict<String>, make: impl Fn(i64, crate::newr_rt::Dict<String>, String) -> Resp) -> Resp {",
             "    http_fetch(method, url, Some(body), timeout_secs, headers, make)",
+            "  }",
+            "}",
+        ]
+
+    def _emit_ui_mod(self) -> list[str]:
+        """The `newr_ui` helper module, emitted into a file that
+        uses `ui.*` (at top level, before `fn main`). The Widget
+        value (an enum with a kind tag plus the fields that kind
+        uses, mirroring the py `newr_rt.Widget` class) plus the
+        constructors and the pure render core (SPEC.md SS12.8):
+        the HTML byte format, the escape, and the separate
+        pre-order button/input counters, byte-identical to the py
+        reference. Std-only, no crates, so a render-only program
+        still builds with plain rustc and no Cargo.toml."""
+        return [
+            "#[allow(dead_code)]",
+            "mod newr_ui {",
+            "  /// A ui widget value: a kind tag plus the fields that",
+            "  /// kind uses (SPEC.md SS12.8). Only the constructors",
+            "  /// below build one; programs never build a Widget by",
+            "  /// hand. Handlers are `Arc<dyn Fn>` values, so a",
+            "  /// Widget is Clone and Send + Sync.",
+            "  #[derive(Clone)]",
+            "  pub enum Widget {",
+            "    Text { text: String },",
+            "    Button { label: String, handler: std::sync::Arc<dyn Fn() -> () + Send + Sync> },",
+            "    Input { placeholder: String, value: String, handler: std::sync::Arc<dyn Fn(String) -> () + Send + Sync> },",
+            "    List { children: Vec<Widget> },",
+            "    Image { url: String },",
+            "    Row { children: Vec<Widget> },",
+            "    Column { children: Vec<Widget> },",
+            "  }",
+            "",
+            "  impl Default for Widget {",
+            "    fn default() -> Self {",
+            "      Widget::Column { children: Vec::new() }",
+            "    }",
+            "  }",
+            "",
+            "  pub fn ui_text(text: String) -> Widget {",
+            "    Widget::Text { text }",
+            "  }",
+            "",
+            "  pub fn ui_button(label: String, handler: std::sync::Arc<dyn Fn() -> () + Send + Sync>) -> Widget {",
+            "    Widget::Button { label, handler }",
+            "  }",
+            "",
+            "  pub fn ui_input(placeholder: String, value: String, handler: std::sync::Arc<dyn Fn(String) -> () + Send + Sync>) -> Widget {",
+            "    Widget::Input { placeholder, value, handler }",
+            "  }",
+            "",
+            "  pub fn ui_list(children: Vec<Widget>) -> Widget {",
+            "    Widget::List { children }",
+            "  }",
+            "",
+            "  pub fn ui_image(url: String) -> Widget {",
+            "    Widget::Image { url }",
+            "  }",
+            "",
+            "  pub fn ui_row(children: Vec<Widget>) -> Widget {",
+            "    Widget::Row { children }",
+            "  }",
+            "",
+            "  pub fn ui_column(children: Vec<Widget>) -> Widget {",
+            "    Widget::Column { children }",
+            "  }",
+            "",
+            "  /// The SPEC.md SS12.8 escape: `&` then `<` `>` `\"`,",
+            "  /// in that order, in text content and attribute",
+            "  /// values alike.",
+            "  pub fn ui_escape(s: &str) -> String {",
+            "    s.replace('&', \"&amp;\").replace('<', \"&lt;\").replace('>', \"&gt;\").replace('\"', \"&quot;\")",
+            "  }",
+            "",
+            "  /// `ui.render(w)`: the widget tree as deterministic",
+            "  /// HTML (SPEC.md SS12.8). No outer wrapper, no",
+            "  /// insignificant whitespace, UTF-8. Button and input",
+            "  /// indices are separate pre-order counters.",
+            "  pub fn ui_render(root: Widget) -> String {",
+            "    let mut button = 0usize;",
+            "    let mut input = 0usize;",
+            "    render_widget(&root, &mut button, &mut input)",
+            "  }",
+            "",
+            "  fn render_widget(w: &Widget, button: &mut usize, input: &mut usize) -> String {",
+            "    match w {",
+            "      Widget::Text { text } => format!(\"<p>{}</p>\", ui_escape(text)),",
+            "      Widget::Button { label, .. } => {",
+            "        let n = *button;",
+            "        *button += 1;",
+            "        format!(\"<button data-action=\\\"{}\\\">{}</button>\", n, ui_escape(label))",
+            "      }",
+            "      Widget::Input { placeholder, value, .. } => {",
+            "        let n = *input;",
+            "        *input += 1;",
+            "        format!(\"<input placeholder=\\\"{}\\\" value=\\\"{}\\\" data-input=\\\"{}\\\">\", ui_escape(placeholder), ui_escape(value), n)",
+            "      }",
+            "      Widget::List { children } => {",
+            "        let mut out = String::from(\"<ul>\");",
+            "        for c in children {",
+            "          out.push_str(\"<li>\");",
+            "          out.push_str(&render_widget(c, button, input));",
+            "          out.push_str(\"</li>\");",
+            "        }",
+            "        out.push_str(\"</ul>\");",
+            "        out",
+            "      }",
+            "      Widget::Image { url } => format!(\"<img src=\\\"{}\\\" alt=\\\"\\\">\", ui_escape(url)),",
+            "      Widget::Row { children } => {",
+            "        let mut out = String::from(\"<div data-layout=\\\"row\\\">\");",
+            "        for c in children {",
+            "          out.push_str(&render_widget(c, button, input));",
+            "        }",
+            "        out.push_str(\"</div>\");",
+            "        out",
+            "      }",
+            "      Widget::Column { children } => {",
+            "        let mut out = String::from(\"<div data-layout=\\\"column\\\">\");",
+            "        for c in children {",
+            "          out.push_str(&render_widget(c, button, input));",
+            "        }",
+            "        out.push_str(\"</div>\");",
+            "        out",
+            "      }",
+            "    }",
+            "  }",
+            "}",
+        ]
+
+    def _emit_ui_window_mod(self) -> list[str]:
+        """The `newr_ui_window` helper module, emitted into a file
+        that uses `ui.show` / `ui.run` (at top level, before `fn
+        main`). The eframe window: an App that calls the newr view
+        function every frame and renders the tree it returns (the
+        Elm-style loop of SPEC.md SS12.8); a tap handler runs and
+        the next frame re-invokes the view. State lives outside
+        the view (a db or http backend), never in a captured
+        variable. An image shows a placeholder label with the URL:
+        a runtime load failure is not an error (U6), and the py
+        reference does the same with tkinter. eframe 0.37 shape:
+        `fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut
+        eframe::Frame)` on the App trait (not the pre-0.37
+        `update(&Context)` shape). Only emitted when a window is
+        used, so a render-only program never needs eframe."""
+        return [
+            "#[allow(dead_code)]",
+            "mod newr_ui_window {",
+            "  use super::newr_ui::Widget;",
+            "",
+            "  /// The eframe App for `ui.show` / `ui.run`. For",
+            "  /// `ui.show` the tree is fixed and `view` is None;",
+            "  /// for `ui.run` the view is called every frame.",
+            "  /// Each input keeps its text in `inputs`, keyed by",
+            "  /// its pre-order index (the same separate counters",
+            "  /// as `ui.render`).",
+            "  struct NewrUiApp {",
+            "    view: Option<std::sync::Arc<dyn Fn() -> Widget + Send + Sync>>,",
+            "    tree: Option<Widget>,",
+            "    inputs: Vec<String>,",
+            "  }",
+            "",
+            "  impl NewrUiApp {",
+            "    fn current_tree(&mut self) -> Widget {",
+            "      match &self.view {",
+            "        Some(view) => view(),",
+            "        None => self.tree.clone().unwrap_or(Widget::Column { children: Vec::new() }),",
+            "      }",
+            "    }",
+            "  }",
+            "",
+            "  impl eframe::App for NewrUiApp {",
+            "    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {",
+            "      egui::CentralPanel::default().show(ui, |ui| {",
+            "        let tree = self.current_tree();",
+            "        let mut button = 0usize;",
+            "        let mut input = 0usize;",
+            "        build_egui(ui, &tree, &mut self.inputs, &mut button, &mut input);",
+            "      });",
+            "    }",
+            "  }",
+            "",
+            "  /// Build the egui widgets for one tree. A button",
+            "  /// calls its handler when clicked. An input calls",
+            "  /// its handler with the text when focus leaves it",
+            "  /// (the py reference fires on Return / FocusOut);",
+            "  /// while it is not focused its buffer follows the",
+            "  /// tree value, so external state wins after a",
+            "  /// handler runs, as in the py rebuild-on-rerender.",
+            "  fn build_egui(ui: &mut egui::Ui, w: &Widget, inputs: &mut Vec<String>, button: &mut usize, input: &mut usize) {",
+            "    match w {",
+            "      Widget::Text { text } => {",
+            "        ui.label(text.as_str());",
+            "      }",
+            "      Widget::Button { label, handler } => {",
+            "        *button += 1;",
+            "        if ui.button(label.as_str()).clicked() {",
+            "          handler();",
+            "        }",
+            "      }",
+            "      Widget::Input { placeholder, value, handler } => {",
+            "        let n = *input;",
+            "        *input += 1;",
+            "        if n >= inputs.len() {",
+            "          inputs.push(value.clone());",
+            "        }",
+            "        let buf = &mut inputs[n];",
+            "        let resp = egui::TextEdit::singleline(buf).hint_text(placeholder.as_str()).show(ui).response;",
+            "        if resp.lost_focus() {",
+            "          handler(buf.clone());",
+            "        }",
+            "        if !resp.has_focus() {",
+            "          *buf = value.clone();",
+            "        }",
+            "      }",
+            "      Widget::List { children } => {",
+            "        ui.vertical(|ui| {",
+            "          for c in children {",
+            "            build_egui(ui, c, inputs, button, input);",
+            "          }",
+            "        });",
+            "      }",
+            "      Widget::Image { url } => {",
+            "        ui.label(format!(\"[image: {}]\", url));",
+            "      }",
+            "      Widget::Row { children } => {",
+            "        ui.horizontal(|ui| {",
+            "          for c in children {",
+            "            build_egui(ui, c, inputs, button, input);",
+            "          }",
+            "        });",
+            "      }",
+            "      Widget::Column { children } => {",
+            "        ui.vertical(|ui| {",
+            "          for c in children {",
+            "            build_egui(ui, c, inputs, button, input);",
+            "          }",
+            "        });",
+            "      }",
+            "    }",
+            "  }",
+            "",
+            "  fn run_window(app: NewrUiApp) {",
+            "    let options = eframe::NativeOptions {",
+            "      viewport: egui::ViewportBuilder::default().with_inner_size([800.0, 600.0]),",
+            "      ..Default::default()",
+            "    };",
+            "    if let Err(e) = eframe::run_native(\"newr\", options, Box::new(|_cc| Ok(Box::new(app)))) {",
+            "      panic!(\"ui: could not open a window: {e}\");",
+            "    }",
+            "  }",
+            "",
+            "  /// `ui.show(w)`: one static native window, blocks",
+            "  /// until the window closes.",
+            "  pub fn ui_show(root: Widget) {",
+            "    run_window(NewrUiApp { view: None, tree: Some(root), inputs: Vec::new() });",
+            "  }",
+            "",
+            "  /// `ui.run(view)`: the Elm-style loop. The App calls",
+            "  /// the view every frame and renders the tree it",
+            "  /// returns, so a handler that updates external state",
+            "  /// shows up on the next frame. Blocks until the",
+            "  /// window closes.",
+            "  pub fn ui_run(view: std::sync::Arc<dyn Fn() -> Widget + Send + Sync>) {",
+            "    run_window(NewrUiApp { view: Some(view), tree: None, inputs: Vec::new() });",
             "  }",
             "}",
         ]
@@ -7962,6 +8302,14 @@ class _RsEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_json_mod())
+        if self._file_uses_ui:
+            if body:
+                body.append("")
+            body.extend(self._emit_ui_mod())
+        if self._file_uses_ui_window:
+            if body:
+                body.append("")
+            body.extend(self._emit_ui_window_mod())
         # Top-level statements: main() for the entry file,
         # __newr_init() for a file module. The module inits run
         # first (in import order), then this file's statements.
@@ -8014,13 +8362,15 @@ def _rs_stem(stem: str) -> str:
 
 
 def _rs_cargo_toml(stem: str, file_stem: str, *,
-                   uses_sqlite: bool) -> str:
+                   uses_sqlite: bool, uses_ui_window: bool = False) -> str:
     """The Cargo build file for a bot program: serenity 0.12.5 and
     poise 0.7.1 (both pinned, verified live - see
     tests/test_emitter_rs.py), tokio 1, rusqlite 0.41 with the
     bundled feature only when a store is used. Two binaries - the
     bot and the standalone registration script - with
-    `default-run` so a bare `cargo run` still runs the bot."""
+    `default-run` so a bare `cargo run` still runs the bot.
+    `uses_ui_window` adds egui 0.37.0 + eframe 0.37.0 (both
+    pinned, verified live - see the M8c egui proof)."""
     artifact = "".join(ch.lower() if ch.isalnum() else "-"
                        for ch in stem).strip("-") or "bot"
     lines = [
@@ -8049,6 +8399,9 @@ def _rs_cargo_toml(stem: str, file_stem: str, *,
     if uses_sqlite:
         lines.append('rusqlite = { version = "0.41", features = '
                      '["bundled"] }')
+    if uses_ui_window:
+        lines.append('egui = "=0.37.0"')
+        lines.append('eframe = "=0.37.0"')
     return "\n".join(lines) + "\n"
 
 
@@ -8063,16 +8416,20 @@ def _rs_db_cargo_toml(stem: str, file_stem: str) -> str:
 
 def _rs_plain_cargo_toml(stem: str, file_stem: str, *,
                          uses_sqlite: bool,
-                         uses_http_json: bool) -> str:
+                         uses_http_json: bool,
+                         uses_ui_window: bool = False) -> str:
     """The Cargo build file for a plain (non-bot) program that uses
-    `db.*` and/or `http.*`/`json.*`: exactly the deps the program
-    uses, no serenity/poise, no deploy script. `db` adds rusqlite
-    0.41 with the bundled feature; `http` or `json` (or both) add
-    tiny_http 0.12.0, ureq 3.5.1 with the rustls feature, and
-    serde_json 1.0.154 with preserve_order (insertion order for
-    struct fields and dict entries), all verified live on
-    crates.io. A plain program using none of the three builds with
-    bare rustc and no Cargo.toml at all."""
+    `db.*` and/or `http.*`/`json.*` and/or `ui.show`/`ui.run`:
+    exactly the deps the program uses, no serenity/poise, no
+    deploy script. `db` adds rusqlite 0.41 with the bundled
+    feature; `http` or `json` (or both) add tiny_http 0.12.0,
+    ureq 3.5.1 with the rustls feature, and serde_json 1.0.154
+    with preserve_order (insertion order for struct fields and
+    dict entries), all verified live on crates.io; `ui.show` /
+    `ui.run` add egui 0.37.0 + eframe 0.37.0 (both pinned,
+    verified live - see the M8c egui proof). A plain program
+    using none of the four builds with bare rustc and no
+    Cargo.toml at all."""
     artifact = "".join(ch.lower() if ch.isalnum() else "-"
                        for ch in stem).strip("-") or "main"
     lines = [
@@ -8097,6 +8454,9 @@ def _rs_plain_cargo_toml(stem: str, file_stem: str, *,
                      '["rustls"] }')
         lines.append('serde_json = { version = "1.0.154", features = '
                      '["preserve_order"] }')
+    if uses_ui_window:
+        lines.append('egui = "=0.37.0"')
+        lines.append('eframe = "=0.37.0"')
     return "\n".join(lines) + "\n"
 
 
@@ -8142,18 +8502,24 @@ def emit_program_rs(program: A.Program, *, main_path: str,
         # Cargo.toml lands next to the sources automatically).
         deploy = em._emit_deploy_file(program, file_stem + ".rs")
         files[file_stem + "_deploy.rs"] = deploy
-        files["Cargo.toml"] = _rs_cargo_toml(stem, file_stem,
-                                             uses_sqlite=em.uses_sqlite)
-    elif em.uses_sqlite or em.uses_http or em.uses_json:
+        files["Cargo.toml"] = _rs_cargo_toml(
+            stem, file_stem, uses_sqlite=em.uses_sqlite,
+            uses_ui_window=em.uses_ui_window)
+    elif em.uses_sqlite or em.uses_http or em.uses_json \
+            or em.uses_ui_window:
         # A plain program that uses `db.*` and/or `http.*`/`json.*`
-        # needs a Cargo build file too (B8): exactly the deps it
-        # uses: rusqlite only for db, tiny_http + ureq + serde_json
-        # for http/json, both sets combined, no serenity/poise and
-        # no deploy script. Plain programs otherwise build with
-        # bare rustc and no Cargo.toml at all.
+        # and/or `ui.show`/`ui.run` needs a Cargo build file too
+        # (B8): exactly the deps it uses: rusqlite only for db,
+        # tiny_http + ureq + serde_json for http/json, egui +
+        # eframe only for a window, both sets combined, no
+        # serenity/poise and no deploy script. Plain programs
+        # otherwise build with bare rustc and no Cargo.toml at
+        # all. A render-only `ui.*` program uses no window and
+        # needs no crates: it stays on plain rustc.
         files["Cargo.toml"] = _rs_plain_cargo_toml(
             stem, file_stem, uses_sqlite=em.uses_sqlite,
-            uses_http_json=em.uses_http or em.uses_json)
+            uses_http_json=em.uses_http or em.uses_json,
+            uses_ui_window=em.uses_ui_window)
     return EmitResult(files=files,
                       main_file=file_stem + ".rs",
                       uses_rt=uses_rt)

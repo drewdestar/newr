@@ -352,7 +352,7 @@ class TestExplainLexerCodes(unittest.TestCase):
         self.assertEqual(indexed, set(EXPLAIN),
                          f"index-only: {sorted(indexed - set(EXPLAIN))}; "
                          f"explain-only: {sorted(set(EXPLAIN) - indexed)}")
-        self.assertEqual(len(indexed), 41)
+        self.assertEqual(len(indexed), 42)
 
 
 # ---------------------------------------------------------------- N-03 precedence

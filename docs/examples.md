@@ -36,6 +36,24 @@ hello_bot.newr, a bot written in the newr language.
 Build it with: newr build examples/hello_bot.newr
 Then run it with: DISCORD_TOKEN=... python examples/hello_bot.py
 
+## `hello_ui.newr`
+
+### let `hello`
+
+hello_ui.newr, a column with text, a button, and an input, shown
+in a native window (M8c). Static: ui.show, no loop, no state.
+Build it with: newr build examples/hello_ui.newr
+
+## `hello_ui_interactive.newr`
+
+### struct `Count`
+
+hello_ui_interactive.newr, a db-backed counter (M8c). The state
+lives in the db, not in a captured variable: the view reads the
+count from the db on every render, and the button handler only
+updates the db. ui.run re-invokes the view after each handler.
+Build it with: newr build examples/hello_ui_interactive.newr
+
 ## `shop.newr`
 
 shop.newr, ping + economy buy + button confirm, in newr v1.

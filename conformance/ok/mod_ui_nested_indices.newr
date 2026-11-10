@@ -1,0 +1,10 @@
+# The ui module (SPEC.md section 12.8): button and input indices
+# are separate pre-order counters, depth-first, left to right.
+let passed = true
+let tree = ui.column([ui.button("A", fn() -> none: print("a")), ui.row([ui.input("p", "", fn(s: str) -> none: print(s)), ui.button("B", fn() -> none: print("b"))]), ui.input("q", "", fn(s: str) -> none: print(s))])
+if ui.render(tree) != "<div data-layout=\"column\"><button data-action=\"0\">A</button><div data-layout=\"row\"><input placeholder=\"p\" value=\"\" data-input=\"0\"><button data-action=\"1\">B</button></div><input placeholder=\"q\" value=\"\" data-input=\"1\"></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

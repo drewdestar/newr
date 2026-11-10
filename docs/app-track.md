@@ -155,27 +155,43 @@ considered:
   splits the language into seven dialects, which breaks the one-source
   promise.
 
-Draft surface (shape a):
+Draft surface (shape a), corrected in the M8c eval
+(`newr-research/m8c-ui-eval/EVAL.md`) and pinned in SPEC §12.8:
 
 - `ui.text(s: str)`, `ui.button(label: str, on_tap: fn)`,
-  `ui.input(hint: str)`, `ui.list(items: list)`, `ui.image(path: str)`,
+  `ui.input(placeholder: str, value: str, on_change: fn)`,
+  `ui.list(items: list)`, `ui.image(url: str)`,
   `ui.row(children: list)`, `ui.column(children: list)`,
-  `ui.show(root)` renders the tree.
+  `ui.render(root: Widget) -> str` (deterministic HTML, the
+  conformance-testable core), `ui.show(root)` (native window where
+  a toolkit exists, HTML file on js and dart),
+  `ui.run(view: fn() -> Widget)` (the interactive loop).
 
 Rules: the widget set stays small in M8 (seven widgets plus two layout
-containers). Styling is tokens, not pixels: `ui.style` takes named
-values (primary color, spacing scale) and each target maps them to its
-own theme. No custom drawing, no animation API in M8. State is plain
-newr values; a tap handler mutates state and the tree re-renders.
+containers). Styling is platform defaults in v1, not tokens and not
+pixels: no colors, fonts, sizes, or padding arguments. No custom
+drawing, no animation API in M8. State is a view function plus
+external state: `ui.run(view)` re-invokes the view after each event,
+and state lives in the `db` module or an `http` backend. A tap
+handler never assigns to a captured variable: closures capture by
+value (SPEC §7.2), so that assignment is a silent no-op at runtime,
+proven by probe in the M8c eval. The draft sentence "a tap handler
+mutates state and the tree re-renders" is wrong and is corrected in
+SPEC §12.8.
 
-Per-target natives: JS renders to the DOM; Dart renders to Flutter
-widgets (this is why the Dart emitter matters for UI); Kotlin renders
-to Jetpack Compose on Android; C# renders to WinUI or MAUI; Java
-renders to JavaFX; Rust renders to a native GUI crate or to a webview
-hosting the JS frontend; Python renders to a webview or Tk as a
-fallback. Where a target cannot render a widget natively in M8, the
-module falls back to the webview path and the conformance program for
-that target says so.
+Per-target natives (corrected in the M8c eval; the draft lines below
+were wrong): JS renders to HTML (no window; `ui.show` writes a file);
+Dart renders to HTML only in M8c (Flutter is NOT installed on the
+build VM and needs a 1.5 to 4 GB install plus apt packages plus a
+runner change, so it is deferred to a later phase); Kotlin renders
+to Swing on the JVM (Jetpack Compose needs Gradle and the Compose
+plugin, not plain kotlinc); C# renders to Avalonia 12.1.6 (WinUI is
+Windows only, MAUI has no official Linux desktop target); Java
+renders to Swing (JavaFX is not in the JDK and needs an OpenJFX
+download); Rust renders to egui 0.37.0 plus eframe; Python renders
+to tkinter 8.6 stdlib. Where a target cannot render a widget
+natively in M8, the module falls back to the HTML sink and the
+conformance program for that target says so.
 
 ### 4.4 `app`: manifest and packaging
 
@@ -223,13 +239,13 @@ shape end to end first.
 
 | Target | db | http serve | http fetch | ui | app package |
 |---|---|---|---|---|---|
-| py | sqlite3 | yes | yes | webview fallback | AppImage, deb |
-| js | sql.js / IndexedDB | no (checker error) | yes | DOM | web |
-| java | sqlite-jdbc | yes | yes | JavaFX | jar, deb |
-| cs | Microsoft.Data.Sqlite | yes | yes | WinUI / MAUI | exe, msi |
-| rs | rusqlite | yes | yes | webview host | binary, AppImage |
-| kt | sqlite-jdbc / android sqlite | yes | yes | Compose | apk, jar |
-| dart | sqflite / sqlite3 | yes | yes | Flutter widgets | apk, dmg, web |
+| py | sqlite3 | yes | yes | tkinter 8.6 | AppImage, deb |
+| js | sql.js / IndexedDB | no (checker error) | yes | HTML sink (render only) | web |
+| java | sqlite-jdbc | yes | yes | Swing | jar, deb |
+| cs | Microsoft.Data.Sqlite | yes | yes | Avalonia 12.1.6 | exe, msi |
+| rs | rusqlite | yes | yes | egui 0.37.0 + eframe | binary, AppImage |
+| kt | sqlite-jdbc / android sqlite | yes | yes | Swing | apk, jar |
+| dart | sqflite / sqlite3 | yes | yes | HTML sink (render only, Flutter deferred) | apk, dmg, web |
 
 "Yes" means a conformance program prints PASS on that target.
 "Fallback" and "checker error" are stated in the module doc, not hidden.
@@ -270,10 +286,15 @@ shape end to end first.
   programs); `examples/hello_api_server.newr` plus
   `examples/hello_api_client.newr`, goldens pinned for the
   client on all seven targets, pair verified live on py and js.
-- M8c `ui`: research the seven UI toolkits (versions, what is
-  installable on this VM, what needs a Mac or an Android SDK), then
-  build the small widget set, then a `hello_ui` example on every target
-  that can render, with screenshots at 390/768/1280 for the web target.
+- M8c `ui`: eval DONE 10 Nov 2026 (research in
+  `newr-research/m8c-ui-eval/EVAL.md`, verdict conditionally
+  feasible, shape (a) with corrections). The draft's WinUI/MAUI,
+  Compose, Flutter, and state-model claims were all wrong and are
+  corrected in SPEC §12.8 and in §4.3 above. Build in progress:
+  `ui.render` deterministic HTML on all seven targets, `ui.show`
+  native window on py/java/kt/cs/rs, HTML sink on js/dart,
+  `ui.run` Elm-style loop with db/http state. E2014 is the ui code.
+  Pins: Avalonia 12.1.6, egui 0.37.0, tkinter 8.6, Swing.
 - M8d `app` plus full-stack example: manifest, packaging flags, then
   the three-file shop app (shared types, backend with db and http,
   frontend with ui), verified live on at least one server target and

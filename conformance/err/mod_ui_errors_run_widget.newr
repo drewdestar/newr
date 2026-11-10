@@ -1,0 +1,3 @@
+# expect: E2014
+# A widget tree goes to ui.show, not ui.run.
+ui.run(ui.text("x"))
