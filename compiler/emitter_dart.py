@@ -32,7 +32,7 @@ Encoding: every `open()` / `read_text()` in this file passes
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields as _dc_fields
 from pathlib import Path
 
 from . import ast_nodes as A
@@ -64,7 +64,7 @@ _RT_HELPERS = frozenset({
 })
 _RT_CLASSES = frozenset({
     "NewrError", "NewrOverflowError", "NewrDivisionByZeroError",
-    "Result",
+    "Result", "NewrHttp", "NewrJson",
 })
 _DART_CORE_TYPES = frozenset({
     "String", "Object", "int", "double", "bool", "num", "List",
@@ -155,6 +155,181 @@ def _dart_float(value: float) -> str:
     if value == float("-inf"):
         return "double.negativeInfinity"
     return repr(value)
+
+
+# ------------------------------------------------------------ http async scan
+# Dart's `dart:io` HTTP APIs are async only (there is no sync
+# HttpClient/HttpServer), while newr `http.get/post/request/serve`
+# read as sync calls. The emitter bridges the gap by making the
+# call sites async: a user fn that (transitively) fetches or
+# serves is emitted as `Future<T> name(...) async`, its call sites
+# get `await`, and main()/newrInit() become async when their
+# statements fetch, serve, or call such a fn. `http.route` and
+# `json.*` are sync and need none of this. The scan below is
+# purely syntactic (it runs on the checked AST before emission);
+# a lambda that fetches may go async only where its Future fn
+# type is known: as the handler argument of http.route, or as a
+# let-bound lambda (its declared type is Future-wrapped and its
+# call sites await it). Any other lambda (an argument to another
+# fn, a value in a collection) fails loudly instead of emitting
+# broken Dart.
+
+_HTTP_ASYNC_METHODS = frozenset({"get", "post", "request", "serve"})
+
+
+def _dart_is_async_http_call(node: A.Call, program: A.Program,
+                             async_fns: set[str],
+                             async_lambdas: set[str],
+                             memo: dict) -> bool:
+    """True when `node` is a call that must be awaited: an
+    `http.get/post/request/serve` call, a call to a user fn in
+    `async_fns`, a call to a let-bound async lambda in
+    `async_lambdas`, or a call to an async fn of an imported file
+    module."""
+    func = node.func
+    if isinstance(func, A.Member) and isinstance(func.obj, A.Name):
+        if func.obj.name == "http" and func.name in _HTTP_ASYNC_METHODS:
+            return True
+        sub = program.modules.get(func.obj.name)
+        if sub is not None:
+            sub_fns, _sub_lams = _dart_async_info(sub, memo)
+            if func.name in sub_fns:
+                return True
+        return False
+    if isinstance(func, A.Name):
+        return func.name in async_fns or func.name in async_lambdas
+    return False
+
+
+def _dart_walk_needs_async(node, program: A.Program,
+                           async_fns: set[str], async_lambdas: set[str],
+                           memo: dict, descend_lambda: bool) -> bool:
+    """True when `node` (an expr, stmt, or list of them) directly
+    contains a call that must be awaited. With `descend_lambda`
+    False, lambda bodies are opaque (a lambda is its own async
+    unit); with True, the outermost lambda's body is scanned but
+    nested lambdas stay opaque."""
+    if node is None or isinstance(node, (str, int, float, bool)):
+        return False
+    if isinstance(node, (list, tuple, set)):
+        return any(_dart_walk_needs_async(x, program, async_fns,
+                                          async_lambdas, memo,
+                                          descend_lambda)
+                   for x in node)
+    if isinstance(node, dict):
+        return any(_dart_walk_needs_async(v, program, async_fns,
+                                          async_lambdas, memo,
+                                          descend_lambda)
+                   for v in node.values())
+    if isinstance(node, A.Lambda):
+        if not descend_lambda:
+            return False
+        body: object = node.expr_body if node.expr_body is not None \
+            else node.body
+        return _dart_walk_needs_async(body, program, async_fns,
+                                      async_lambdas, memo, False)
+    if isinstance(node, A.Call):
+        if _dart_is_async_http_call(node, program, async_fns,
+                                    async_lambdas, memo):
+            return True
+    fields = getattr(node, "__dataclass_fields__", None)
+    if fields is not None:
+        return any(_dart_walk_needs_async(getattr(node, f.name),
+                                          program, async_fns,
+                                          async_lambdas, memo,
+                                          descend_lambda)
+                   for f in _dc_fields(node))
+    return False
+
+
+def _dart_async_info(program: A.Program,
+                     memo: dict | None = None
+                     ) -> tuple[set[str], set[str]]:
+    """(async_fns, async_lambda_names) for one program: the user
+    fns that must be emitted async, and the let-bound route-handler
+    lambdas that must be emitted async. Computed to a fixed point
+    (a fn calling an async fn is async; a handler lambda calling
+    an async fn is async), memoized per program id in `memo`."""
+    if memo is None:
+        memo = {}
+    key = id(program)
+    if key in memo:
+        return memo[key]
+    memo[key] = (set(), set())
+    async_fns: set[str] = set()
+    async_lambdas: set[str] = set()
+    # Let-bound lambdas by name (first binding wins), for the
+    # route-handler scan below.
+    lambdas: dict[str, A.Lambda] = {}
+
+    def collect_lambdas(node) -> None:
+        if node is None or isinstance(node, (str, int, float, bool)):
+            return
+        if isinstance(node, (list, tuple, set)):
+            for x in node:
+                collect_lambdas(x)
+            return
+        if isinstance(node, dict):
+            for v in node.values():
+                collect_lambdas(v)
+            return
+        if isinstance(node, (A.Let, A.Const)) \
+                and isinstance(node.value, A.Lambda):
+            lambdas.setdefault(node.name, node.value)
+        fields = getattr(node, "__dataclass_fields__", None)
+        if fields is not None:
+            for f in _dc_fields(node):
+                collect_lambdas(getattr(node, f.name))
+
+    collect_lambdas(program.stmts)
+    for fn in program.functions:
+        collect_lambdas(fn.body)
+    changed = True
+    while changed:
+        changed = False
+        for fn in program.functions:
+            if fn.name in async_fns:
+                continue
+            if _dart_walk_needs_async(fn.body, program, async_fns,
+                                      async_lambdas, memo, False):
+                async_fns.add(fn.name)
+                changed = True
+        # Let-bound lambdas whose body needs awaiting (a route
+        # handler, or any stored lambda that fetches): their
+        # declared type becomes the Future fn type, and their
+        # call sites await them.
+        for name, lam in lambdas.items():
+            if name in async_lambdas:
+                continue
+            if _dart_walk_needs_async(lam, program, async_fns,
+                                      async_lambdas, memo, True):
+                async_lambdas.add(name)
+                changed = True
+    result = (async_fns, async_lambdas)
+    memo[key] = result
+    return result
+
+
+def _dart_entry_needs_async(program: A.Program,
+                            memo: dict | None = None) -> bool:
+    """True when a file's entry point (main() or newrInit()) must
+    be async: its own top-level statements need awaiting, or an
+    imported file module it initializes needs an async newrInit()."""
+    if memo is None:
+        memo = {}
+    async_fns, async_lambdas = _dart_async_info(program, memo)
+    if _dart_walk_needs_async(program.stmts, program, async_fns,
+                              async_lambdas, memo, False):
+        return True
+    for imp in program.imports:
+        if imp.path is None:
+            continue
+        sub = program.modules.get(imp.bound_name)
+        if sub is None or not sub.stmts:
+            continue
+        if _dart_entry_needs_async(sub, memo):
+            return True
+    return False
 
 
 # Java precedence (higher binds tighter), loosest -> tightest.
@@ -309,6 +484,36 @@ class _DartEmitter:
         # This file uses `db.*` (set by `_emit_db_call`) — the
         # `NewrDb` helper class is emitted into the file only then.
         self._file_uses_db: bool = False
+        self.uses_http: bool = False
+        # This file uses `http.*` (set by `_emit_http_call`) — the
+        # `NewrHttp` helper class is emitted into the file only then.
+        self._file_uses_http: bool = False
+        self.uses_json: bool = False
+        # This file uses `json.*` (set by `_emit_json_call`) — the
+        # `NewrJson` helper class is emitted into the file only then.
+        self._file_uses_json: bool = False
+        # Async-scan results for the file being emitted (computed
+        # in `_emit_one`): user fns that must be emitted async,
+        # let-bound lambdas that must be emitted async, and
+        # whether main()/newrInit() must be async.
+        self._async_fns: set[str] = set()
+        self._async_lambda_names: set[str] = set()
+        self._entry_async: bool = False
+        # Async context stack for emission: True while emitting
+        # inside an async fn / async main / async lambda (where
+        # `await` is legal). A fetch/serve call emitted with the
+        # top False is an emitter bug or an unsupported lambda,
+        # and fails loudly instead of emitting broken Dart.
+        self._async_ctx: list[bool] = [False]
+        # Depth of async-lambda emission: while emitting the
+        # handler argument of http.route, or the value of a
+        # let-bound lambda that fetches, the lambda may go async;
+        # anywhere else it fails with a clear message.
+        self._async_lambda_depth: int = 0
+        # Memo for per-program async info (keyed by id(program)),
+        # shared across the file set so a file-module fn's
+        # async-ness is computed once.
+        self._async_memo: dict = {}
         self.uses_math: bool = False
         # File-module imports referenced by this file:
         # bound name -> file stem (for `import '<stem>.dart'
@@ -520,6 +725,35 @@ class _DartEmitter:
     def _need_sqlite(self):
         self.uses_sqlite = True
 
+    def _need_http(self):
+        # dart:io for the server/client plus dart:convert for
+        # utf8 (bodies are UTF-8 text) and dart:async for the
+        # fetch timeout (TimeoutException, Future.timeout). The
+        # helpers use NewrError and NewrRt.floatStr from
+        # newr_rt.dart, so the runtime file must be copied (the
+        # "floatStr" marker). The http helpers also build response
+        # structs through NewrJson (buildFromShape/readField), so
+        # using http implies using json: the NewrJson class must be
+        # emitted too.
+        self.uses_http = True
+        self._file_uses_http = True
+        self.uses_json = True
+        self._file_uses_json = True
+        self.uses_io = True
+        self.uses_convert = True
+        self.uses_async = True
+        self._need_rt("floatStr")
+
+    def _need_json(self):
+        # dart:convert for jsonEncode/jsonDecode (string escaping
+        # and the JSON parse); the encoder uses NewrRt.floatStr
+        # for the pinned float rule, so the runtime file must be
+        # copied.
+        self.uses_json = True
+        self._file_uses_json = True
+        self.uses_convert = True
+        self._need_rt("floatStr")
+
     def _need_math(self):
         self.uses_math = True
 
@@ -532,6 +766,15 @@ class _DartEmitter:
         lines: list[str] = []
         if getattr(self, "uses_io", False):
             lines.append("import 'dart:io';")
+        if getattr(self, "uses_http", False):
+            # A second import of dart:io under the `io` prefix:
+            # the `NewrHttp` helpers must name dart:io's
+            # HttpRequest/HttpResponse, which collide with the
+            # user's own HttpRequest/HttpResponse structs (the
+            # local structs shadow the unprefixed import).
+            lines.append("import 'dart:io' as io;")
+        if getattr(self, "uses_convert", False):
+            lines.append("import 'dart:convert';")
         if getattr(self, "uses_async", False):
             lines.append("import 'dart:async';")
         if self.uses_math:
@@ -653,6 +896,17 @@ class _DartEmitter:
             text += "?"
         return text
 
+    def _dart_fn_type_async(self, t: Type) -> str:
+        """The async twin of `_dart_fn_type`: `fn(A, B) -> R` ->
+        `Future<R> Function(A, B)`, for a lambda or fn whose body
+        awaits (an http fetch/serve). A `none` return is
+        `Future<void>`."""
+        params = t.params[:-1]
+        ret = t.params[-1]
+        args = ", ".join(self._dart_type(p) for p in params)
+        ret_s = "void" if _is_none(ret) else self._dart_type(ret)
+        return f"Future<{ret_s}> Function({args})"
+
     def _dart_entity_type(self, name: str) -> str:
         """A Discord entity type (SPEC §7.1) -> its nyxx class.
         Only reachable in bot files. (Verified live against
@@ -773,8 +1027,37 @@ class _DartEmitter:
                        "right-hand side (the emitter found it nested "
                        "inside an expression)")
         if isinstance(node, A.TryExpr):
-            self._need_rt("tryResult")
             inner_t = self._type_of(node).params[0]
+            if _dart_walk_needs_async(node.expr, self.program,
+                                      self._async_fns,
+                                      self._async_lambda_names,
+                                      self._async_memo, False):
+                # `try http.get(...)`: the fetch awaits, so the
+                # sync `tryResult(() => ...)` closure cannot hold
+                # it. Inline the async equivalent (an async IIFE
+                # that Ok-wraps the value and catches into err).
+                self._need_rt("ok")
+                self._need_rt("err")
+                self._need_rt("asError")
+                self._async_ctx.append(True)
+                try:
+                    inner = self.emit_expr(
+                        node.expr, 0,
+                        fn_target=inner_t if _is_fn(inner_t) else None)
+                finally:
+                    self._async_ctx.pop()
+                # Explicit type arguments on ok/err: without them
+                # the two branches unify to Result<dynamic, ...>
+                # (the err branch carries no value to infer T
+                # from) and the assignment to Result[T, ...]
+                # fails. inner_t is the Ok type.
+                dart_t = self._dart_type(inner_t)
+                return (f"(await (() async {{ try {{ return "
+                        f"NewrRt.ok<{dart_t}>({inner}); }} catch (e) "
+                        f"{{ return NewrRt.err<{dart_t}>"
+                        f"(NewrRt.asError(e)); }} }})())",
+                        _PREC["primary"])
+            self._need_rt("tryResult")
             inner = self.emit_expr(
                 node.expr, 0,
                 fn_target=inner_t if _is_fn(inner_t) else None)
@@ -1160,7 +1443,8 @@ class _DartEmitter:
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
-                                       or obj.name == "db"):
+                                       or obj.name in ("db", "http",
+                                                      "json")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -1279,12 +1563,22 @@ class _DartEmitter:
                 # fn (kind "fn") is a static method and takes the
                 # plain call below.
                 args = [self.emit_expr(a, 0) for a in node.args]
-                return (f"{binding.dart}({', '.join(args)})",
-                        _PREC["primary"])
+                call = f"{binding.dart}({', '.join(args)})"
+                if name in self._async_lambda_names:
+                    # A let-bound async lambda (one that fetches):
+                    # await its Future result.
+                    return (f"(await {call})", _PREC["primary"])
+                return (call, _PREC["primary"])
             args = [self.emit_expr(a, 0) for a in node.args]
             kwargs = self._emit_kwargs(node, binding)
-            return (f"{binding.dart}({', '.join(args + kwargs)})",
-                    _PREC["primary"])
+            call = f"{binding.dart}({', '.join(args + kwargs)})"
+            if name in self._async_fns:
+                # A user fn that fetches or serves is emitted
+                # async, so its call sites await it (parenthesised:
+                # `await f().field` would read as awaiting the
+                # field access, not the call).
+                return (f"(await {call})", _PREC["primary"])
+            return (call, _PREC["primary"])
         self._fail(f"unknown function `{name}`")
 
     def _emit_kwargs(self, node: A.Call, binding: _Binding) -> list[str]:
@@ -1605,7 +1899,8 @@ class _DartEmitter:
                     self._fail(
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
-            if obj.name in MODULES or obj.name == "db":
+            if obj.name in MODULES or obj.name in ("db", "http",
+                                                   "json"):
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(dart=obj.name, kind="module",
@@ -2235,7 +2530,21 @@ class _DartEmitter:
         body with statements, so it is hoisted to a `final`
         const immediately before the enclosing statement. An inline
         lambda needs no cast when the context provides its fn type
-        (fn_target); otherwise it is cast to its own fn type."""
+        (fn_target); otherwise it is cast to its own fn type. A
+        lambda that fetches or serves is emitted `async` (its
+        result type becomes a Future) - only where its Future fn
+        type is known (a route-handler argument, or a let-bound
+        lambda whose declared type is Future-wrapped)."""
+        needs_async = _dart_walk_needs_async(
+            node, self.program, self._async_fns,
+            self._async_lambda_names, self._async_memo, True)
+        if needs_async and self._async_lambda_depth == 0:
+            self._fail("http fetch/serve inside a lambda is only "
+                       "supported for a route handler argument or "
+                       "a let-bound lambda - move the fetch into a "
+                       "named function",
+                       span=node.span)
+        self._async_ctx.append(needs_async)
         free = self._lambda_free_vars(node)
         self._push_scope()
         saved_used = self._fn_used
@@ -2257,25 +2566,30 @@ class _DartEmitter:
             f"{self._dart_type(b.type)} {b.dart}" for b in param_bindings)
         fn_type = self._type_of(node)
         cast = fn_target if _is_fn(fn_target) else fn_type
-        cast_text = self._dart_fn_type(cast)
+        cast_text = self._dart_fn_type_async(cast) if needs_async \
+            else self._dart_fn_type(cast)
+        async_kw = " async" if needs_async else ""
         if node.expr_body is not None:
             body, hoists = self._emit_expr_with_hoists(node.expr_body)
             self._fn_used = saved_used
             self._pop_scope()
             if not hoists:
-                arrow = f"({params_text}) => {body}"
+                arrow = f"({params_text}){async_kw} => {body}"
+                self._async_ctx.pop()
                 return arrow, _PREC["primary"]
             # The body needed hoists (a nested block-body lambda):
             # the hoisted const's initializer IS the lambda, so the
             # snapshot locals are in scope inside the arrow body at
             # call time.
             name = self._new_lambda_name()
-            lines = [f"final {cast_text} {name} = ({params_text}) {{"]
+            lines = [f"final {cast_text} {name} = "
+                     f"({params_text}){async_kw} {{"]
             for h in hoists:
                 lines.append("  " + h)
             lines.append(f"  return {body};")
             lines.append("};")
             self._hoists_add(lines)
+            self._async_ctx.pop()
             return name, _PREC["primary"]
         # Block body: hoist a const arrow.
         name = self._new_lambda_name()
@@ -2285,10 +2599,12 @@ class _DartEmitter:
         self._fn_ctx.pop()
         self._fn_used = saved_used
         self._pop_scope()
-        lines = [f"final {cast_text} {name} = ({params_text}) {{"]
+        lines = [f"final {cast_text} {name} = "
+                 f"({params_text}){async_kw} {{"]
         lines.extend(body_lines if body_lines else ["  ;"])
         lines.append("};")
         self._hoists_add(lines)
+        self._async_ctx.pop()
         return name, _PREC["primary"]
 
     def _lambda_free_vars(self, node: A.Lambda) -> list[tuple[str, _Binding]]:
@@ -2562,6 +2878,18 @@ class _DartEmitter:
                       and binding.kind == "global-let")
             if isinstance(stmt.value, A.Propagate):
                 value = self._propagate_unwrapped(stmt.value)
+            elif isinstance(stmt.value, A.Lambda) \
+                    and stmt.name in self._async_lambda_names:
+                # A let-bound lambda that fetches: emit it in
+                # async-lambda context (so it may go async) and
+                # declare it with its Future fn type.
+                tgt = binding.type if binding is not None and \
+                    _is_fn(binding.type) else None
+                self._async_lambda_depth += 1
+                try:
+                    value = self.emit_expr(stmt.value, 0, fn_target=tgt)
+                finally:
+                    self._async_lambda_depth -= 1
             else:
                 tgt = binding.type if binding is not None and \
                     _is_fn(binding.type) else None
@@ -2582,7 +2910,12 @@ class _DartEmitter:
                 t = self._type_of(stmt.value)
             binding = self._bind(stmt.name, type=t, kind="local")
             keyword = "final " if isinstance(stmt, A.Const) else ""
-            return [f"{p}{keyword}{self._dart_type(t)} "
+            decl_type = self._dart_type(t)
+            if isinstance(stmt.value, A.Lambda) \
+                    and stmt.name in self._async_lambda_names \
+                    and t.name == "fn":
+                decl_type = self._dart_fn_type_async(t)
+            return [f"{p}{keyword}{decl_type} "
                     f"{binding.dart} = {value};"]
         if isinstance(stmt, A.Assign):
             return self._emit_assign(stmt, indent)
@@ -3133,8 +3466,17 @@ class _DartEmitter:
                                 f"({', '.join(parts)})", _PREC["primary"])
             args = [self.emit_expr(a, 0) for a in node.args]
             kwargs = self._emit_module_kwargs(node, sub)
-            return (f"{ref}.{self._mangle(name)}"
-                    f"({', '.join(args + kwargs)})", _PREC["primary"])
+            call = (f"{ref}.{self._mangle(name)}"
+                    f"({', '.join(args + kwargs)})")
+            if sub is not None:
+                sub_fns, _sub_lams = _dart_async_info(
+                    sub, self._async_memo)
+                if name in sub_fns:
+                    # A fn of an imported file module that fetches
+                    # or serves is emitted async there, so await it
+                    # here (parenthesised, like every awaited call).
+                    return (f"(await {call})", _PREC["primary"])
+            return (call, _PREC["primary"])
         real = binding.module or binding.dart
         if real == "file":
             name = node.func.name
@@ -3152,6 +3494,10 @@ class _DartEmitter:
         if real == "db":
             args = [self.emit_expr(a, 0) for a in node.args]
             return self._emit_db_call(node, args)
+        if real == "http":
+            return self._emit_http_call(node)
+        if real == "json":
+            return self._emit_json_call(node)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.dart,
                                            node.func.name, args)
@@ -3502,6 +3848,799 @@ class _DartEmitter:
             "}",
         ]
 
+    # ------------------------------------------------------------ http/json
+    # shapes
+
+    def _await_call(self, call: str) -> str:
+        """Parenthesised `await` for an http fetch/serve call. The
+        parens matter: a bare `await f().field` reads as awaiting
+        the field access, not the call. Fails loudly when the call
+        is emitted outside an async context (a sync fn the scan
+        missed, or a lambda that is not a route handler or a
+        let-bound lambda)."""
+        if not self._async_ctx or not self._async_ctx[-1]:
+            self._fail("http fetch/serve needs an async context "
+                       "(top-level statements, or a function that "
+                       "calls it); a lambda that fetches must be a "
+                       "route handler argument or a let-bound lambda")
+        return f"(await {call})"
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring the Python emitter's `_struct_decl`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """Dart source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7), mirroring the Python
+        emitter's `_shape_literal`: a scalar is `"int"` /
+        `"float"` / `"str"` / `"bool"` / `"none"`, a nullable is
+        `["?", inner]`, a list is `["list", elem, converter]`, a
+        dict is `["dict", value, converter]`, a struct is
+        `["struct", factory, [[field, shape, getter], ...]]` in
+        declaration order. The list/dict converters re-type the
+        decoded values (a decoded `List<Object?>` must become a
+        `List<Todo>` at runtime, or a later `as List<Todo>` cast
+        fails: Dart generics are reified). The struct factory
+        builds the struct positionally from converted values;
+        each getter reads one field, for json.encode."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return f'["?", {self._shape_literal(inner)}]'
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return _dart_str(t.name)
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            elem = t.params[0]
+            conv = (f"(List<Object?> v) => v.map((e) => "
+                    f"{self._shape_value_expr(elem, 'e')}).toList()")
+            return f'["list", {self._shape_literal(elem)}, {conv}]'
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            val = t.params[1]
+            conv = (f"(Map<String, Object?> v) => v.map((k, v2) => "
+                    f"MapEntry(k, "
+                    f"{self._shape_value_expr(val, 'v2')}))")
+            return f'["dict", {self._shape_literal(val)}, {conv}]'
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        dart_name = self._struct_dart_name(t.name)
+        factory = (f"(List<Object?> v) => {dart_name}(" + ", ".join(
+            f"{self._mangle(f.name)}: "
+            f"{self._shape_value_expr(f.type, f'v[{i}]')}"
+            for i, f in enumerate(decl.fields)) + ")")
+        fields = ", ".join(
+            f"[{_dart_str(f.name)}, {self._shape_literal(f.type)}, "
+            f"(Object? v) => (v as {dart_name}).{self._mangle(f.name)}]"
+            for f in decl.fields)
+        return f'["struct", {factory}, [{fields}]]'
+
+    def _shape_value_expr(self, t: Type, var: str) -> str:
+        """The Dart expression converting the decoded value in
+        `var` (statically Object?) to the newr type `t`: a cast
+        for scalars and structs, a re-typing `.map(...).toList()`
+        for lists (and `.map` for dicts), recursing so nested
+        collections come out with their exact runtime types."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return (f"({var} == null ? null : "
+                    f"{self._shape_value_expr(inner, var)})")
+        if t.name in ("int", "float", "str", "bool"):
+            return f"{var} as {self._dart_type(t)}"
+        if t.name == "none":
+            return "null"
+        if t.name == "list":
+            elem = t.params[0]
+            return (f"({var} as List).map((e) => "
+                    f"{self._shape_value_expr(elem, 'e')}).toList()")
+        if t.name == "dict":
+            val = t.params[1]
+            return (f"({var} as Map).map((k, v2) => MapEntry("
+                    f"k as String, "
+                    f"{self._shape_value_expr(val, 'v2')}))")
+        return f"{var} as {self._struct_dart_name(t.name)}"
+
+    def _http_handler_types(self, handler_arg: A.Expr
+                            ) -> tuple[Type, Type]:
+        """The (request type, response type) of a route handler:
+        the parameter and return types of an inline lambda, or
+        the first and last params of the fn type of a let-bound
+        lambda variable (the checker tracks let-bound lambdas the
+        same way, in http_check._lambdas). A named function is not
+        a handler in M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            if handler_arg.return_type is None:
+                self._fail("a route handler must declare a response "
+                           "struct return type",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type, handler_arg.return_type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and t.params:
+                    return t.params[0], t.params[-1]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _emit_http_call(self, node: A.Call) -> tuple[str, int]:
+        """`http.*` calls (SPEC.md section 12.6): the helpers live
+        in the `NewrHttp` class emitted into this file (see
+        `_emit_http_class`) — inline, not in newr_rt.dart, because
+        the runtime file is dependency-free. The checker
+        (http_check) has already validated the call, so the arity
+        here is trusted. Fetch calls carry the response struct
+        shape from `node.expr_type`, set by http_check; route
+        calls carry the request/response struct shapes from the
+        handler lambda's parameter and return types. Fetch and
+        serve are awaited (dart:io is async only); route is sync."""
+        name = node.func.name
+        if name == "route":
+            method = self.emit_expr(node.args[0], 0)
+            path = self.emit_expr(node.args[1], 0)
+            req_type, resp_type = self._http_handler_types(node.args[2])
+            req_shape = self._shape_literal(req_type)
+            resp_shape = self._shape_literal(resp_type)
+            self._need_http()
+            self._async_lambda_depth += 1
+            try:
+                handler = self.emit_expr(node.args[2], 0)
+            finally:
+                self._async_lambda_depth -= 1
+            return (f"NewrHttp.route({method}, {path}, {handler}, "
+                    f"{req_shape}, {resp_shape})", _PREC["primary"])
+        if name == "serve":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            self._need_http()
+            call = f"NewrHttp.serve({', '.join(args)})"
+            return (self._await_call(call), _PREC["primary"])
+        if name in ("get", "post", "request"):
+            t = node.expr_type
+            if t is None:
+                self._fail(f"internal: http.{name} without a "
+                           "response type")
+            shape = self._shape_literal(t)
+            args = [self.emit_expr(a, 0) for a in node.args]
+            self._need_http()
+            dart_t = self._dart_type(t)
+            if name == "get":
+                timeout = args[1] if len(args) > 1 else "10"
+                headers = args[2] if len(args) > 2 else "null"
+                call = (f"NewrHttp.get<{dart_t}>({args[0]}, {timeout}, "
+                        f"{headers}, {shape})")
+            elif name == "post":
+                timeout = args[2] if len(args) > 2 else "10"
+                headers = args[3] if len(args) > 3 else "null"
+                call = (f"NewrHttp.post<{dart_t}>({args[0]}, {args[1]}, "
+                        f"{timeout}, {headers}, {shape})")
+            else:
+                timeout = args[3] if len(args) > 3 else "10"
+                headers = args[4] if len(args) > 4 else "null"
+                call = (f"NewrHttp.request<{dart_t}>({args[0]}, "
+                        f"{args[1]}, {args[2]}, {timeout}, {headers}, "
+                        f"{shape})")
+            return (self._await_call(call), _PREC["primary"])
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, node: A.Call) -> tuple[str, int]:
+        """`json.*` calls (SPEC.md section 12.7): the helpers live
+        in the `NewrJson` class emitted into this file (see
+        `_emit_json_class`) — inline, not in newr_rt.dart.
+        `json.encode` takes its shape from the argument's static
+        type; `json.decode` takes its shape from `node.expr_type`,
+        the expected type set by json_check. Both are sync
+        (dart:convert is sync), so no await is involved."""
+        name = node.func.name
+        if name == "encode":
+            shape = self._shape_literal(self._type_of(node.args[0]))
+            arg = self.emit_expr(node.args[0], 0)
+            self._need_json()
+            return f"NewrJson.encode({arg}, {shape})", _PREC["primary"]
+        if name == "decode":
+            t = node.expr_type
+            if t is None:
+                self._fail("internal: json.decode without an "
+                           "expected type")
+            shape = self._shape_literal(t)
+            arg = self.emit_expr(node.args[0], 0)
+            self._need_json()
+            dart_t = self._dart_type(t)
+            return (f"NewrJson.decode<{dart_t}>({arg}, {shape})",
+                    _PREC["primary"])
+        self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_json_class(self) -> list[str]:
+        """The `NewrJson` helper class, emitted into a file that
+        uses `json.*` (at top level, before `void main`). Typed
+        JSON over dart:convert: encode is compact with UTF-8
+        output (no spaces, no \\u escapes), floats use
+        NewrRt.floatStr (shortest round-trip, ".0" for integral
+        floats), decode walks the shape (struct fields match by
+        name, a missing field throws, an extra field is ignored,
+        null only into a nullable expected type, a JSON float
+        into an int field always throws, an integer into a float
+        field is fine, trailing data throws, an empty string
+        throws, duplicate keys last wins, an integer outside
+        int64 throws: dart:convert parses it as a double, so the
+        int branch rejects doubles outright)."""
+        return [
+            "class NewrJson {",
+            "  static String encode(Object? value, Object? shape) {",
+            "    final sb = StringBuffer();",
+            "    _writeValue(sb, value, shape);",
+            "    return sb.toString();",
+            "  }",
+            "",
+            "  static String _jsonString(String value) {",
+            "    return jsonEncode(value);",
+            "  }",
+            "",
+            "  static void _writeValue(StringBuffer sb, Object? value,",
+            "      Object? shape) {",
+            "    if (shape is String) {",
+            "      switch (shape) {",
+            "        case 'int':",
+            "          if (value is! int) {",
+            "            throw NewrError(",
+            "                'json: expected int, got '",
+            "                '${value.runtimeType}');",
+            "          }",
+            "          sb.write(value.toString());",
+            "          return;",
+            "        case 'float':",
+            "          if (value is bool) {",
+            "            throw NewrError('json: expected float, got bool');",
+            "          }",
+            "          if (value is int) {",
+            "            sb.write(NewrRt.floatStr(value.toDouble()));",
+            "            return;",
+            "          }",
+            "          if (value is double) {",
+            "            if (!value.isFinite) {",
+            "              throw NewrError(",
+            "                  'json: cannot encode non-finite float');",
+            "            }",
+            "            sb.write(NewrRt.floatStr(value));",
+            "            return;",
+            "          }",
+            "          throw NewrError(",
+            "              'json: expected float, got '",
+            "              '${value.runtimeType}');",
+            "        case 'str':",
+            "          if (value is! String) {",
+            "            throw NewrError(",
+            "                'json: expected str, got '",
+            "                '${value.runtimeType}');",
+            "          }",
+            "          sb.write(_jsonString(value));",
+            "          return;",
+            "        case 'bool':",
+            "          if (value is! bool) {",
+            "            throw NewrError(",
+            "                'json: expected bool, got '",
+            "                '${value.runtimeType}');",
+            "          }",
+            "          sb.write(value ? 'true' : 'false');",
+            "          return;",
+            "        case 'none':",
+            "          if (value != null) {",
+            "            throw NewrError('json: expected null');",
+            "          }",
+            "          sb.write('null');",
+            "          return;",
+            "        default:",
+            "          throw NewrError(\"json: unknown shape '$shape'\");",
+            "      }",
+            "    }",
+            "    final list = shape as List<Object?>;",
+            "    final kind = list[0] as String;",
+            "    if (kind == '?') {",
+            "      if (value == null) {",
+            "        sb.write('null');",
+            "        return;",
+            "      }",
+            "      _writeValue(sb, value, list[1]);",
+            "      return;",
+            "    }",
+            "    if (kind == 'list') {",
+            "      if (value is! List) {",
+            "        throw NewrError(",
+            "            'json: expected list, got '",
+            "            '${value.runtimeType}');",
+            "      }",
+            "      sb.write('[');",
+            "      for (var i = 0; i < value.length; i++) {",
+            "        if (i > 0) sb.write(',');",
+            "        _writeValue(sb, value[i], list[1]);",
+            "      }",
+            "      sb.write(']');",
+            "      return;",
+            "    }",
+            "    if (kind == 'dict') {",
+            "      if (value is! Map) {",
+            "        throw NewrError(",
+            "            'json: expected dict, got '",
+            "            '${value.runtimeType}');",
+            "      }",
+            "      sb.write('{');",
+            "      var first = true;",
+            "      for (final e in value.entries) {",
+            "        if (e.key is! String) {",
+            "          throw NewrError('json: dict keys must be str');",
+            "        }",
+            "        if (!first) sb.write(',');",
+            "        first = false;",
+            "        sb.write(_jsonString(e.key as String));",
+            "        sb.write(':');",
+            "        _writeValue(sb, e.value, list[1]);",
+            "      }",
+            "      sb.write('}');",
+            "      return;",
+            "    }",
+            "    if (kind == 'struct') {",
+            "      if (value == null) {",
+            "        throw NewrError('json: expected object, got null');",
+            "      }",
+            "      final fields = list[2] as List<Object?>;",
+            "      sb.write('{');",
+            "      for (var i = 0; i < fields.length; i++) {",
+            "        final entry = fields[i] as List<Object?>;",
+            "        if (i > 0) sb.write(',');",
+            "        sb.write(_jsonString(entry[0] as String));",
+            "        sb.write(':');",
+            "        final getter = entry[2] as Object? Function(Object?);",
+            "        _writeValue(sb, getter(value), entry[1]);",
+            "      }",
+            "      sb.write('}');",
+            "      return;",
+            "    }",
+            "    throw NewrError(\"json: unknown shape '$shape'\");",
+            "  }",
+            "",
+            "  static T decode<T>(String text, Object? shape) {",
+            "    Object? parsed;",
+            "    try {",
+            "      parsed = jsonDecode(text);",
+            "    } on FormatException catch (e) {",
+            "      throw NewrError('json: invalid JSON: $e');",
+            "    }",
+            "    return _decodeValue(parsed, shape) as T;",
+            "  }",
+            "",
+            "  static Object? _decodeValue(Object? value, Object? shape) {",
+            "    if (shape is String) {",
+            "      switch (shape) {",
+            "        case 'int':",
+            "          if (value is! int) {",
+            "            throw NewrError(",
+            "                'json: expected int, got '",
+            "                '${value.runtimeType}');",
+            "          }",
+            "          return value;",
+            "        case 'float':",
+            "          if (value is bool) {",
+            "            throw NewrError('json: expected float, got bool');",
+            "          }",
+            "          if (value is int) {",
+            "            return value.toDouble();",
+            "          }",
+            "          if (value is double) {",
+            "            return value;",
+            "          }",
+            "          throw NewrError(",
+            "              'json: expected float, got '",
+            "              '${value.runtimeType}');",
+            "        case 'str':",
+            "          if (value is! String) {",
+            "            throw NewrError(",
+            "                'json: expected str, got '",
+            "                '${value.runtimeType}');",
+            "          }",
+            "          return value;",
+            "        case 'bool':",
+            "          if (value is! bool) {",
+            "            throw NewrError(",
+            "                'json: expected bool, got '",
+            "                '${value.runtimeType}');",
+            "          }",
+            "          return value;",
+            "        case 'none':",
+            "          if (value != null) {",
+            "            throw NewrError('json: expected null');",
+            "          }",
+            "          return null;",
+            "        default:",
+            "          throw NewrError(\"json: unknown shape '$shape'\");",
+            "      }",
+            "    }",
+            "    final list = shape as List<Object?>;",
+            "    final kind = list[0] as String;",
+            "    if (kind == '?') {",
+            "      if (value == null) {",
+            "        return null;",
+            "      }",
+            "      return _decodeValue(value, list[1]);",
+            "    }",
+            "    if (kind == 'list') {",
+            "      if (value is! List) {",
+            "        throw NewrError(",
+            "            'json: expected list, got '",
+            "            '${value.runtimeType}');",
+            "      }",
+            "      final raw = <Object?>[];",
+            "      for (final e in value) {",
+            "        raw.add(_decodeValue(e, list[1]));",
+            "      }",
+            "      final convert =",
+            "          list[2] as List<Object?> Function(List<Object?>);",
+            "      return convert(raw);",
+            "    }",
+            "    if (kind == 'dict') {",
+            "      if (value is! Map) {",
+            "        throw NewrError(",
+            "            'json: expected dict, got '",
+            "            '${value.runtimeType}');",
+            "      }",
+            "      final raw = <String, Object?>{};",
+            "      for (final e in value.entries) {",
+            "        raw[e.key as String] = _decodeValue(e.value, list[1]);",
+            "      }",
+            "      final convert = list[2] as Map<String, Object?>",
+            "          Function(Map<String, Object?>);",
+            "      return convert(raw);",
+            "    }",
+            "    if (kind == 'struct') {",
+            "      if (value is! Map) {",
+            "        throw NewrError(",
+            "            'json: expected object, got '",
+            "            '${value.runtimeType}');",
+            "      }",
+            "      final fields = list[2] as List<Object?>;",
+            "      final args = <Object?>[];",
+            "      for (final f in fields) {",
+            "        final entry = f as List<Object?>;",
+            "        final name = entry[0] as String;",
+            "        if (!value.containsKey(name)) {",
+            "          throw NewrError(\"json: missing field '$name'\");",
+            "        }",
+            "        args.add(_decodeValue(value[name], entry[1]));",
+            "      }",
+            "      final factory =",
+            "          list[1] as Object? Function(List<Object?>);",
+            "      return factory(args);",
+            "    }",
+            "    throw NewrError(\"json: unknown shape '$shape'\");",
+            "  }",
+            "",
+            "  static Object? buildFromShape(List<Object?> shape,",
+            "      Map<String, Object?> values) {",
+            "    if (shape.length != 3 || shape[0] != 'struct') {",
+            "      throw NewrError('http: internal: expected a struct shape');",
+            "    }",
+            "    final fields = shape[2] as List<Object?>;",
+            "    final args = <Object?>[];",
+            "    for (final f in fields) {",
+            "      final entry = f as List<Object?>;",
+            "      final name = entry[0] as String;",
+            "      if (!values.containsKey(name)) {",
+            "        throw NewrError(\"http: missing field '$name'\");",
+            "      }",
+            "      args.add(_decodeValue(values[name], entry[1]));",
+            "    }",
+            "    final factory =",
+            "        shape[1] as Object? Function(List<Object?>);",
+            "    return factory(args);",
+            "  }",
+            "",
+            "  static Object? readField(Object? value, List<Object?> shape,",
+            "      String name) {",
+            "    final fields = shape[2] as List<Object?>;",
+            "    for (final f in fields) {",
+            "      final entry = f as List<Object?>;",
+            "      if (entry[0] == name) {",
+            "        final getter = entry[2] as Object? Function(Object?);",
+            "        return getter(value);",
+            "      }",
+            "    }",
+            "    throw NewrError(\"http: internal: no field '$name' \"",
+            "        'in response shape');",
+            "  }",
+            "}",
+        ]
+
+    def _emit_http_class(self) -> list[str]:
+        """The `NewrHttp` helper class, emitted into a file that
+        uses `http.*` (at top level, before `void main`). Sync
+        newr calls over async dart:io: the server is an
+        `HttpServer` (bind, print the listening line, then
+        `await for` each request), the client is an `HttpClient`
+        with a whole-request timeout. Routes are exact-match only
+        (no route or a method mismatch is 404 with an empty
+        body); query strings parse into dict[str, str] (a repeated
+        key keeps the last value, "+" decodes as a space, %XX
+        decodes as UTF-8); the whole body is read before the
+        handler runs; status is validated 100 to 599 and
+        Content-Length is always set; handler exceptions, an
+        invalid status, and non-UTF-8 bodies surface as 500 with
+        an empty body and the server stays alive. Fetch returns
+        the response struct for 4xx/5xx (not a throw); an
+        unreachable host, a timeout, a bad URL, or a host outside
+        the default localhost allowlist throws. POST/request set
+        Content-Type: application/json unless the program sets
+        one; GET sets none. The runtime enforces the default
+        localhost allowlist only; the manifest allowlist is a
+        static checker concern."""
+        return [
+            "class NewrHttp {",
+            "  static const List<String> _methods = [",
+            "    'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS',",
+            "  ];",
+            "  static const List<String> _allowlist = [",
+            "    'localhost', '127.0.0.1',",
+            "  ];",
+            "  static final List<List<Object?>> _routes = [];",
+            "",
+            "  static void route(String method, String path, dynamic handler,",
+            "      List<Object?> reqShape, List<Object?> respShape) {",
+            "    if (!_methods.contains(method)) {",
+            "      throw NewrError(\"http: invalid method '$method'\");",
+            "    }",
+            "    if (!path.startsWith('/')) {",
+            "      throw NewrError(",
+            "          \"http: route path must start with '/', got '$path'\");",
+            "    }",
+            "    if (handler is! Function) {",
+            "      throw NewrError('http: route handler must be callable');",
+            "    }",
+            "    _routes.add([method, path, handler, reqShape, respShape]);",
+            "  }",
+            "",
+            "  static Future<void> serve(int port,",
+            "      [String host = '127.0.0.1']) async {",
+            "    if (port < 0 || port > 65535) {",
+            "      throw NewrError('http: port must be 0 to 65535, got $port');",
+            "    }",
+            "    final server = await io.HttpServer.bind(host, port);",
+            "    print('listening on $host:${server.port}');",
+            "    await io.stdout.flush();",
+            "    await for (final io.HttpRequest req in server) {",
+            "      await _handle(req);",
+            "    }",
+            "  }",
+            "",
+            "  static Future<void> _send(io.HttpResponse resp, int status,",
+            "      Map<String, String> headers, List<int> body) async {",
+            "    resp.statusCode = status;",
+            "    for (final e in headers.entries) {",
+            "      if (e.key.toLowerCase() == 'content-length') continue;",
+            "      resp.headers.set(e.key, e.value);",
+            "    }",
+            "    resp.contentLength = body.length;",
+            "    if (body.isNotEmpty) {",
+            "      resp.add(body);",
+            "    }",
+            "    await resp.close();",
+            "  }",
+            "",
+            "  static Future<void> _handle(io.HttpRequest req) async {",
+            "    try {",
+            "      final path = req.uri.path;",
+            "      final query = <String, String>{};",
+            "      req.uri.queryParameters.forEach((k, v) => query[k] = v);",
+            "      final chunks = await req.toList();",
+            "      final bytes = <int>[];",
+            "      for (final c in chunks) {",
+            "        bytes.addAll(c);",
+            "      }",
+            "      String body;",
+            "      try {",
+            "        body = utf8.decode(bytes);",
+            "      } on FormatException {",
+            "        await _send(req.response, 500, {}, []);",
+            "        return;",
+            "      }",
+            "      final headers = <String, String>{};",
+            "      req.headers.forEach((name, values) {",
+            "        headers[name] = values.last;",
+            "      });",
+            "      List<Object?>? found;",
+            "      for (final r in _routes) {",
+            "        if (r[0] == req.method && r[1] == path) {",
+            "          found = r;",
+            "          break;",
+            "        }",
+            "      }",
+            "      if (found == null) {",
+            "        await _send(req.response, 404, {}, []);",
+            "        return;",
+            "      }",
+            "      final values = <String, Object?>{",
+            "        'method': req.method,",
+            "        'path': path,",
+            "        'headers': headers,",
+            "        'body': body,",
+            "        'query': query,",
+            "      };",
+            "      final reqObj =",
+            "          NewrJson.buildFromShape(found[3] as List<Object?>, values);",
+            "      var result = (found[2] as dynamic)(reqObj);",
+            "      if (result is Future) {",
+            "        result = await result;",
+            "      }",
+            "      final respShape = found[4] as List<Object?>;",
+            "      final status = NewrJson.readField(result, respShape, 'status');",
+            "      final respHeaders =",
+            "          NewrJson.readField(result, respShape, 'headers');",
+            "      final respBody = NewrJson.readField(result, respShape, 'body');",
+            "      if (status is! int || status < 100 || status > 599) {",
+            "        throw NewrError(",
+            "            'http: response status must be 100 to 599, got $status');",
+            "      }",
+            "      if (respHeaders is! Map<String, String>) {",
+            "        throw NewrError('http: response headers must be a dict');",
+            "      }",
+            "      if (respBody is! String) {",
+            "        throw NewrError('http: response body must be a str');",
+            "      }",
+            "      final bodyBytes = utf8.encode(respBody);",
+            "      await _send(req.response, status, respHeaders,",
+            "          req.method == 'HEAD' ? <int>[] : bodyBytes);",
+            "    } catch (_) {",
+            "      try {",
+            "        await _send(req.response, 500, {}, []);",
+            "      } catch (_) {}",
+            "    }",
+            "  }",
+            "",
+            "  static Future<T> fetch<T>(String method, String url,",
+            "      Object? body, int timeout, Map<String, String>? headers,",
+            "      List<Object?> shape) async {",
+            "    if (!_methods.contains(method)) {",
+            "      throw NewrError(\"http: invalid method '$method'\");",
+            "    }",
+            "    if (timeout <= 0) {",
+            "      throw NewrError(",
+            "          'http: timeout must be a positive number of seconds, '",
+            "          'got $timeout');",
+            "    }",
+            "    final uri = Uri.tryParse(url);",
+            "    if (uri == null ||",
+            "        (uri.scheme != 'http' && uri.scheme != 'https')) {",
+            "      throw NewrError(",
+            "          \"http: fetch URL must start with http:// or https://, \"",
+            "          \"got '$url'\");",
+            "    }",
+            "    if (uri.host.isEmpty) {",
+            "      throw NewrError(\"http: fetch URL has no host: '$url'\");",
+            "    }",
+            "    if (uri.userInfo.isNotEmpty) {",
+            "      throw NewrError(",
+            "          'http: a URL must not carry userinfo; read the token '",
+            "          'from env and pass it as a header');",
+            "    }",
+            "    final host = uri.host.toLowerCase();",
+            "    if (!_allowlist.contains(host)) {",
+            "      throw NewrError(",
+            "          \"http: fetch host '$host' is not on the allowlist \"",
+            "          '(localhost, 127.0.0.1)');",
+            "    }",
+            "    final reqHeaders = <String, String>{};",
+            "    if (headers != null) {",
+            "      reqHeaders.addAll(headers);",
+            "    }",
+            "    List<int>? data;",
+            "    if (body != null) {",
+            "      if (body is! String) {",
+            "        throw NewrError('http: body must be a str');",
+            "      }",
+            "      data = utf8.encode(body);",
+            "      var hasContentType = false;",
+            "      for (final k in reqHeaders.keys) {",
+            "        if (k.toLowerCase() == 'content-type') {",
+            "          hasContentType = true;",
+            "        }",
+            "      }",
+            "      if (!hasContentType) {",
+            "        reqHeaders['Content-Type'] = 'application/json';",
+            "      }",
+            "    }",
+            "    final client = io.HttpClient();",
+            "    client.connectionTimeout = Duration(seconds: timeout);",
+            "    try {",
+            "      final result =",
+            "          await _doFetch(client, method, uri, reqHeaders, data,",
+            "                  shape)",
+            "              .timeout(",
+            "        Duration(seconds: timeout),",
+            "        onTimeout: () {",
+            "          throw NewrError(",
+            "              'http: fetch $method $url timed out after '",
+            "              '${timeout}s');",
+            "        },",
+            "      );",
+            "      return result as T;",
+            "    } on NewrError {",
+            "      rethrow;",
+            "    } on TimeoutException {",
+            "      throw NewrError(",
+            "          'http: fetch $method $url timed out after ${timeout}s');",
+            "    } catch (e) {",
+            "      throw NewrError('http: fetch $method $url failed: $e');",
+            "    } finally {",
+            "      client.close();",
+            "    }",
+            "  }",
+            "",
+            "  static Future<Object?> _doFetch(io.HttpClient client,",
+            "      String method, Uri uri, Map<String, String> headers,",
+            "      List<int>? data, List<Object?> shape) async {",
+            "    final req = await client.openUrl(method, uri);",
+            "    headers.forEach((k, v) => req.headers.set(k, v));",
+            "    if (data != null) {",
+            "      req.add(data);",
+            "    }",
+            "    final resp = await req.close();",
+            "    final chunks = await resp.toList();",
+            "    final bytes = <int>[];",
+            "    for (final c in chunks) {",
+            "      bytes.addAll(c);",
+            "    }",
+            "    String text;",
+            "    try {",
+            "      text = utf8.decode(bytes);",
+            "    } on FormatException {",
+            "      throw NewrError('http: response body is not valid UTF-8');",
+            "    }",
+            "    final respHeaders = <String, String>{};",
+            "    resp.headers.forEach((name, values) {",
+            "      respHeaders[name] = values.last;",
+            "    });",
+            "    final values = <String, Object?>{",
+            "      'status': resp.statusCode,",
+            "      'headers': respHeaders,",
+            "      'body': text,",
+            "    };",
+            "    return NewrJson.buildFromShape(shape, values);",
+            "  }",
+            "",
+            "  static Future<T> get<T>(String url, int timeout,",
+            "      Map<String, String>? headers, List<Object?> shape) {",
+            "    return fetch<T>('GET', url, null, timeout, headers, shape);",
+            "  }",
+            "",
+            "  static Future<T> post<T>(String url, String body, int timeout,",
+            "      Map<String, String>? headers, List<Object?> shape) {",
+            "    return fetch<T>('POST', url, body, timeout, headers, shape);",
+            "  }",
+            "",
+            "  static Future<T> request<T>(String method, String url,",
+            "      String body, int timeout, Map<String, String>? headers,",
+            "      List<Object?> shape) {",
+            "    return fetch<T>(method, url, body, timeout, headers, shape);",
+            "  }",
+            "}",
+        ]
+
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:
         """A named-module member used as a value: a constant, or a
@@ -3780,7 +4919,17 @@ class _DartEmitter:
         if requires or ensures:
             # The contract checks below throw NewrError.
             self._need_rt("NewrError")
-        lines = [f"{p}{ret_text} {java_name}({sig}) {{"]
+        is_async = decl.name in self._async_fns
+        # A fn that fetches or serves (directly, or through another
+        # async fn) is emitted `Future<Ret> name(...) async`:
+        # dart:io has no sync HTTP API, so the await must live
+        # here, and its call sites await it (see _emit_name_call).
+        self._async_ctx.append(is_async)
+        if is_async:
+            ret_text = f"Future<{ret_text}>"
+            lines = [f"{p}{ret_text} {java_name}({sig}) async {{"]
+        else:
+            lines = [f"{p}{ret_text} {java_name}({sig}) {{"]
         bp = "  " * (indent + 1)
         body_lines: list[str] = []
         if ensures:
@@ -3814,6 +4963,7 @@ class _DartEmitter:
             body_lines = [f"{bp};"]
         lines.extend(body_lines)
         lines.append(f"{p}}}")
+        self._async_ctx.pop()
         self._fn_ctx.pop()
         self._fn_used = saved_used
         self._pop_scope()
@@ -4110,7 +5260,14 @@ class _DartEmitter:
                     Type("error")
                 late = "late final" if isinstance(st, A.Const) \
                     else "late"
-                body.append(f"{late} {self._dart_type(t)} "
+                decl_type = self._dart_type(t)
+                if isinstance(st.value, A.Lambda) \
+                        and st.name in self._async_lambda_names \
+                        and t.name == "fn":
+                    # A let-bound lambda that fetches is a
+                    # Future-returning fn in Dart.
+                    decl_type = self._dart_fn_type_async(t)
+                body.append(f"{late} {decl_type} "
                             f"{b.dart if b is not None else self._mangle(st.name)};")
         for decl in program.structs:
             if body:
@@ -4134,10 +5291,8 @@ class _DartEmitter:
         stmt_lines: list[str] = []
         if program.stmts:
             if is_main:
-                stmt_lines.append("void main(List<String> args) {")
-                # Initialize the imported file modules first, in
-                # import order (each module's own newrInit handles
-                # ITS imports transitively).
+                main_async = self._entry_async
+                init_lines: list[str] = []
                 for imp in program.imports:
                     if imp.path is None:
                         continue
@@ -4147,19 +5302,48 @@ class _DartEmitter:
                     stem = self.imported_modules.get(imp.bound_name,
                                                      imp.bound_name)
                     self.dart_imports[imp.bound_name] = stem
-                    stmt_lines.append(f"  {imp.bound_name}.newrInit();")
-                stmt_lines.extend(self._emit_block(program.stmts, 1,
-                                                   top_level=True))
+                    init_async = _dart_entry_needs_async(
+                        sub, self._async_memo)
+                    if init_async:
+                        main_async = True
+                    init_lines.append(
+                        f"  {'await ' if init_async else ''}"
+                        f"{imp.bound_name}.newrInit();")
+                sig = ("Future<void> main(List<String> args) async {"
+                       if main_async else
+                       "void main(List<String> args) {")
+                stmt_lines.append(sig)
+                stmt_lines.extend(init_lines)
+                self._async_ctx.append(main_async)
+                try:
+                    stmt_lines.extend(self._emit_block(program.stmts, 1,
+                                                       top_level=True))
+                finally:
+                    self._async_ctx.pop()
                 stmt_lines.append("}")
             else:
-                stmt_lines.append("void newrInit() {")
-                stmt_lines.extend(self._emit_block(program.stmts, 1,
-                                                   top_level=True))
+                sig = ("Future<void> newrInit() async {"
+                       if self._entry_async else "void newrInit() {")
+                stmt_lines.append(sig)
+                self._async_ctx.append(self._entry_async)
+                try:
+                    stmt_lines.extend(self._emit_block(program.stmts, 1,
+                                                       top_level=True))
+                finally:
+                    self._async_ctx.pop()
                 stmt_lines.append("}")
         if self._file_uses_db:
             if body:
                 body.append("")
             body.extend(self._emit_db_class())
+        if self._file_uses_http:
+            if body:
+                body.append("")
+            body.extend(self._emit_http_class())
+        if self._file_uses_json:
+            if body:
+                body.append("")
+            body.extend(self._emit_json_class())
         if stmt_lines:
             if body:
                 body.append("")
@@ -4220,6 +5404,15 @@ class _DartEmitter:
                   is_main: bool = True):
         """Emit a single program's file. Returns (text, uses_rt)."""
         self.program = program
+        # The http async scan runs before any emission: fn
+        # async-ness decides signatures, and entry async-ness
+        # decides the main()/newrInit() signature.
+        self._async_fns, self._async_lambda_names = _dart_async_info(
+            program, self._async_memo)
+        self._entry_async = _dart_entry_needs_async(
+            program, self._async_memo)
+        self._async_ctx = [False]
+        self._async_lambda_depth = 0
         if program.bot is not None:
             return self._emit_bot_file(program, main_path)
         return self._emit_general_file(program, main_path)
@@ -4436,7 +5629,14 @@ class _DartEmitter:
                     Type("error")
                 late = "late final" if isinstance(st, A.Const) \
                     else "late"
-                body.append(f"{late} {self._dart_type(t)} "
+                decl_type = self._dart_type(t)
+                if isinstance(st.value, A.Lambda) \
+                        and st.name in self._async_lambda_names \
+                        and t.name == "fn":
+                    # A let-bound lambda that fetches is a
+                    # Future-returning fn in Dart.
+                    decl_type = self._dart_fn_type_async(t)
+                body.append(f"{late} {decl_type} "
                             f"{b.dart if b is not None else self._mangle(st.name)};")
         for decl in program.structs:
             if body:
@@ -4522,8 +5722,20 @@ class _DartEmitter:
         if body:
             body.append("")
         body.extend(self._emit_commands_table())
+        # main() is emitted first into a variable: it may use
+        # http/json at the top level, which decides whether the
+        # helper classes below are emitted at all.
+        main_lines = self._emit_main(program)
+        if self._file_uses_http:
+            if body:
+                body.append("")
+            body.extend(self._emit_http_class())
+        if self._file_uses_json:
+            if body:
+                body.append("")
+            body.extend(self._emit_json_class())
         body.append("")
-        body.extend(self._emit_main(program))
+        body.extend(main_lines)
 
         lines = self._header(main_path, bot.description)
         imports = self._render_imports()
@@ -5365,7 +6577,15 @@ class _DartEmitter:
         `token` would shadow it inside main()."""
         lines = ["Future<void> main(List<String> args) async {"]
         self._fn_ctx = []
-        lines.extend(self._emit_block(program.stmts, 1, top_level=True))
+        # Bot main is async, so top-level http fetch/serve calls
+        # await here (json calls are sync; http inside a bot
+        # handler is not in M8b and fails in _await_call).
+        self._async_ctx.append(True)
+        try:
+            lines.extend(self._emit_block(program.stmts, 1,
+                                          top_level=True))
+        finally:
+            self._async_ctx.pop()
         lines.append("  final _newrToken = "
                      "Platform.environment['DISCORD_TOKEN'];")
         lines.append("  if (_newrToken == null || _newrToken.isEmpty) {")

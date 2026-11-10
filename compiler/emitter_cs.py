@@ -319,6 +319,14 @@ class _CSEmitter:
         # This file uses `db.*` (set by `_emit_db_call`) — the
         # `NewrDb` helper class is emitted into the file only then.
         self._file_uses_db: bool = False
+        self.uses_http: bool = False
+        # This file uses `http.*` (set by `_emit_http_call`), the
+        # `NewrHttp` helper class is emitted into the file only then.
+        self._file_uses_http: bool = False
+        self.uses_json: bool = False
+        # This file uses `json.*` (set by `_emit_json_call`), the
+        # `NewrJson` helper class is emitted into the file only then.
+        self._file_uses_json: bool = False
         self.rt_helpers: set[str] = set()
         # Module-level declarations of the file being emitted.
         self.fns: dict[str, A.FnDecl] = {}
@@ -500,6 +508,14 @@ class _CSEmitter:
     def _need_sqlite(self):
         self.uses_sqlite = True
 
+    def _need_http(self):
+        self.uses_http = True
+        self._file_uses_http = True
+
+    def _need_json(self):
+        self.uses_json = True
+        self._file_uses_json = True
+
     def _render_imports(self) -> list[str]:
         """The `using` block: `System` and
         `System.Collections.Generic` are unconditional (emitted code
@@ -515,6 +531,22 @@ class _CSEmitter:
             lines.append("using System.Threading.Tasks;")
         if self.uses_sqlite:
             lines.append("using Microsoft.Data.Sqlite;")
+        if self.uses_http:
+            # HttpListener, HttpClient, threads, streams: stdlib only,
+            # no package reference is added for http/json.
+            lines.append("using System.Net;")
+            lines.append("using System.Net.Http;")
+            lines.append("using System.Net.Sockets;")
+            lines.append("using System.Threading;")
+            lines.append("using System.Threading.Tasks;")
+            lines.append("using System.IO;")
+        if self.uses_http or self.uses_json:
+            # The inline NewrHttp/NewrJson helpers use JSON parsing,
+            # reflection for struct construction, and text encoding.
+            lines.append("using System.Text;")
+            lines.append("using System.Text.Json;")
+            lines.append("using System.Reflection;")
+            lines.append("using System.Globalization;")
         for ns in sorted(self.discord_names):
             lines.append(f"using {ns};")
         return lines
@@ -1131,7 +1163,8 @@ class _CSEmitter:
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
-                                       or obj.name == "db"):
+                                       or obj.name in ("db", "http",
+                                                       "json")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -3181,6 +3214,12 @@ class _CSEmitter:
         if real == "db":
             args = [self.emit_expr(a, 0) for a in node.args]
             return self._emit_db_call(node, args)
+        if real == "http":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_http_call(node, args)
+        if real == "json":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_json_call(node, args)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
@@ -3328,6 +3367,152 @@ class _CSEmitter:
         with `?` when nullable. Row fields are only int/float/str/
         bool (db_check enforces it), so no deeper shape is needed."""
         return t.name + ("?" if t.nullable else "")
+
+    # ------------------------------------------------------------ http/json
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring the Python emitter's `_struct_decl`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """C# source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7), mirroring the Python
+        emitter's `_shape_literal`: a scalar is `"int"` /
+        `"float"` / `"str"` / `"bool"` / `"none"`, a nullable is
+        `new object[] {"?", inner}`, a list is
+        `new object[] {"list", elem}`, a dict is
+        `new object[] {"dict", value}`, a struct is
+        `new object[] {"struct", Name, new object[] { new object[]
+        {field, shape}, ... }}` in declaration order, where Name
+        is the struct's short name (the runtime resolves it by
+        reflection). The runtime walks the shape for json.encode /
+        decode and for building the http request/response structs."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return ("new object[] {\"?\", "
+                    f"{self._shape_literal(inner)}}}")
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return _cs_str(t.name)
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail("internal: list type without one element "
+                           f"type: `{t}`")
+            return ("new object[] {\"list\", "
+                    f"{self._shape_literal(t.params[0])}}}")
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail("internal: dict type without two params: "
+                           f"`{t}`")
+            return ("new object[] {\"dict\", "
+                    f"{self._shape_literal(t.params[1])}}}")
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        short = t.name.rsplit(".", 1)[-1] if "." in t.name else t.name
+        fields = ", ".join(
+            "new object[] {" + _cs_str(f.name) + ", "
+            + self._shape_literal(f.type) + "}"
+            for f in decl.fields)
+        return ("new object[] {\"struct\", " + _cs_str(short)
+                + ", new object[] {" + fields + "}}")
+
+    def _http_handler_request_type(self, handler_arg: A.Expr) -> Type:
+        """The request struct type of a route handler: the parameter
+        type of an inline lambda, or the first parameter of the fn
+        type of a let-bound lambda variable (the checker tracks
+        let-bound lambdas the same way, in http_check._lambdas).
+        A named function is not a handler in M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and t.params:
+                    return t.params[0]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _emit_http_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`http.*` calls (SPEC.md section 12.6): the helpers live
+        in the `NewrHttp` class emitted into this file (see
+        `_emit_http_class`), inline, not in newr_rt.cs, because
+        the runtime file is dependency-free and a program that
+        never uses `http` must not need a new package. The checker
+        (http_check) has already validated the call, so the arity
+        here is trusted. Fetch calls carry the response struct
+        shape from `node.expr_type`, set by http_check; route calls
+        carry the request struct shape from the handler lambda's
+        parameter type."""
+        name = node.func.name
+        self._need_http()
+        self._need_rt("NewrError")
+        if name == "route":
+            req_type = self._http_handler_request_type(node.args[2])
+            shape = self._shape_literal(req_type)
+            return (f"NewrHttp.Route({args[0]}, {args[1]}, {args[2]}, "
+                    f"{shape})", _PREC["primary"])
+        if name == "serve":
+            return f"NewrHttp.Serve({', '.join(args)})", _PREC["primary"]
+        if name in ("get", "post", "request"):
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            resp_cs = self._cs_type(t)
+            if name == "get":
+                timeout = args[1] if len(args) > 1 else "10"
+                headers = args[2] if len(args) > 2 else "null"
+                return (f"({resp_cs}) NewrHttp.Get({args[0]}, {timeout}, "
+                        f"{headers}, {shape})", _PREC["primary"])
+            if name == "post":
+                timeout = args[2] if len(args) > 2 else "10"
+                headers = args[3] if len(args) > 3 else "null"
+                return (f"({resp_cs}) NewrHttp.Post({args[0]}, {args[1]}, "
+                        f"{timeout}, {headers}, {shape})",
+                        _PREC["primary"])
+            timeout = args[3] if len(args) > 3 else "10"
+            headers = args[4] if len(args) > 4 else "null"
+            return (f"({resp_cs}) NewrHttp.Request({args[0]}, {args[1]}, "
+                    f"{args[2]}, {timeout}, {headers}, {shape})",
+                    _PREC["primary"])
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`json.*` calls (SPEC.md section 12.7): the helpers live
+        in the `NewrJson` class emitted into this file (see
+        `_emit_json_class`). `json.encode` takes its shape from
+        the argument's static type; `json.decode` takes its shape
+        from `node.expr_type`, the expected type set by json_check."""
+        name = node.func.name
+        self._need_json()
+        self._need_rt("NewrError")
+        if name == "encode":
+            shape = self._shape_literal(self._type_of(node.args[0]))
+            return (f"NewrJson.Encode({args[0]}, {shape})",
+                    _PREC["primary"])
+        if name == "decode":
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            return (f"NewrJson.Decode<{self._cs_boxed_type(t)}>"
+                    f"({args[0]}, {shape})", _PREC["primary"])
+        self._fail(f"module `json` has no function `{name}`")
 
     def _emit_db_class(self) -> list[str]:
         """The `NewrDb` helper class, emitted into a file that uses
@@ -3636,6 +3821,913 @@ class _CSEmitter:
             "      SqliteConnection conn = Conn(handle);",
             "      conn.Close();",
             "      Conns.Remove(handle);",
+            "    }",
+            "  }",
+        ]
+
+    def _emit_json_class(self) -> list[str]:
+        """The `NewrJson` helper class, emitted into a file that uses
+        `json.*` (at indent 1, nested in the program class). Typed
+        JSON over System.Text.Json: the emitter passes a recursive
+        shape descriptor (see `_shape_literal`), the helper walks
+        it for both directions. Structs are built by reflection
+        from the struct name in the shape (the emitted struct
+        classes are nested in the program class, so a lookup by
+        name in the executing assembly finds them; field values
+        are read the same way, trying the plain field name then
+        the mangled name with a trailing underscore). Floats use
+        the shortest round-trip decimal with ".0" for integral
+        floats (the "R" format gives plain decimal inside the
+        pinned range; System.Text.Json would print "1" for 1.0).
+        Decode distinguishes int from float by the JSON syntax
+        (the raw text), so 1.0 into an int field always throws,
+        and an integer outside int64 throws. Duplicate keys keep
+        the last value, trailing data and empty input throw, a
+        missing struct field throws, an extra field is ignored,
+        null lands only in a nullable shape. Strings are written
+        as UTF-8 with no \\u escapes (UnsafeRelaxedJsonEscaping).
+        `BuildFromShape` / `FieldValue` are shared with NewrHttp:
+        they build a struct from plain (non-JSON) field values
+        and read one field back."""
+        return [
+            "  private static class NewrJson {",
+            "    private static readonly Dictionary<string, Type> StructCache = new Dictionary<string, Type>();",
+            "",
+            "    public static string Encode(object value, object shape) {",
+            "      StringBuilder sb = new StringBuilder();",
+            "      WriteValue(sb, value, shape);",
+            "      return sb.ToString();",
+            "    }",
+            "",
+            "    public static T Decode<T>(string text, object shape) {",
+            "      if (text == null) {",
+            "        throw new NewrRt.NewrError(\"json: decode takes a string\");",
+            "      }",
+            "      JsonElement root;",
+            "      try {",
+            "        using (JsonDocument doc = JsonDocument.Parse(text)) {",
+            "          root = doc.RootElement.Clone();",
+            "        }",
+            "      } catch (JsonException e) {",
+            "        throw new NewrRt.NewrError(\"json: invalid JSON: \" + e.Message);",
+            "      }",
+            "      return (T) ReadValue(root, shape);",
+            "    }",
+            "",
+            "    public static object BuildFromShape(object shape, Dictionary<string, object> values) {",
+            "      if (!(shape is object[] parts) || parts.Length != 3 || !Equals(parts[0], \"struct\")) {",
+            "        throw new NewrRt.NewrError(\"http: internal: expected a struct shape\");",
+            "      }",
+            "      object[] fields = (object[]) parts[2];",
+            "      object[] args = new object[fields.Length];",
+            "      for (int i = 0; i < fields.Length; i++) {",
+            "        object[] field = (object[]) fields[i];",
+            "        string name = (string) field[0];",
+            "        if (!values.TryGetValue(name, out object v)) {",
+            "          throw new NewrRt.NewrError(\"http: missing field \" + name);",
+            "        }",
+            "        args[i] = ConvertPlain(v, field[1]);",
+            "      }",
+            "      return BuildStruct((string) parts[1], args);",
+            "    }",
+            "",
+            "    public static object FieldValue(object obj, string fieldName) {",
+            "      if (obj == null) {",
+            "        throw new NewrRt.NewrError(\"json: missing field \" + fieldName);",
+            "      }",
+            "      Type t = obj.GetType();",
+            "      FieldInfo f = t.GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);",
+            "      if (f == null) {",
+            "        f = t.GetField(fieldName + \"_\", BindingFlags.Public | BindingFlags.Instance);",
+            "      }",
+            "      if (f == null) {",
+            "        throw new NewrRt.NewrError(\"json: missing field \" + fieldName);",
+            "      }",
+            "      return f.GetValue(obj);",
+            "    }",
+            "",
+            "    private static string FmtDouble(double d) {",
+            "      if (double.IsNaN(d) || double.IsInfinity(d)) {",
+            "        throw new NewrRt.NewrError(\"json: cannot encode a non-finite float\");",
+            "      }",
+            "      string s = d.ToString(\"R\", CultureInfo.InvariantCulture);",
+            "      if (s.IndexOf('.') < 0 && s.IndexOf('E') < 0 && s.IndexOf('e') < 0) {",
+            "        s += \".0\";",
+            "      }",
+            "      return s;",
+            "    }",
+            "",
+            "    private static string Quote(string s) {",
+            "      return JsonSerializer.Serialize(s, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });",
+            "    }",
+            "",
+            "    private static Type FindStruct(string name) {",
+            "      if (StructCache.TryGetValue(name, out Type found)) {",
+            "        return found;",
+            "      }",
+            "      foreach (Type t in Assembly.GetExecutingAssembly().GetTypes()) {",
+            "        if (t.Name == name) {",
+            "          StructCache[name] = t;",
+            "          return t;",
+            "        }",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown struct \" + name);",
+            "    }",
+            "",
+            "    private static object BuildStruct(string name, object[] args) {",
+            "      Type t = FindStruct(name);",
+            "      try {",
+            "        return Activator.CreateInstance(t, args);",
+            "      } catch (Exception e) {",
+            "        throw new NewrRt.NewrError(\"json: cannot build \" + name + \": \" + e.Message);",
+            "      }",
+            "    }",
+            "",
+            "    private static Type TypeForShape(object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": return typeof(long);",
+            "          case \"float\": return typeof(double);",
+            "          case \"str\": return typeof(string);",
+            "          case \"bool\": return typeof(bool);",
+            "          case \"none\": return typeof(object);",
+            "          default: throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        Type inner = TypeForShape(parts[1]);",
+            "        if (inner == typeof(long)) {",
+            "          return typeof(long?);",
+            "        }",
+            "        if (inner == typeof(double)) {",
+            "          return typeof(double?);",
+            "        }",
+            "        if (inner == typeof(bool)) {",
+            "          return typeof(bool?);",
+            "        }",
+            "        return inner;",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        return typeof(List<>).MakeGenericType(TypeForShape(parts[1]));",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        return typeof(Dictionary<,>).MakeGenericType(typeof(string), TypeForShape(parts[1]));",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        return FindStruct((string) parts[1]);",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "",
+            "    private static void WriteValue(StringBuilder sb, object value, object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": {",
+            "            if (value is bool) {",
+            "              throw new NewrRt.NewrError(\"json: expected int, got bool\");",
+            "            }",
+            "            if (value is long l) {",
+            "              sb.Append(l.ToString(CultureInfo.InvariantCulture));",
+            "              return;",
+            "            }",
+            "            if (value is int iv) {",
+            "              sb.Append(iv.ToString(CultureInfo.InvariantCulture));",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected int\");",
+            "          }",
+            "          case \"float\": {",
+            "            if (value is bool) {",
+            "              throw new NewrRt.NewrError(\"json: expected float, got bool\");",
+            "            }",
+            "            if (value is double d) {",
+            "              sb.Append(FmtDouble(d));",
+            "              return;",
+            "            }",
+            "            if (value is long lv) {",
+            "              sb.Append(FmtDouble((double) lv));",
+            "              return;",
+            "            }",
+            "            if (value is int iv2) {",
+            "              sb.Append(FmtDouble((double) iv2));",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected float\");",
+            "          }",
+            "          case \"str\": {",
+            "            if (value is string s) {",
+            "              sb.Append(Quote(s));",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected str\");",
+            "          }",
+            "          case \"bool\": {",
+            "            if (value is bool b) {",
+            "              sb.Append(b ? \"true\" : \"false\");",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected bool\");",
+            "          }",
+            "          case \"none\": {",
+            "            if (value != null) {",
+            "              throw new NewrRt.NewrError(\"json: expected null\");",
+            "            }",
+            "            sb.Append(\"null\");",
+            "            return;",
+            "          }",
+            "          default:",
+            "            throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        if (value == null) {",
+            "          sb.Append(\"null\");",
+            "          return;",
+            "        }",
+            "        WriteValue(sb, value, parts[1]);",
+            "        return;",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        if (value is string) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        if (!(value is System.Collections.IEnumerable items)) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        sb.Append('[');",
+            "        bool first = true;",
+            "        foreach (object item in items) {",
+            "          if (!first) {",
+            "            sb.Append(',');",
+            "          }",
+            "          first = false;",
+            "          WriteValue(sb, item, parts[1]);",
+            "        }",
+            "        sb.Append(']');",
+            "        return;",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        if (!(value is System.Collections.IDictionary dict)) {",
+            "          throw new NewrRt.NewrError(\"json: expected dict\");",
+            "        }",
+            "        sb.Append('{');",
+            "        bool first = true;",
+            "        foreach (System.Collections.DictionaryEntry entry in dict) {",
+            "          if (!(entry.Key is string key)) {",
+            "            throw new NewrRt.NewrError(\"json: dict keys must be str\");",
+            "          }",
+            "          if (!first) {",
+            "            sb.Append(',');",
+            "          }",
+            "          first = false;",
+            "          sb.Append(Quote(key));",
+            "          sb.Append(':');",
+            "          WriteValue(sb, entry.Value, parts[1]);",
+            "        }",
+            "        sb.Append('}');",
+            "        return;",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        sb.Append('{');",
+            "        object[] fields = (object[]) parts[2];",
+            "        for (int i = 0; i < fields.Length; i++) {",
+            "          object[] field = (object[]) fields[i];",
+            "          string name = (string) field[0];",
+            "          if (i > 0) {",
+            "            sb.Append(',');",
+            "          }",
+            "          sb.Append(Quote(name));",
+            "          sb.Append(':');",
+            "          WriteValue(sb, FieldValue(value, name), field[1]);",
+            "        }",
+            "        sb.Append('}');",
+            "        return;",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "",
+            "    private static object ReadValue(JsonElement el, object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": {",
+            "            if (el.ValueKind != JsonValueKind.Number) {",
+            "              throw new NewrRt.NewrError(\"json: expected int\");",
+            "            }",
+            "            string raw = el.GetRawText();",
+            "            if (raw.IndexOf('.') >= 0 || raw.IndexOf('e') >= 0 || raw.IndexOf('E') >= 0) {",
+            "              throw new NewrRt.NewrError(\"json: expected int, got a float\");",
+            "            }",
+            "            if (!el.TryGetInt64(out long v)) {",
+            "              throw new NewrRt.NewrError(\"json: integer outside int64 range\");",
+            "            }",
+            "            return v;",
+            "          }",
+            "          case \"float\": {",
+            "            if (el.ValueKind != JsonValueKind.Number) {",
+            "              throw new NewrRt.NewrError(\"json: expected float\");",
+            "            }",
+            "            string raw = el.GetRawText();",
+            "            if (raw.IndexOf('.') >= 0 || raw.IndexOf('e') >= 0 || raw.IndexOf('E') >= 0) {",
+            "              return el.GetDouble();",
+            "            }",
+            "            if (!el.TryGetInt64(out long v)) {",
+            "              throw new NewrRt.NewrError(\"json: integer too large for float\");",
+            "            }",
+            "            return (double) v;",
+            "          }",
+            "          case \"str\": {",
+            "            if (el.ValueKind != JsonValueKind.String) {",
+            "              throw new NewrRt.NewrError(\"json: expected str\");",
+            "            }",
+            "            return el.GetString();",
+            "          }",
+            "          case \"bool\": {",
+            "            if (el.ValueKind == JsonValueKind.True) {",
+            "              return true;",
+            "            }",
+            "            if (el.ValueKind == JsonValueKind.False) {",
+            "              return false;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected bool\");",
+            "          }",
+            "          case \"none\": {",
+            "            if (el.ValueKind != JsonValueKind.Null) {",
+            "              throw new NewrRt.NewrError(\"json: expected null\");",
+            "            }",
+            "            return null;",
+            "          }",
+            "          default:",
+            "            throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        if (el.ValueKind == JsonValueKind.Null) {",
+            "          return null;",
+            "        }",
+            "        return ReadValue(el, parts[1]);",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        if (el.ValueKind != JsonValueKind.Array) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        Type elemType = TypeForShape(parts[1]);",
+            "        Type listType = typeof(List<>).MakeGenericType(elemType);",
+            "        System.Collections.IList list = (System.Collections.IList) Activator.CreateInstance(listType);",
+            "        foreach (JsonElement item in el.EnumerateArray()) {",
+            "          list.Add(ReadValue(item, parts[1]));",
+            "        }",
+            "        return list;",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        if (el.ValueKind != JsonValueKind.Object) {",
+            "          throw new NewrRt.NewrError(\"json: expected dict\");",
+            "        }",
+            "        Type valueType = TypeForShape(parts[1]);",
+            "        Type dictType = typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType);",
+            "        System.Collections.IDictionary dict = (System.Collections.IDictionary) Activator.CreateInstance(dictType);",
+            "        foreach (JsonProperty prop in el.EnumerateObject()) {",
+            "          dict[prop.Name] = ReadValue(prop.Value, parts[1]);",
+            "        }",
+            "        return dict;",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        if (el.ValueKind != JsonValueKind.Object) {",
+            "          throw new NewrRt.NewrError(\"json: expected object\");",
+            "        }",
+            "        Dictionary<string, JsonElement> props = new Dictionary<string, JsonElement>();",
+            "        foreach (JsonProperty prop in el.EnumerateObject()) {",
+            "          props[prop.Name] = prop.Value;",
+            "        }",
+            "        object[] fields = (object[]) parts[2];",
+            "        object[] args = new object[fields.Length];",
+            "        for (int i = 0; i < fields.Length; i++) {",
+            "          object[] field = (object[]) fields[i];",
+            "          string name = (string) field[0];",
+            "          if (!props.TryGetValue(name, out JsonElement v)) {",
+            "            throw new NewrRt.NewrError(\"json: missing field \" + name);",
+            "          }",
+            "          args[i] = ReadValue(v, field[1]);",
+            "        }",
+            "        return BuildStruct((string) parts[1], args);",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "",
+            "    private static object ConvertPlain(object value, object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": {",
+            "            if (value is long l) {",
+            "              return l;",
+            "            }",
+            "            if (value is int iv) {",
+            "              return (long) iv;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected int\");",
+            "          }",
+            "          case \"float\": {",
+            "            if (value is double d) {",
+            "              return d;",
+            "            }",
+            "            if (value is long lv) {",
+            "              return (double) lv;",
+            "            }",
+            "            if (value is int iv2) {",
+            "              return (double) iv2;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected float\");",
+            "          }",
+            "          case \"str\": {",
+            "            if (value is string s) {",
+            "              return s;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected str\");",
+            "          }",
+            "          case \"bool\": {",
+            "            if (value is bool b) {",
+            "              return b;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected bool\");",
+            "          }",
+            "          case \"none\": {",
+            "            if (value == null) {",
+            "              return null;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected null\");",
+            "          }",
+            "          default:",
+            "            throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        if (value == null) {",
+            "          return null;",
+            "        }",
+            "        return ConvertPlain(value, parts[1]);",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        if (value is string) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        if (!(value is System.Collections.IEnumerable items)) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        Type elemType = TypeForShape(parts[1]);",
+            "        Type listType = typeof(List<>).MakeGenericType(elemType);",
+            "        System.Collections.IList list = (System.Collections.IList) Activator.CreateInstance(listType);",
+            "        foreach (object item in items) {",
+            "          list.Add(ConvertPlain(item, parts[1]));",
+            "        }",
+            "        return list;",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        if (!(value is System.Collections.IDictionary source)) {",
+            "          throw new NewrRt.NewrError(\"json: expected dict\");",
+            "        }",
+            "        Type valueType = TypeForShape(parts[1]);",
+            "        Type dictType = typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType);",
+            "        System.Collections.IDictionary dict = (System.Collections.IDictionary) Activator.CreateInstance(dictType);",
+            "        foreach (System.Collections.DictionaryEntry entry in source) {",
+            "          dict[(string) entry.Key] = ConvertPlain(entry.Value, parts[1]);",
+            "        }",
+            "        return dict;",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        if (!(value is System.Collections.IDictionary fields)) {",
+            "          throw new NewrRt.NewrError(\"json: expected object\");",
+            "        }",
+            "        object[] fieldShapes = (object[]) parts[2];",
+            "        object[] args = new object[fieldShapes.Length];",
+            "        for (int i = 0; i < fieldShapes.Length; i++) {",
+            "          object[] field = (object[]) fieldShapes[i];",
+            "          string name = (string) field[0];",
+            "          if (!fields.Contains(name)) {",
+            "            throw new NewrRt.NewrError(\"json: missing field \" + name);",
+            "          }",
+            "          args[i] = ConvertPlain(fields[name], field[1]);",
+            "        }",
+            "        return BuildStruct((string) parts[1], args);",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "  }",
+        ]
+
+    def _emit_http_class(self) -> list[str]:
+        """The `NewrHttp` helper class, emitted into a file that uses
+        `http.*` (at indent 1, nested in the program class). The
+        server is System.Net.HttpListener (one thread per request),
+        the client is System.Net.Http.HttpClient, JSON goes through
+        NewrJson. Routes are exact-match only; no route, or a method
+        mismatch, returns 404 with an empty body. The server reads
+        the whole body before calling the handler; a non-UTF-8 body,
+        a handler exception, or an out-of-range status surfaces as
+        500 with an empty body and the server stays alive. Serve
+        prints `listening on <host>:<port>` as its first line (the
+        real port when 0: HttpListener rejects port 0 in a prefix,
+        so a TcpListener probe allocates the ephemeral port first)
+        and blocks forever. Query strings parse into dict[str, str]
+        with the last value winning for a repeated key, "+" as a
+        space, and %XX as UTF-8 bytes. Fetch validates the method,
+        the timeout (whole seconds, default 10, connect plus body),
+        the URL (http/https, a host, no userinfo), and the default
+        localhost allowlist (localhost, 127.0.0.1) only; the manifest
+        allowlist is a static checker concern. POST/request set
+        Content-Type: application/json unless the program sets one;
+        GET sets none. A 4xx/5xx status is a response struct, not a
+        throw; an unreachable host, a timeout, a bad URL, or a
+        disallowed host throws NewrError. The fetch connects through
+        a SocketsHttpHandler whose ConnectCallback opens an explicit
+        IPv4 socket: the handler default (a dual-mode socket) has
+        its connect redirected to the VM egress proxy, which cannot
+        reach a loopback server, while an IPv4 socket connects
+        direct (verified live on this VM)."""
+        return [
+            "  private static class NewrHttp {",
+            "    private static readonly string[] Methods = { \"GET\", \"POST\", \"PUT\", \"PATCH\", \"DELETE\", \"HEAD\", \"OPTIONS\" };",
+            "    private static readonly string[] Allowlist = { \"localhost\", \"127.0.0.1\" };",
+            "",
+            "    private sealed class RouteEntry {",
+            "      public string Method;",
+            "      public string Path;",
+            "      public Delegate Handler;",
+            "      public object Shape;",
+            "    }",
+            "",
+            "    private static readonly List<RouteEntry> Routes = new List<RouteEntry>();",
+            "",
+            "    public static void Route(string method, string path, Delegate handler, object shape) {",
+            "      if (method == null || Array.IndexOf(Methods, method) < 0) {",
+            "        throw new NewrRt.NewrError(\"http: invalid method \" + method);",
+            "      }",
+            "      if (path == null || !path.StartsWith(\"/\")) {",
+            "        throw new NewrRt.NewrError(\"http: route path must start with '/', got \" + path);",
+            "      }",
+            "      if (handler == null) {",
+            "        throw new NewrRt.NewrError(\"http: route handler must be callable\");",
+            "      }",
+            "      Routes.Add(new RouteEntry { Method = method, Path = path, Handler = handler, Shape = shape });",
+            "    }",
+            "",
+            "    public static void Serve(long port, string host = \"127.0.0.1\") {",
+            "      if (port < 0 || port > 65535) {",
+            "        throw new NewrRt.NewrError(\"http: port must be 0 to 65535, got \" + port);",
+            "      }",
+            "      if (host == null) {",
+            "        throw new NewrRt.NewrError(\"http: host must be a str\");",
+            "      }",
+            "      long realPort = port;",
+            "      if (realPort == 0) {",
+            "        realPort = FreePort(host);",
+            "      }",
+            "      string prefixHost = host == \"0.0.0.0\" ? \"+\" : host;",
+            "      HttpListener listener = new HttpListener();",
+            "      listener.Prefixes.Add(\"http://\" + prefixHost + \":\" + realPort + \"/\");",
+            "      listener.Start();",
+            "      Console.WriteLine(\"listening on \" + host + \":\" + realPort);",
+            "      Console.Out.Flush();",
+            "      while (true) {",
+            "        HttpListenerContext ctx = listener.GetContext();",
+            "        Thread t = new Thread(() => Handle(ctx));",
+            "        t.IsBackground = true;",
+            "        t.Start();",
+            "      }",
+            "    }",
+            "",
+            "    private static long FreePort(string host) {",
+            "      IPAddress addr;",
+            "      if (host == \"0.0.0.0\") {",
+            "        addr = IPAddress.Any;",
+            "      } else if (host == \"localhost\") {",
+            "        addr = IPAddress.Loopback;",
+            "      } else {",
+            "        try {",
+            "          addr = IPAddress.Parse(host);",
+            "        } catch (FormatException) {",
+            "          throw new NewrRt.NewrError(\"http: invalid host \" + host);",
+            "        }",
+            "      }",
+            "      TcpListener probe = new TcpListener(addr, 0);",
+            "      probe.Start();",
+            "      long port = ((IPEndPoint) probe.LocalEndpoint).Port;",
+            "      probe.Stop();",
+            "      return port;",
+            "    }",
+            "",
+            "    private static void Handle(HttpListenerContext ctx) {",
+            "      try {",
+            "        string path = ctx.Request.Url.AbsolutePath;",
+            "        Dictionary<string, string> query = ParseQuery(ctx.Request.Url.Query);",
+            "        byte[] raw;",
+            "        using (MemoryStream ms = new MemoryStream()) {",
+            "          ctx.Request.InputStream.CopyTo(ms);",
+            "          raw = ms.ToArray();",
+            "        }",
+            "        string body;",
+            "        try {",
+            "          body = new UTF8Encoding(false, true).GetString(raw);",
+            "        } catch (DecoderFallbackException) {",
+            "          Send(ctx, 500, null, new byte[0]);",
+            "          return;",
+            "        }",
+            "        Dictionary<string, string> headers = new Dictionary<string, string>();",
+            "        foreach (string key in ctx.Request.Headers.AllKeys) {",
+            "          headers[key] = ctx.Request.Headers[key];",
+            "        }",
+            "        RouteEntry found = null;",
+            "        foreach (RouteEntry r in Routes) {",
+            "          if (r.Method == ctx.Request.HttpMethod && r.Path == path) {",
+            "            found = r;",
+            "            break;",
+            "          }",
+            "        }",
+            "        if (found == null) {",
+            "          Send(ctx, 404, null, new byte[0]);",
+            "          return;",
+            "        }",
+            "        Dictionary<string, object> values = new Dictionary<string, object>();",
+            "        values[\"method\"] = ctx.Request.HttpMethod;",
+            "        values[\"path\"] = path;",
+            "        values[\"headers\"] = headers;",
+            "        values[\"body\"] = body;",
+            "        values[\"query\"] = query;",
+            "        object req = NewrJson.BuildFromShape(found.Shape, values);",
+            "        object resp;",
+            "        try {",
+            "          resp = found.Handler.DynamicInvoke(req);",
+            "        } catch (TargetInvocationException e) {",
+            "          throw e.InnerException ?? (Exception) e;",
+            "        }",
+            "        object statusObj = NewrJson.FieldValue(resp, \"status\");",
+            "        if (!(statusObj is long status)) {",
+            "          throw new NewrRt.NewrError(\"http: response status must be an int\");",
+            "        }",
+            "        if (status < 100 || status > 599) {",
+            "          throw new NewrRt.NewrError(\"http: response status must be 100 to 599, got \" + status);",
+            "        }",
+            "        object headersObj = NewrJson.FieldValue(resp, \"headers\");",
+            "        if (!(headersObj is Dictionary<string, string> respHeaders)) {",
+            "          throw new NewrRt.NewrError(\"http: response headers must be a dict\");",
+            "        }",
+            "        object bodyObj = NewrJson.FieldValue(resp, \"body\");",
+            "        if (!(bodyObj is string respBody)) {",
+            "          throw new NewrRt.NewrError(\"http: response body must be a str\");",
+            "        }",
+            "        Send(ctx, (int) status, respHeaders, Encoding.UTF8.GetBytes(respBody));",
+            "      } catch (Exception) {",
+            "        try {",
+            "          Send(ctx, 500, null, new byte[0]);",
+            "        } catch (Exception) {",
+            "        }",
+            "      } finally {",
+            "        try {",
+            "          ctx.Response.Close();",
+            "        } catch (Exception) {",
+            "        }",
+            "      }",
+            "    }",
+            "",
+            "    private static void Send(HttpListenerContext ctx, int status, Dictionary<string, string> headers, byte[] body) {",
+            "      HttpListenerResponse r = ctx.Response;",
+            "      r.StatusCode = status;",
+            "      if (headers != null) {",
+            "        foreach (KeyValuePair<string, string> kv in headers) {",
+            "          if (string.Equals(kv.Key, \"Content-Length\", StringComparison.OrdinalIgnoreCase)) {",
+            "            continue;",
+            "          }",
+            "          if (string.Equals(kv.Key, \"Content-Type\", StringComparison.OrdinalIgnoreCase)) {",
+            "            r.ContentType = kv.Value;",
+            "            continue;",
+            "          }",
+            "          try {",
+            "            r.Headers[kv.Key] = kv.Value;",
+            "          } catch (Exception) {",
+            "          }",
+            "        }",
+            "      }",
+            "      r.ContentLength64 = body.Length;",
+            "      if (ctx.Request.HttpMethod != \"HEAD\" && body.Length > 0) {",
+            "        r.OutputStream.Write(body, 0, body.Length);",
+            "      }",
+            "    }",
+            "",
+            "    private static Dictionary<string, string> ParseQuery(string rawQuery) {",
+            "      Dictionary<string, string> query = new Dictionary<string, string>();",
+            "      if (string.IsNullOrEmpty(rawQuery)) {",
+            "        return query;",
+            "      }",
+            "      string q = rawQuery.StartsWith(\"?\") ? rawQuery.Substring(1) : rawQuery;",
+            "      foreach (string pair in q.Split('&')) {",
+            "        if (pair.Length == 0) {",
+            "          continue;",
+            "        }",
+            "        int eq = pair.IndexOf('=');",
+            "        string k = eq < 0 ? pair : pair.Substring(0, eq);",
+            "        string v = eq < 0 ? \"\" : pair.Substring(eq + 1);",
+            "        query[DecodeQuery(k)] = DecodeQuery(v);",
+            "      }",
+            "      return query;",
+            "    }",
+            "",
+            "    private static bool IsHex(char c) {",
+            "      return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');",
+            "    }",
+            "",
+            "    private static int HexVal(char c) {",
+            "      if (c >= '0' && c <= '9') {",
+            "        return c - '0';",
+            "      }",
+            "      if (c >= 'a' && c <= 'f') {",
+            "        return c - 'a' + 10;",
+            "      }",
+            "      return c - 'A' + 10;",
+            "    }",
+            "",
+            "    private static string DecodeQuery(string s) {",
+            "      List<byte> bytes = new List<byte>();",
+            "      for (int i = 0; i < s.Length; i++) {",
+            "        char c = s[i];",
+            "        if (c == '+') {",
+            "          bytes.Add((byte) ' ');",
+            "        } else if (c == '%' && i + 2 < s.Length && IsHex(s[i + 1]) && IsHex(s[i + 2])) {",
+            "          bytes.Add((byte) (HexVal(s[i + 1]) * 16 + HexVal(s[i + 2])));",
+            "          i += 2;",
+            "        } else {",
+            "          foreach (byte b in Encoding.UTF8.GetBytes(new char[] { c })) {",
+            "            bytes.Add(b);",
+            "          }",
+            "        }",
+            "      }",
+            "      return Encoding.UTF8.GetString(bytes.ToArray());",
+            "    }",
+            "",
+            "    public static object Get(string url, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      return Fetch(\"GET\", url, null, timeout, headers, shape);",
+            "    }",
+            "",
+            "    public static object Post(string url, string body, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      return Fetch(\"POST\", url, body, timeout, headers, shape);",
+            "    }",
+            "",
+            "    public static object Request(string method, string url, string body, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      return Fetch(method, url, body, timeout, headers, shape);",
+            "    }",
+            "",
+            "    private static bool HasHeader(Dictionary<string, string> headers, string name) {",
+            "      if (headers == null) {",
+            "        return false;",
+            "      }",
+            "      foreach (string key in headers.Keys) {",
+            "        if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase)) {",
+            "          return true;",
+            "        }",
+            "      }",
+            "      return false;",
+            "    }",
+            "",
+            "    private static string HeaderValue(Dictionary<string, string> headers, string name) {",
+            "      foreach (KeyValuePair<string, string> kv in headers) {",
+            "        if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase)) {",
+            "          return kv.Value;",
+            "        }",
+            "      }",
+            "      return null;",
+            "    }",
+            "",
+            "    private static Stream ConnectDirect(SocketsHttpConnectionContext ctx, CancellationToken ct) {",
+            "      // The connect for a fetch: an explicit IPv4 socket,",
+            "      // connected synchronously. A dual-mode socket (the",
+            "      // SocketsHttpHandler default) has its connect",
+            "      // redirected to the VM egress proxy, which cannot",
+            "      // reach a loopback server; an IPv4 socket connects",
+            "      // direct (verified live on this VM). The fetch",
+            "      // allowlist is loopback only, so IPv4 is always",
+            "      // right here. The proxy is off too: a loopback",
+            "      // fetch must never go through a proxy.",
+            "      Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);",
+            "      try {",
+            "        s.Connect(ctx.DnsEndPoint.Host, ctx.DnsEndPoint.Port);",
+            "      } catch (Exception) {",
+            "        s.Dispose();",
+            "        throw;",
+            "      }",
+            "      return new NetworkStream(s, true);",
+            "    }",
+            "",
+            "    public static object Fetch(string method, string url, string body, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      if (method == null || Array.IndexOf(Methods, method) < 0) {",
+            "        throw new NewrRt.NewrError(\"http: invalid method \" + method);",
+            "      }",
+            "      if (timeout <= 0 || timeout > 2147483) {",
+            "        throw new NewrRt.NewrError(\"http: timeout must be a positive number of seconds, got \" + timeout);",
+            "      }",
+            "      if (url == null) {",
+            "        throw new NewrRt.NewrError(\"http: URL must be a str\");",
+            "      }",
+            "      Uri uri;",
+            "      try {",
+            "        uri = new Uri(url);",
+            "      } catch (UriFormatException e) {",
+            "        throw new NewrRt.NewrError(\"http: invalid URL \" + url + \": \" + e.Message);",
+            "      }",
+            "      if (uri.Scheme != \"http\" && uri.Scheme != \"https\") {",
+            "        throw new NewrRt.NewrError(\"http: fetch URL must start with http:// or https://, got \" + url);",
+            "      }",
+            "      if (string.IsNullOrEmpty(uri.Host)) {",
+            "        throw new NewrRt.NewrError(\"http: fetch URL has no host: \" + url);",
+            "      }",
+            "      if (!string.IsNullOrEmpty(uri.UserInfo)) {",
+            "        throw new NewrRt.NewrError(\"http: a URL must not carry userinfo; read the token from env and pass it as a header\");",
+            "      }",
+            "      string host = uri.Host.ToLowerInvariant();",
+            "      if (Array.IndexOf(Allowlist, host) < 0) {",
+            "        throw new NewrRt.NewrError(\"http: fetch host \" + host + \" is not on the allowlist (localhost, 127.0.0.1)\");",
+            "      }",
+            "      if (shape == null) {",
+            "        throw new NewrRt.NewrError(\"http: internal: fetch without a response shape\");",
+            "      }",
+            "      byte[] data = null;",
+            "      string contentType = null;",
+            "      if (body != null) {",
+            "        data = Encoding.UTF8.GetBytes(body);",
+            "        contentType = HasHeader(headers, \"Content-Type\") ? HeaderValue(headers, \"Content-Type\") : \"application/json\";",
+            "      }",
+            "      TimeSpan span;",
+            "      try {",
+            "        span = TimeSpan.FromSeconds((double) timeout);",
+            "      } catch (Exception) {",
+            "        throw new NewrRt.NewrError(\"http: timeout out of range: \" + timeout);",
+            "      }",
+            "      using (CancellationTokenSource cts = new CancellationTokenSource(span)) {",
+            "        SocketsHttpHandler handler = new SocketsHttpHandler();",
+            "        handler.UseProxy = false;",
+            "        handler.ConnectCallback = (ctx, ct) => new ValueTask<Stream>(ConnectDirect(ctx, ct));",
+            "        using (HttpClient client = new HttpClient(handler)) {",
+            "          client.Timeout = span;",
+            "          using (HttpRequestMessage req = new HttpRequestMessage(new HttpMethod(method), uri)) {",
+            "            if (headers != null) {",
+            "              foreach (KeyValuePair<string, string> kv in headers) {",
+            "                if (string.Equals(kv.Key, \"Content-Type\", StringComparison.OrdinalIgnoreCase)) {",
+            "                  continue;",
+            "                }",
+            "                req.Headers.TryAddWithoutValidation(kv.Key, kv.Value);",
+            "              }",
+            "            }",
+            "            if (data != null) {",
+            "              ByteArrayContent content = new ByteArrayContent(data);",
+            "              try {",
+            "                content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);",
+            "              } catch (Exception) {",
+            "                throw new NewrRt.NewrError(\"http: invalid Content-Type: \" + contentType);",
+            "              }",
+            "              req.Content = content;",
+            "            } else if (HasHeader(headers, \"Content-Type\")) {",
+            "              req.Headers.TryAddWithoutValidation(\"Content-Type\", HeaderValue(headers, \"Content-Type\"));",
+            "            }",
+            "            HttpResponseMessage resp;",
+            "            try {",
+            "              resp = client.SendAsync(req, cts.Token).GetAwaiter().GetResult();",
+            "            } catch (Exception e) {",
+            "              throw new NewrRt.NewrError(\"http: fetch \" + method + \" \" + url + \" failed: \" + e.Message);",
+            "            }",
+            "            using (resp) {",
+            "              int status = (int) resp.StatusCode;",
+            "              Dictionary<string, string> respHeaders = new Dictionary<string, string>();",
+            "              foreach (var h in resp.Headers) {",
+            "                respHeaders[h.Key] = string.Join(\", \", h.Value);",
+            "              }",
+            "              foreach (var h in resp.Content.Headers) {",
+            "                respHeaders[h.Key] = string.Join(\", \", h.Value);",
+            "              }",
+            "              byte[] raw;",
+            "              try {",
+            "                raw = resp.Content.ReadAsByteArrayAsync(cts.Token).GetAwaiter().GetResult();",
+            "              } catch (Exception e) {",
+            "                throw new NewrRt.NewrError(\"http: fetch \" + method + \" \" + url + \" failed: \" + e.Message);",
+            "              }",
+            "              string text;",
+            "              try {",
+            "                text = new UTF8Encoding(false, true).GetString(raw);",
+            "              } catch (DecoderFallbackException) {",
+            "                throw new NewrRt.NewrError(\"http: response body is not valid UTF-8\");",
+            "              }",
+            "              Dictionary<string, object> values = new Dictionary<string, object>();",
+            "              values[\"status\"] = (long) status;",
+            "              values[\"headers\"] = respHeaders;",
+            "              values[\"body\"] = text;",
+            "              return NewrJson.BuildFromShape(shape, values);",
+            "            }",
+            "          }",
+            "        }",
+            "      }",
             "    }",
             "  }",
         ]
@@ -4260,6 +5352,14 @@ class _CSEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_db_class())
+        if self._file_uses_http:
+            if body:
+                body.append("")
+            body.extend(self._emit_http_class())
+        if self._file_uses_json:
+            if body:
+                body.append("")
+            body.extend(self._emit_json_class())
         # Top-level statements: Main() for the entry file, a static
         # constructor for a file module.
         if program.stmts:

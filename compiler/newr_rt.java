@@ -26,11 +26,24 @@
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.math.BigInteger;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URLDecoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.CharsetDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -47,15 +60,38 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 
 public class NewrRt {
+
+    static {
+        // Prefer the IPv4 stack for this VM's networking: Java's
+        // default dual-stack sockets to 127.0.0.1 connect but never
+        // deliver data here (verified live 10 Nov 2026: a plain
+        // Socket to a local HttpServer connects with an IPv6 local
+        // address and the read blocks until reset, while
+        // -Djava.net.preferIPv4Stack=true works at once). The
+        // property must be set before any socket is created, so it
+        // is set when this class loads, which is before any newr
+        // program can reach the network (only the http helpers use
+        // sockets). An explicit user setting is never overridden.
+        // The runtime only ever fetches localhost, so preferring
+        // IPv4 changes nothing on a normal machine.
+        if (System.getProperty("java.net.preferIPv4Stack") == null) {
+            System.setProperty("java.net.preferIPv4Stack", "true");
+        }
+    }
 
     // ---------------------------------------------------------------- int64
 
@@ -1757,5 +1793,1026 @@ public class NewrRt {
             throw asError(e);
         }
         return null;
+    }
+
+    // ---------------------------------------------------------------- json
+    // Typed JSON (SPEC.md section 12.7), hand-written strict RFC 8259
+    // parser and serializer: the JDK has no JSON library. The emitter
+    // passes a recursive shape descriptor built from the static type:
+    // a scalar is the String "int" / "float" / "str" / "bool" /
+    // "none", a nullable is Object[]{"?", inner}, a list is
+    // Object[]{"list", elem}, a dict is Object[]{"dict", value}, a
+    // struct is Object[]{"struct", factory, Object[][] fields} where
+    // factory is a Function<Object[], Object> building the struct
+    // from its field values in declaration order, and each field is
+    // Object[]{newrName, javaFieldName, shape}. The runtime walks
+    // the shape for both directions. Java longs are 64-bit, so big
+    // ints round-trip exactly; integral floats render with ".0"
+    // through floatStr (Python repr semantics, already in this file).
+
+    private static String _jsonEscape(String s) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                    break;
+            }
+        }
+        sb.append('"');
+        return sb.toString();
+    }
+
+    private static Object _structField(Object struct, String javaName) {
+        try {
+            return struct.getClass().getField(javaName).get(struct);
+        } catch (NoSuchFieldException e) {
+            try {
+                return struct.getClass().getField(javaName + "_")
+                    .get(struct);
+            } catch (ReflectiveOperationException e2) {
+                throw new NewrError("json: struct has no field "
+                    + javaName);
+            }
+        } catch (ReflectiveOperationException e) {
+            throw new NewrError("json: cannot read field " + javaName);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void _jsonEncodeValue(StringBuilder sb, Object value,
+            Object shape) {
+        if (shape instanceof String s) {
+            switch (s) {
+                case "int":
+                    if (value instanceof Boolean) {
+                        throw new NewrError("json: expected int, "
+                            + "got bool");
+                    }
+                    if (value instanceof Long l) {
+                        sb.append(l.toString());
+                        return;
+                    }
+                    if (value instanceof BigInteger bi) {
+                        if (bi.compareTo(INT64_MIN_BI) < 0
+                                || bi.compareTo(INT64_MAX_BI) > 0) {
+                            throw new NewrError("json: integer outside "
+                                + "int64 range");
+                        }
+                        sb.append(bi.toString());
+                        return;
+                    }
+                    throw new NewrError("json: expected int, got "
+                        + (value == null ? "null"
+                            : value.getClass().getSimpleName()));
+                case "float":
+                    if (value instanceof Boolean) {
+                        throw new NewrError("json: expected float, "
+                            + "got bool");
+                    }
+                    if (value instanceof Number n) {
+                        double d = n.doubleValue();
+                        if (Double.isNaN(d) || Double.isInfinite(d)) {
+                            throw new NewrError("json: cannot encode "
+                                + "a non-finite float");
+                        }
+                        sb.append(floatStr(d));
+                        return;
+                    }
+                    throw new NewrError("json: expected float, got "
+                        + (value == null ? "null"
+                            : value.getClass().getSimpleName()));
+                case "str":
+                    if (!(value instanceof String str)) {
+                        throw new NewrError("json: expected str, got "
+                            + (value == null ? "null"
+                                : value.getClass().getSimpleName()));
+                    }
+                    sb.append(_jsonEscape(str));
+                    return;
+                case "bool":
+                    if (!(value instanceof Boolean b)) {
+                        throw new NewrError("json: expected bool, got "
+                            + (value == null ? "null"
+                                : value.getClass().getSimpleName()));
+                    }
+                    sb.append(b ? "true" : "false");
+                    return;
+                case "none":
+                    if (value != null) {
+                        throw new NewrError("json: expected null");
+                    }
+                    sb.append("null");
+                    return;
+                default:
+                    throw new NewrError("json: unknown shape " + s);
+            }
+        }
+        if (!(shape instanceof Object[] arr) || arr.length == 0
+                || !(arr[0] instanceof String kind)) {
+            throw new NewrError("json: unknown shape");
+        }
+        switch (kind) {
+            case "?":
+                if (value == null) {
+                    sb.append("null");
+                } else {
+                    _jsonEncodeValue(sb, value, arr[1]);
+                }
+                return;
+            case "list": {
+                if (!(value instanceof List<?> list)) {
+                    throw new NewrError("json: expected list, got "
+                        + (value == null ? "null"
+                            : value.getClass().getSimpleName()));
+                }
+                sb.append('[');
+                for (int i = 0; i < list.size(); i++) {
+                    if (i > 0) {
+                        sb.append(',');
+                    }
+                    _jsonEncodeValue(sb, list.get(i), arr[1]);
+                }
+                sb.append(']');
+                return;
+            }
+            case "dict": {
+                if (!(value instanceof Map<?, ?> map)) {
+                    throw new NewrError("json: expected dict, got "
+                        + (value == null ? "null"
+                            : value.getClass().getSimpleName()));
+                }
+                sb.append('{');
+                boolean first = true;
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    if (!(e.getKey() instanceof String key)) {
+                        throw new NewrError("json: dict keys must "
+                            + "be str");
+                    }
+                    if (!first) {
+                        sb.append(',');
+                    }
+                    first = false;
+                    sb.append(_jsonEscape(key));
+                    sb.append(':');
+                    _jsonEncodeValue(sb, e.getValue(), arr[1]);
+                }
+                sb.append('}');
+                return;
+            }
+            case "struct": {
+                if (value == null) {
+                    throw new NewrError("json: expected object, "
+                        + "got null");
+                }
+                Object[][] fields = (Object[][]) arr[2];
+                sb.append('{');
+                for (int i = 0; i < fields.length; i++) {
+                    if (i > 0) {
+                        sb.append(',');
+                    }
+                    String name = (String) fields[i][0];
+                    String javaName = (String) fields[i][1];
+                    sb.append(_jsonEscape(name));
+                    sb.append(':');
+                    _jsonEncodeValue(sb, _structField(value, javaName),
+                        fields[i][2]);
+                }
+                sb.append('}');
+                return;
+            }
+            default:
+                throw new NewrError("json: unknown shape " + kind);
+        }
+    }
+
+    /** newr `json.encode(value)`: JSON text, compact, in struct
+     * declaration order, UTF-8 output with no \\u escapes for
+     * non-ASCII text. */
+    public static String jsonEncode(Object value, Object shape) {
+        StringBuilder sb = new StringBuilder();
+        _jsonEncodeValue(sb, value, shape);
+        return sb.toString();
+    }
+
+    /** A strict RFC 8259 parser. Parsed values are String,
+     * Boolean, null, Long (integer syntax in int64 range),
+     * BigInteger (integer syntax outside int64 range, so the shape
+     * check can throw instead of wrapping), Double (fraction or
+     * exponent syntax, so a JSON float into an int field always
+     * throws, including integral 1.0), List, or LinkedHashMap
+     * (duplicate keys: last wins). */
+    private static class _JsonParser {
+        private final String text;
+        private int pos;
+
+        _JsonParser(String text) {
+            this.text = text;
+            this.pos = 0;
+        }
+
+        Object parse() {
+            Object value = parseValue();
+            skipWs();
+            if (pos != text.length()) {
+                throw new NewrError("json: trailing data after the "
+                    + "JSON value");
+            }
+            return value;
+        }
+
+        private void skipWs() {
+            while (pos < text.length()) {
+                char c = text.charAt(pos);
+                if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                    pos++;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        private Object parseValue() {
+            skipWs();
+            if (pos >= text.length()) {
+                throw new NewrError("json: unexpected end of JSON");
+            }
+            char c = text.charAt(pos);
+            switch (c) {
+                case '{': return parseObject();
+                case '[': return parseArray();
+                case '"': return parseString();
+                case 't': return parseLiteral("true", Boolean.TRUE);
+                case 'f': return parseLiteral("false", Boolean.FALSE);
+                case 'n': return parseLiteral("null", null);
+                default:
+                    if (c == '-' || (c >= '0' && c <= '9')) {
+                        return parseNumber();
+                    }
+                    throw new NewrError("json: unexpected character "
+                        + "'" + c + "' in JSON");
+            }
+        }
+
+        private Object parseLiteral(String word, Object value) {
+            if (!text.startsWith(word, pos)) {
+                throw new NewrError("json: invalid JSON literal");
+            }
+            pos += word.length();
+            return value;
+        }
+
+        private LinkedHashMap<String, Object> parseObject() {
+            LinkedHashMap<String, Object> map = new LinkedHashMap<>();
+            pos++;
+            skipWs();
+            if (pos < text.length() && text.charAt(pos) == '}') {
+                pos++;
+                return map;
+            }
+            while (true) {
+                skipWs();
+                if (pos >= text.length() || text.charAt(pos) != '"') {
+                    throw new NewrError("json: expected a string key "
+                        + "in an object");
+                }
+                String key = parseString();
+                skipWs();
+                if (pos >= text.length() || text.charAt(pos) != ':') {
+                    throw new NewrError("json: expected ':' in an "
+                        + "object");
+                }
+                pos++;
+                map.put(key, parseValue());
+                skipWs();
+                if (pos >= text.length()) {
+                    throw new NewrError("json: unterminated object");
+                }
+                char c = text.charAt(pos);
+                if (c == ',') {
+                    pos++;
+                    continue;
+                }
+                if (c == '}') {
+                    pos++;
+                    return map;
+                }
+                throw new NewrError("json: expected ',' or '}' in an "
+                    + "object");
+            }
+        }
+
+        private ArrayList<Object> parseArray() {
+            ArrayList<Object> list = new ArrayList<>();
+            pos++;
+            skipWs();
+            if (pos < text.length() && text.charAt(pos) == ']') {
+                pos++;
+                return list;
+            }
+            while (true) {
+                list.add(parseValue());
+                skipWs();
+                if (pos >= text.length()) {
+                    throw new NewrError("json: unterminated array");
+                }
+                char c = text.charAt(pos);
+                if (c == ',') {
+                    pos++;
+                    continue;
+                }
+                if (c == ']') {
+                    pos++;
+                    return list;
+                }
+                throw new NewrError("json: expected ',' or ']' in an "
+                    + "array");
+            }
+        }
+
+        private String parseString() {
+            StringBuilder sb = new StringBuilder();
+            pos++;
+            while (true) {
+                if (pos >= text.length()) {
+                    throw new NewrError("json: unterminated string");
+                }
+                char c = text.charAt(pos);
+                if (c == '"') {
+                    pos++;
+                    return sb.toString();
+                }
+                if (c == '\\') {
+                    pos++;
+                    if (pos >= text.length()) {
+                        throw new NewrError("json: unterminated "
+                            + "escape");
+                    }
+                    char e = text.charAt(pos);
+                    pos++;
+                    switch (e) {
+                        case '"': sb.append('"'); break;
+                        case '\\': sb.append('\\'); break;
+                        case '/': sb.append('/'); break;
+                        case 'b': sb.append('\b'); break;
+                        case 'f': sb.append('\f'); break;
+                        case 'n': sb.append('\n'); break;
+                        case 'r': sb.append('\r'); break;
+                        case 't': sb.append('\t'); break;
+                        case 'u': {
+                            if (pos + 4 > text.length()) {
+                                throw new NewrError("json: bad \\u "
+                                    + "escape");
+                            }
+                            int code;
+                            try {
+                                code = Integer.parseInt(
+                                    text.substring(pos, pos + 4), 16);
+                            } catch (NumberFormatException ex) {
+                                throw new NewrError("json: bad \\u "
+                                    + "escape");
+                            }
+                            pos += 4;
+                            sb.append((char) code);
+                            break;
+                        }
+                        default:
+                            throw new NewrError("json: bad escape "
+                                + "'\\" + e + "'");
+                    }
+                    continue;
+                }
+                if (c < 0x20) {
+                    throw new NewrError("json: unescaped control "
+                        + "character in a string");
+                }
+                sb.append(c);
+                pos++;
+            }
+        }
+
+        private Object parseNumber() {
+            int start = pos;
+            if (pos < text.length() && text.charAt(pos) == '-') {
+                pos++;
+            }
+            if (pos >= text.length()) {
+                throw new NewrError("json: bad number");
+            }
+            if (text.charAt(pos) == '0') {
+                pos++;
+            } else if (text.charAt(pos) >= '1'
+                    && text.charAt(pos) <= '9') {
+                while (pos < text.length()
+                        && text.charAt(pos) >= '0'
+                        && text.charAt(pos) <= '9') {
+                    pos++;
+                }
+            } else {
+                throw new NewrError("json: bad number");
+            }
+            boolean isFloat = false;
+            if (pos < text.length() && text.charAt(pos) == '.') {
+                isFloat = true;
+                pos++;
+                if (pos >= text.length()
+                        || text.charAt(pos) < '0'
+                        || text.charAt(pos) > '9') {
+                    throw new NewrError("json: bad number");
+                }
+                while (pos < text.length()
+                        && text.charAt(pos) >= '0'
+                        && text.charAt(pos) <= '9') {
+                    pos++;
+                }
+            }
+            if (pos < text.length()
+                    && (text.charAt(pos) == 'e'
+                        || text.charAt(pos) == 'E')) {
+                isFloat = true;
+                pos++;
+                if (pos < text.length()
+                        && (text.charAt(pos) == '+'
+                            || text.charAt(pos) == '-')) {
+                    pos++;
+                }
+                if (pos >= text.length()
+                        || text.charAt(pos) < '0'
+                        || text.charAt(pos) > '9') {
+                    throw new NewrError("json: bad number");
+                }
+                while (pos < text.length()
+                        && text.charAt(pos) >= '0'
+                        && text.charAt(pos) <= '9') {
+                    pos++;
+                }
+            }
+            String num = text.substring(start, pos);
+            if (isFloat) {
+                return Double.parseDouble(num);
+            }
+            try {
+                return Long.parseLong(num);
+            } catch (NumberFormatException e) {
+                return new BigInteger(num);
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object _jsonDecodeValue(Object value, Object shape) {
+        if (shape instanceof String s) {
+            switch (s) {
+                case "int":
+                    if (value instanceof Long l) {
+                        return checkInt(l);
+                    }
+                    if (value instanceof BigInteger) {
+                        throw new NewrError("json: integer outside "
+                            + "int64 range");
+                    }
+                    throw new NewrError("json: expected int, got "
+                        + _jsonValueKind(value));
+                case "float":
+                    if (value instanceof Boolean) {
+                        throw new NewrError("json: expected float, "
+                            + "got bool");
+                    }
+                    if (value instanceof Long l) {
+                        return (double) l;
+                    }
+                    if (value instanceof BigInteger bi) {
+                        double d = bi.doubleValue();
+                        if (Double.isInfinite(d)) {
+                            throw new NewrError("json: integer too "
+                                + "large for float");
+                        }
+                        return d;
+                    }
+                    if (value instanceof Double d) {
+                        return d;
+                    }
+                    throw new NewrError("json: expected float, got "
+                        + _jsonValueKind(value));
+                case "str":
+                    if (!(value instanceof String str)) {
+                        throw new NewrError("json: expected str, got "
+                            + _jsonValueKind(value));
+                    }
+                    return str;
+                case "bool":
+                    if (!(value instanceof Boolean b)) {
+                        throw new NewrError("json: expected bool, got "
+                            + _jsonValueKind(value));
+                    }
+                    return b;
+                case "none":
+                    if (value != null) {
+                        throw new NewrError("json: expected null, got "
+                            + _jsonValueKind(value));
+                    }
+                    return null;
+                default:
+                    throw new NewrError("json: unknown shape " + s);
+            }
+        }
+        if (!(shape instanceof Object[] arr) || arr.length == 0
+                || !(arr[0] instanceof String kind)) {
+            throw new NewrError("json: unknown shape");
+        }
+        switch (kind) {
+            case "?":
+                if (value == null) {
+                    return null;
+                }
+                return _jsonDecodeValue(value, arr[1]);
+            case "list": {
+                if (!(value instanceof List<?> list)) {
+                    throw new NewrError("json: expected list, got "
+                        + _jsonValueKind(value));
+                }
+                ArrayList<Object> out = new ArrayList<>();
+                for (Object item : list) {
+                    out.add(_jsonDecodeValue(item, arr[1]));
+                }
+                return out;
+            }
+            case "dict": {
+                if (!(value instanceof Map<?, ?> map)) {
+                    throw new NewrError("json: expected dict, got "
+                        + _jsonValueKind(value));
+                }
+                LinkedHashMap<String, Object> out =
+                    new LinkedHashMap<>();
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    out.put((String) e.getKey(),
+                        _jsonDecodeValue(e.getValue(), arr[1]));
+                }
+                return out;
+            }
+            case "struct": {
+                if (!(value instanceof Map<?, ?> map)) {
+                    throw new NewrError("json: expected object, got "
+                        + _jsonValueKind(value));
+                }
+                Object[][] fields = (Object[][]) arr[2];
+                Object[] vals = new Object[fields.length];
+                for (int i = 0; i < fields.length; i++) {
+                    String name = (String) fields[i][0];
+                    if (!map.containsKey(name)) {
+                        throw new NewrError("json: missing field '"
+                            + name + "'");
+                    }
+                    vals[i] = _jsonDecodeValue(map.get(name),
+                        fields[i][2]);
+                }
+                Function<Object[], Object> factory =
+                    (Function<Object[], Object>) arr[1];
+                return factory.apply(vals);
+            }
+            default:
+                throw new NewrError("json: unknown shape " + kind);
+        }
+    }
+
+    private static String _jsonValueKind(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof Long || value instanceof BigInteger) {
+            return "int";
+        }
+        if (value instanceof Double) {
+            return "float";
+        }
+        if (value instanceof String) {
+            return "str";
+        }
+        if (value instanceof Boolean) {
+            return "bool";
+        }
+        if (value instanceof List) {
+            return "list";
+        }
+        if (value instanceof Map) {
+            return "dict";
+        }
+        return value.getClass().getSimpleName();
+    }
+
+    /** newr `json.decode(text)`: the typed value for ``text`` under
+     * ``shape``. An empty string throws, trailing data after the
+     * JSON value throws, duplicate keys keep the last value, a JSON
+     * fraction into an int field throws, an integer into a float
+     * field is fine, null only into a nullable shape, and an
+     * integer outside int64 throws. */
+    public static Object jsonDecode(String text, Object shape) {
+        if (text == null) {
+            throw new NewrError("json: decode takes a string");
+        }
+        Object parsed = new _JsonParser(text).parse();
+        return _jsonDecodeValue(parsed, shape);
+    }
+
+    private static Object _buildFromShape(Object shape,
+            Map<String, Object> values) {
+        return _jsonDecodeValue(values, shape);
+    }
+
+    // ---------------------------------------------------------------- http
+    // Sync HTTP server plus fetch client (SPEC.md section 12.6),
+    // JDK only: `com.sun.net.httpserver.HttpServer` for serve,
+    // `java.net.http.HttpClient` for fetch. Routes live in a
+    // registry, exact-match only; a request with no route, or a
+    // method mismatch, gets 404 with an empty body (not 405).
+    // The runtime enforces the DEFAULT localhost allowlist only
+    // (localhost, 127.0.0.1); the manifest http_allowlist is a
+    // static checker concern, the CLI does not pass it through.
+
+    private static final LinkedHashSet<String> _HTTP_METHODS =
+        new LinkedHashSet<>(List.of("GET", "POST", "PUT", "PATCH",
+            "DELETE", "HEAD", "OPTIONS"));
+    private static final LinkedHashSet<String> _DEFAULT_HTTP_ALLOWLIST =
+        new LinkedHashSet<>(List.of("localhost", "127.0.0.1"));
+
+    private static class _HttpRoute {
+        final String method;
+        final String path;
+        final Object handler;
+        final Object[] reqShape;
+
+        _HttpRoute(String method, String path, Object handler,
+                Object[] reqShape) {
+            this.method = method;
+            this.path = path;
+            this.handler = handler;
+            this.reqShape = reqShape;
+        }
+    }
+
+    private static final List<_HttpRoute> _HTTP_ROUTES =
+        new ArrayList<>();
+
+    /** newr `http.route(method, path, handler)`: register one
+     * exact-match route. A computed method that is not one of the
+     * uppercase methods, or a computed path without a leading
+     * slash, throws here (literal ones are E2012 from the
+     * checker). */
+    public static Object httpRoute(String method, String path,
+            Object handler, Object[] reqShape) {
+        if (method == null || !_HTTP_METHODS.contains(method)) {
+            throw new NewrError("http: invalid method " + method);
+        }
+        if (path == null || !path.startsWith("/")) {
+            throw new NewrError("http: route path must start with "
+                + "'/', got " + path);
+        }
+        if (!(handler instanceof Fn1)) {
+            throw new NewrError("http: route handler must be a "
+                + "lambda");
+        }
+        if (reqShape == null) {
+            throw new NewrError("http: internal: route without a "
+                + "request shape");
+        }
+        _HTTP_ROUTES.add(new _HttpRoute(method, path, handler,
+            reqShape));
+        return null;
+    }
+
+    private static String _decodeUtf8Strict(byte[] bytes) {
+        CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT);
+        try {
+            return decoder.decode(ByteBuffer.wrap(bytes)).toString();
+        } catch (CharacterCodingException e) {
+            throw new NewrError("http: body is not valid UTF-8");
+        }
+    }
+
+    private static LinkedHashMap<String, String> _parseQuery(
+            String rawQuery) {
+        LinkedHashMap<String, String> query = new LinkedHashMap<>();
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return query;
+        }
+        for (String part : rawQuery.split("&", -1)) {
+            if (part.isEmpty()) {
+                continue;
+            }
+            int eq = part.indexOf('=');
+            String key;
+            String value;
+            if (eq < 0) {
+                key = part;
+                value = "";
+            } else {
+                key = part.substring(0, eq);
+                value = part.substring(eq + 1);
+            }
+            // URLDecoder decodes "+" as space and %XX as the byte
+            // (UTF-8); put keeps the LAST value for a repeated key.
+            query.put(URLDecoder.decode(key, StandardCharsets.UTF_8),
+                URLDecoder.decode(value, StandardCharsets.UTF_8));
+        }
+        return query;
+    }
+
+    private static void _httpSend(HttpExchange ex, int status,
+            Map<String, String> headers, byte[] body) {
+        try {
+            if (headers != null) {
+                for (Map.Entry<String, String> e : headers.entrySet()) {
+                    if (e.getKey().equalsIgnoreCase("content-length")) {
+                        continue;
+                    }
+                    ex.getResponseHeaders().set(e.getKey(), e.getValue());
+                }
+            }
+            boolean head = "HEAD".equals(ex.getRequestMethod());
+            ex.sendResponseHeaders(status, body.length);
+            OutputStream os = ex.getResponseBody();
+            try {
+                if (!head && body.length > 0) {
+                    os.write(body);
+                }
+            } finally {
+                os.close();
+            }
+        } catch (IOException e) {
+            try {
+                ex.close();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void _httpDispatch(HttpExchange ex) {
+        boolean responded = false;
+        try {
+            String rawPath = ex.getRequestURI().getRawPath();
+            if (rawPath == null) {
+                rawPath = ex.getRequestURI().getPath();
+            }
+            LinkedHashMap<String, String> query =
+                _parseQuery(ex.getRequestURI().getRawQuery());
+            byte[] raw = ex.getRequestBody().readAllBytes();
+            String body;
+            try {
+                body = _decodeUtf8Strict(raw);
+            } catch (NewrError e) {
+                _httpSend(ex, 500, null, new byte[0]);
+                responded = true;
+                return;
+            }
+            LinkedHashMap<String, String> headers =
+                new LinkedHashMap<>();
+            for (Map.Entry<String, List<String>> e
+                    : ex.getRequestHeaders().entrySet()) {
+                if (e.getValue() == null || e.getValue().isEmpty()) {
+                    continue;
+                }
+                headers.put(e.getKey(),
+                    e.getValue().get(e.getValue().size() - 1));
+            }
+            _HttpRoute found = null;
+            for (_HttpRoute route : _HTTP_ROUTES) {
+                if (route.method.equals(ex.getRequestMethod())
+                        && route.path.equals(rawPath)) {
+                    found = route;
+                    break;
+                }
+            }
+            if (found == null) {
+                _httpSend(ex, 404, null, new byte[0]);
+                responded = true;
+                return;
+            }
+            LinkedHashMap<String, Object> values =
+                new LinkedHashMap<>();
+            values.put("method", ex.getRequestMethod());
+            values.put("path", rawPath);
+            values.put("headers", headers);
+            values.put("body", body);
+            values.put("query", query);
+            Object req = _buildFromShape(found.reqShape, values);
+            Object resp = ((Fn1<Object, Object>) found.handler)
+                .apply(req);
+            if (resp == null) {
+                throw new NewrError("http: handler returned null");
+            }
+            Object statusObj = _structField(resp, "status");
+            Object headersObj = _structField(resp, "headers");
+            Object bodyObj = _structField(resp, "body");
+            if (!(statusObj instanceof Long status)
+                    || status < 100 || status > 599) {
+                throw new NewrError("http: response status must be "
+                    + "100 to 599, got " + statusObj);
+            }
+            if (!(headersObj instanceof Map)) {
+                throw new NewrError("http: response headers must be "
+                    + "a dict");
+            }
+            if (!(bodyObj instanceof String respBody)) {
+                throw new NewrError("http: response body must be "
+                    + "a str");
+            }
+            _httpSend(ex, status.intValue(),
+                (Map<String, String>) headersObj,
+                respBody.getBytes(StandardCharsets.UTF_8));
+            responded = true;
+        } catch (Exception e) {
+            if (!responded) {
+                try {
+                    _httpSend(ex, 500, null, new byte[0]);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    /** newr `http.serve(port)` / `http.serve(port, host)`: serve
+     * the registered routes forever, until the process is killed.
+     * Prints `listening on <host>:<port>` (the real port when 0)
+     * as its first line, then blocks. */
+    public static Object httpServe(long port) {
+        return httpServe(port, "127.0.0.1");
+    }
+
+    public static Object httpServe(long port, String host) {
+        if (port < 0 || port > 65535) {
+            throw new NewrError("http: port must be 0 to 65535, got "
+                + port);
+        }
+        if (host == null) {
+            throw new NewrError("http: host must be a str");
+        }
+        try {
+            HttpServer server = HttpServer.create(
+                new InetSocketAddress(host, (int) port), 0);
+            server.createContext("/", NewrRt::_httpDispatch);
+            server.setExecutor(Executors.newCachedThreadPool());
+            server.start();
+            int realPort = server.getAddress().getPort();
+            System.out.println("listening on " + host + ":"
+                + realPort);
+            System.out.flush();
+            new CountDownLatch(1).await();
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        } catch (IOException e) {
+            throw asError(e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Object httpFetch(String method, String url,
+            String body, long timeout, Map<String, String> headers,
+            Object[] shape) {
+        if (method == null || !_HTTP_METHODS.contains(method)) {
+            throw new NewrError("http: invalid method " + method);
+        }
+        if (timeout <= 0) {
+            throw new NewrError("http: timeout must be a positive "
+                + "number of seconds, got " + timeout);
+        }
+        if (url == null) {
+            throw new NewrError("http: URL must be a str");
+        }
+        URI uri;
+        try {
+            uri = new URI(url);
+        } catch (URISyntaxException e) {
+            throw new NewrError("http: bad URL " + url + ": "
+                + e.getMessage());
+        }
+        String scheme = uri.getScheme();
+        if (scheme == null
+                || !(scheme.equalsIgnoreCase("http")
+                    || scheme.equalsIgnoreCase("https"))) {
+            throw new NewrError("http: fetch URL must start with "
+                + "http:// or https://, got " + url);
+        }
+        String host = uri.getHost();
+        if (host == null || host.isEmpty()) {
+            throw new NewrError("http: fetch URL has no host: " + url);
+        }
+        if (uri.getUserInfo() != null) {
+            throw new NewrError("http: a URL must not carry userinfo; "
+                + "read the token from env and pass it as a header");
+        }
+        if (!_DEFAULT_HTTP_ALLOWLIST.contains(
+                host.toLowerCase(java.util.Locale.ROOT))) {
+            throw new NewrError("http: fetch host '" + host
+                + "' is not on the allowlist (localhost, 127.0.0.1)");
+        }
+        if (shape == null) {
+            throw new NewrError("http: internal: fetch without a "
+                + "response shape");
+        }
+        LinkedHashMap<String, String> reqHeaders =
+            new LinkedHashMap<>();
+        if (headers != null) {
+            for (Map.Entry<String, String> e : headers.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) {
+                    throw new NewrError("http: headers must be "
+                        + "dict[str, str]");
+                }
+                reqHeaders.put(e.getKey(), e.getValue());
+            }
+        }
+        boolean hasContentType = false;
+        for (String key : reqHeaders.keySet()) {
+            if (key.equalsIgnoreCase("content-type")) {
+                hasContentType = true;
+                break;
+            }
+        }
+        HttpClient client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(timeout))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+            .uri(uri)
+            .timeout(Duration.ofSeconds(timeout));
+        for (Map.Entry<String, String> e : reqHeaders.entrySet()) {
+            builder.header(e.getKey(), e.getValue());
+        }
+        if (body != null) {
+            if (!hasContentType) {
+                builder.header("Content-Type", "application/json");
+            }
+            builder.method(method,
+                HttpRequest.BodyPublishers.ofString(body,
+                    StandardCharsets.UTF_8));
+        } else {
+            builder.method(method, HttpRequest.BodyPublishers.noBody());
+        }
+        HttpResponse<byte[]> resp;
+        try {
+            resp = client.send(builder.build(),
+                HttpResponse.BodyHandlers.ofByteArray());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new NewrError("http: fetch " + method + " " + url
+                + " failed: interrupted");
+        } catch (IOException e) {
+            throw new NewrError("http: fetch " + method + " " + url
+                + " failed: " + e.getMessage());
+        }
+        LinkedHashMap<String, String> respHeaders =
+            new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> e
+                : resp.headers().map().entrySet()) {
+            if (e.getValue() == null || e.getValue().isEmpty()) {
+                continue;
+            }
+            respHeaders.put(e.getKey(),
+                e.getValue().get(e.getValue().size() - 1));
+        }
+        String text = _decodeUtf8Strict(resp.body());
+        LinkedHashMap<String, Object> values = new LinkedHashMap<>();
+        values.put("status", (long) resp.statusCode());
+        values.put("headers", respHeaders);
+        values.put("body", text);
+        return _buildFromShape(shape, values);
+    }
+
+    /** newr `http.get(url[, timeout[, headers]])`: GET, no body,
+     * no Content-Type unless the program sets one. */
+    public static Object httpGet(String url, long timeout,
+            Map<String, String> headers, Object[] shape) {
+        return httpFetch("GET", url, null, timeout, headers, shape);
+    }
+
+    /** newr `http.post(url, body[, timeout[, headers]])`. */
+    public static Object httpPost(String url, String body, long timeout,
+            Map<String, String> headers, Object[] shape) {
+        return httpFetch("POST", url, body, timeout, headers, shape);
+    }
+
+    /** newr `http.request(method, url, body[, timeout[, headers]])`:
+     * the generic fetch primitive. */
+    public static Object httpRequest(String method, String url,
+            String body, long timeout, Map<String, String> headers,
+            Object[] shape) {
+        return httpFetch(method, url, body, timeout, headers, shape);
     }
 }

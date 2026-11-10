@@ -34,6 +34,8 @@ exception to the numbering scheme, not an oversight.
 | `E2009` | i18n violation (`strings`/`t()`) |
 | `E2010` | Not all paths answer (command handler) |
 | `E2011` | db module rule violation |
+| `E2012` | http module rule violation |
+| `E2013` | json module rule violation |
 
 ## Resolver — `E3xxx`
 

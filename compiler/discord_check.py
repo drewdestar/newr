@@ -70,6 +70,7 @@ from .discord_limits import (
 )
 from .errors import Diagnostic, Span
 from .errors import MAX_NESTING_DEPTH
+from .resolver import NAMED_MODULES
 
 # ---------------------------------------------------------------- providers
 
@@ -1029,13 +1030,19 @@ class DiscordChecker:
         if func.name in ("get", "set", "delete", "balance", "credit",
                          "debit", "transfer") and \
                 func.obj.name not in self._store_names and \
-                func.obj.name != "store" and expr.expr_type is None:
+                func.obj.name != "store" and \
+                func.obj.name not in NAMED_MODULES and \
+                expr.expr_type is None:
             # The core checker could not type this call (it is not a
             # known method on the receiver), and the receiver is not a
             # declared store: a store operation on a non-store. (A
             # genuine method call such as `list.get(...)` types fine
             # in the core checker, so its expr_type is set and this
-            # does not fire.)
+            # does not fire.) A call on a named module (http.get, for
+            # example, whose expr_type stays None inside `try` or
+            # when the module checker reports a missing expected
+            # type) is never a store operation, so named modules are
+            # skipped here.
             self._error(expr.span, "E2008",
                         f"`{func.obj.name}` is not a store -- store "
                         "operations (`get` / `set` / `delete` / "

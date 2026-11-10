@@ -1030,11 +1030,13 @@ class _Emitter:
                         "named-module", "file-module"):
                     return self._emit_module_call(func.name, node, binding)
                 if binding is None and (obj.name in MODULES
-                                        or obj.name == "db"):
+                                        or obj.name in ("db", "http",
+                                                       "json")):
                     # A named module used without an import (N-09/N-10).
-                    # `db` is a domain module like `discord`: it is not
-                    # in MODULES, but the same no-import fallback applies
-                    # (SPEC.md section 12.5).
+                    # `db`, `http`, and `json` are domain modules like
+                    # `discord`: they are not in MODULES, but the same
+                    # no-import fallback applies (SPEC.md sections
+                    # 12.5, 12.6, 12.7).
                     fake = _Binding(py=obj.name, kind="named-module",
                                     module=obj.name)
                     return self._emit_module_call(func.name, node, fake)
@@ -1235,6 +1237,10 @@ class _Emitter:
         real = binding.module or binding.py
         if real == "db":
             return self._emit_db_call(name, node)
+        if real == "http":
+            return self._emit_http_call(name, node)
+        if real == "json":
+            return self._emit_json_call(name, node)
         if real == "file":
             if name in ("read", "write", "append"):
                 self._need_rt(f"file_{name}")
@@ -1313,6 +1319,157 @@ class _Emitter:
         with `?` when nullable. Row fields are only int/float/str/
         bool (db_check enforces it), so no deeper shape is needed."""
         return t.name + ("?" if t.nullable else "")
+
+    # ------------------------------------------------------------ http/json
+    # shapes
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring `_db_row_struct`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _struct_py_name(self, name: str) -> str:
+        """The Python reference for a struct type name: the plain
+        mangled name in this file, or `alias.Struct` for a struct
+        from an imported file module (mirroring `_db_row_struct`)."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        if short in self.structs:
+            return self._mangle(short)
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == short:
+                    self._need_file_module(bound)
+                    return f"{bound}.{self._mangle(short)}"
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """Python source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7): a scalar is `"int"` /
+        `"float"` / `"str"` / `"bool"` / `"none"`, a nullable is
+        `["?", inner]`, a list is `["list", elem]`, a dict is
+        `["dict", value]`, a struct is `["struct", <class>,
+        [[field, shape], ...]]` in declaration order, where
+        `<class>` is the emitted struct class itself. The runtime
+        walks the shape for json.encode/decode and for building
+        the http request/response structs."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return f'["?", {self._shape_literal(inner)}]'
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return repr(t.name)
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            return f'["list", {self._shape_literal(t.params[0])}]'
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            return f'["dict", {self._shape_literal(t.params[1])}]'
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        py_name = self._struct_py_name(t.name)
+        fields = ", ".join(
+            f"[{f.name!r}, {self._shape_literal(f.type)}]"
+            for f in decl.fields)
+        return f'["struct", {py_name}, [{fields}]]'
+
+    def _http_handler_request_type(self, handler_arg: A.Expr) -> Type:
+        """The request struct type of a route handler: the parameter
+        type of an inline lambda, or the first parameter of the fn
+        type of a let-bound lambda variable (the checker tracks
+        let-bound lambdas the same way, in http_check._lambdas).
+        A named function is not a handler in M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and t.params:
+                    return t.params[0]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _emit_http_call(self, name: str, node: A.Call) -> str:
+        """`http.*` calls (SPEC.md section 12.6): runtime helpers in
+        newr_rt.py. The checker (http_check) has already validated
+        the call, so the arity here is trusted. Fetch calls carry
+        the response struct shape from `node.expr_type`, set by
+        http_check; route calls carry the request struct shape
+        from the handler lambda's parameter type."""
+        if name == "route":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            req_type = self._http_handler_request_type(node.args[2])
+            shape = self._shape_literal(req_type)
+            self._need_rt("http_route")
+            return (f"http_route({args[0]}, {args[1]}, {args[2]}, "
+                    f"{shape})")
+        if name == "serve":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            self._need_rt("http_serve")
+            return f"http_serve({', '.join(args)})"
+        if name in ("get", "post", "request"):
+            t = node.expr_type
+            if t is None:
+                self._fail(f"internal: http.{name} without a "
+                           "response type")
+            shape = self._shape_literal(t)
+            args = [self.emit_expr(a, 0) for a in node.args]
+            self._need_rt(f"http_{name}")
+            if name == "get":
+                timeout = args[1] if len(args) > 1 else "10"
+                headers = args[2] if len(args) > 2 else "None"
+                return (f"http_get({args[0]}, {timeout}, {headers}, "
+                        f"{shape})")
+            if name == "post":
+                timeout = args[2] if len(args) > 2 else "10"
+                headers = args[3] if len(args) > 3 else "None"
+                return (f"http_post({args[0]}, {args[1]}, {timeout}, "
+                        f"{headers}, {shape})")
+            timeout = args[3] if len(args) > 3 else "10"
+            headers = args[4] if len(args) > 4 else "None"
+            return (f"http_request({args[0]}, {args[1]}, {args[2]}, "
+                    f"{timeout}, {headers}, {shape})")
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, name: str, node: A.Call) -> str:
+        """`json.*` calls (SPEC.md section 12.7): runtime helpers in
+        newr_rt.py. `json.encode` takes its shape from the
+        argument's static type; `json.decode` takes its shape from
+        `node.expr_type`, the expected type set by json_check."""
+        if name == "encode":
+            shape = self._shape_literal(self._type_of(node.args[0]))
+            arg = self.emit_expr(node.args[0], 0)
+            self._need_rt("json_encode")
+            return f"json_encode({arg}, {shape})"
+        if name == "decode":
+            t = node.expr_type
+            if t is None:
+                self._fail("internal: json.decode without an "
+                           "expected type")
+            shape = self._shape_literal(t)
+            arg = self.emit_expr(node.args[0], 0)
+            self._need_rt("json_decode")
+            return f"json_decode({arg}, {shape})"
+        self._fail(f"module `json` has no function `{name}`")
 
     def _emit_enum_call(self, enum_name: str, variant: str,
                         node: A.Call) -> str:

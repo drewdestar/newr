@@ -237,6 +237,21 @@ class TestStore(unittest.TestCase):
                '    print v\n')
         self.assertIn("E2008", codes(full(src)))
 
+    def test_named_module_get_inside_try_is_not_E2008(self):
+        # M8b: `http.get` inside `try` leaves expr_type unset (the
+        # core TryExpr synth does not pass the expected type down),
+        # but a call on a named module is never a store operation.
+        # The store rule must not misfire on it.
+        src = ('struct HttpResponse:\n'
+               '  status: int\n'
+               '  headers: dict[str, str]\n'
+               '  body: str\n'
+               '\nfn main():\n'
+               '  let tried: Result[HttpResponse, error] = '
+               'try http.get("http://127.0.0.1:9/todos")\n'
+               '  print(tried.is_ok())\n')
+        self.assertNotIn("E2008", codes(full(src)))
+
     def test_economy_balance_without_balances_table_is_E2008(self):
         src = (BOT + 'store economy:\n  table items (id: str, price: int)\n'
                'command bal:\n  description: "b"\n  do:\n'

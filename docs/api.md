@@ -254,6 +254,56 @@ The last AUTOINCREMENT id on this handle.
 
 Closes the handle. Using a closed handle throws.
 
+## http module (SPEC.md section 12.6)
+
+HTTP server plus fetch client, sync. Routes are exact-match only. The request and response are user-declared structs, validated by field shape. Fetch returns a typed HttpResponse struct, resolved from the expected type at the call site. Every http call throws on failure. Fetches are allowlisted (newr.json `http_allowlist`, default localhost only).
+
+### `http.route`
+
+`route(method: str, path: str, handler: fn) -> none`
+
+Registers one exact-match route. The method must be one of GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS (uppercase); the path must start with "/". The handler is a lambda taking one request struct (method, path, headers, body, query) and returning a response struct (status, headers, body). Two routes with the same method and path are an error. A request with no route returns 404 with an empty body.
+
+### `http.serve`
+
+`serve(port: int) -> none; serve(port: int, host: str) -> none`
+
+Serves the registered routes forever, until the process is killed. Binds 127.0.0.1 by default; an explicit host binds that host instead ("0.0.0.0" listens on all interfaces). Port 0 means the OS picks an ephemeral port, and the server prints `listening on <host>:<port>` with the real port as its first line. Put `serve` last: it never returns.
+
+### `http.get`
+
+`get(url: str) -> HttpResponse; get(url: str, timeout: int) -> HttpResponse; get(url: str, timeout: int, headers: dict[str, str]) -> HttpResponse`
+
+Fetches a URL with GET and returns the response as a typed struct (status, headers, body), resolved from the expected type at the call site, for example `let resp: HttpResponse = http.get(url)`. The timeout is whole seconds (default 10) and covers the whole request. The URL host must be on the allowlist (newr.json `http_allowlist`, default localhost only). Throws on failure; use try/catch to handle it.
+
+### `http.post`
+
+`post(url: str, body: str) -> HttpResponse; post(url: str, body: str, timeout: int) -> HttpResponse; post(url: str, body: str, timeout: int, headers: dict[str, str]) -> HttpResponse`
+
+Fetches a URL with POST, sending the body as given, and returns the response as a typed struct (status, headers, body), resolved from the expected type at the call site. Sets `Content-Type: application/json` unless the program sets one. The timeout is whole seconds (default 10). The URL host must be on the allowlist. Throws on failure.
+
+### `http.request`
+
+`request(method: str, url: str, body: str) -> HttpResponse; request(method: str, url: str, body: str, timeout: int) -> HttpResponse; request(method: str, url: str, body: str, timeout: int, headers: dict[str, str]) -> HttpResponse`
+
+The generic fetch primitive: any method (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS), any URL, a body sent as given. Returns the response as a typed struct (status, headers, body), resolved from the expected type at the call site. Sets `Content-Type: application/json` when a body is sent and the program sets none. The timeout is whole seconds (default 10). The URL host must be on the allowlist. Throws on failure.
+
+## json module (SPEC.md section 12.7)
+
+Typed JSON. `encode` takes any encodable value (struct, list, dict, scalar, or nullable of those); `decode` takes its type from the call site. Enums are not encodable in M8b. Floats encode as their shortest round-trip decimal, with ".0" for integral floats.
+
+### `json.encode`
+
+`encode(value) -> str`
+
+Encodes a value as JSON text. The value may be a struct, a list, a dict, a str, an int, a float, a bool, or a nullable of any of those (none encodes as `null`), nested recursively. Structs encode as objects, field names as keys, in declaration order; nullable fields that are none encode as `null` (they are not omitted). Enums are NOT encodable in M8b. Floats encode as their shortest round-trip decimal, with ".0" for integral floats (1.0 encodes as "1.0"). Ints encode as exact decimal, including int64.
+
+### `json.decode`
+
+`decode(text: str) -> T`
+
+Decodes JSON text into the expected type at the call site, for example `let todos: list[Todo] = json.decode(text)`. The expected type may be a struct, a list, a dict, a str, an int, a float, a bool, or a nullable of any of those. A JSON `null` decodes to `none` only for a nullable expected type. Struct fields match by name; a missing field throws, an extra field is ignored. A JSON number with a fraction into an `int` field throws; a JSON integer into a `float` field is fine. Trailing data after the JSON value throws, and an empty string throws. Duplicate keys: last wins.
+
 ## Methods (SPEC.md section 12.4)
 
 Methods on values. The receiver type is shown first.

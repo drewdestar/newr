@@ -1,0 +1,17 @@
+# expect: E2012
+# A lowercase route method is E2012 (methods are uppercase).
+struct HttpRequest:
+  method: str
+  path: str
+  headers: dict[str, str]
+  body: str
+  query: dict[str, str]
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let handler = fn(req: HttpRequest) -> HttpResponse: HttpResponse(status: 200, headers: {}, body: "")
+http.route("get", "/todos", handler)
+http.serve(8080)

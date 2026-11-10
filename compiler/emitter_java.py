@@ -1140,7 +1140,7 @@ class _JavaEmitter:
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
-                                      or obj.name == "db"):
+                                      or obj.name in ("db", "http", "json")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference. `db` is a domain module
@@ -3104,6 +3104,10 @@ class _JavaEmitter:
         args = [self.emit_expr(a, 0) for a in node.args]
         if real == "db":
             return self._emit_db_call(node, args)
+        if real == "http":
+            return self._emit_http_call(node, args)
+        if real == "json":
+            return self._emit_json_call(node, args)
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
 
@@ -3251,6 +3255,169 @@ class _JavaEmitter:
         with `?` when nullable. Row fields are only int/float/str/
         bool (db_check enforces it), so no deeper shape is needed."""
         return t.name + ("?" if t.nullable else "")
+
+    # ------------------------------------------------------------ http/json
+    # shapes
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring `_db_row_struct`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """Java source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7), mirroring the Python
+        `_shape_literal`: a scalar is the String `"int"` /
+        `"float"` / `"str"` / `"bool"` / `"none"`, a nullable is
+        `new Object[]{"?", inner}`, a list is
+        `new Object[]{"list", elem}`, a dict is
+        `new Object[]{"dict", value}`, a struct is
+        `new Object[]{"struct", factory, fields}` where factory is
+        a Function<Object[], Object> building the struct from its
+        field values in declaration order (boxed casts, so a
+        nullable field stays boxed and a primitive field unboxes),
+        and fields is `new Object[][]` of
+        `{newrName, javaFieldName, shape}` in declaration order.
+        The runtime walks the shape for json.encode/decode and for
+        building the http request/response structs."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return (f"new Object[]{{\"?\", "
+                    f"{self._shape_literal(inner)}}}")
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return _java_str(t.name)
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            return (f"new Object[]{{\"list\", "
+                    f"{self._shape_literal(t.params[0])}}}")
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            return (f"new Object[]{{\"dict\", "
+                    f"{self._shape_literal(t.params[1])}}}")
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        java_name = self._struct_java_name(t.name)
+        if decl.fields:
+            casts = ", ".join(
+                f"({self._java_boxed_type(f.type)}) vals[{i}]"
+                for i, f in enumerate(decl.fields))
+            factory = ("((java.util.function.Function<Object[], "
+                       "Object>) ((Object[] vals) -> new "
+                       f"{java_name}({casts})))")
+        else:
+            factory = ("((java.util.function.Function<Object[], "
+                       "Object>) ((Object[] vals) -> new "
+                       f"{java_name}()))")
+        fields = ", ".join(
+            f"new Object[]{{{_java_str(f.name)}, "
+            f"{_java_str(self._mangle(f.name))}, "
+            f"{self._shape_literal(f.type)}}}"
+            for f in decl.fields)
+        return (f"new Object[]{{\"struct\", {factory}, "
+                f"new Object[][]{{{fields}}}}}")
+
+    def _http_handler_request_type(self, handler_arg: A.Expr) -> Type:
+        """The request struct type of a route handler: the parameter
+        type of an inline lambda, or the first parameter of the fn
+        type of a let-bound lambda variable (the checker tracks
+        let-bound lambdas the same way, in http_check._lambdas).
+        A named function is not a handler in M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and t.params:
+                    return t.params[0]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _emit_http_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`http.*` calls (SPEC.md section 12.6): runtime helpers in
+        NewrRt.java. The checker (http_check) has already validated
+        the call, so the arity here is trusted. Fetch calls carry
+        the response struct shape from `node.expr_type`, set by
+        http_check; route calls carry the request struct shape
+        from the handler lambda's parameter type."""
+        name = node.func.name
+        if name == "route":
+            req_type = self._http_handler_request_type(node.args[2])
+            shape = self._shape_literal(req_type)
+            self._need_rt("httpRoute")
+            return (f"NewrRt.httpRoute({args[0]}, {args[1]}, "
+                    f"{args[2]}, {shape})", _PREC["primary"])
+        if name == "serve":
+            self._need_rt("httpServe")
+            return (f"NewrRt.httpServe({', '.join(args)})",
+                    _PREC["primary"])
+        if name in ("get", "post", "request"):
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            cast = self._java_boxed_type(t)
+            if name == "get":
+                self._need_rt("httpGet")
+                timeout = args[1] if len(args) > 1 else "10"
+                headers = args[2] if len(args) > 2 else "null"
+                return (f"({cast}) NewrRt.httpGet({args[0]}, "
+                        f"{timeout}, {headers}, {shape})",
+                        _PREC["primary"])
+            if name == "post":
+                self._need_rt("httpPost")
+                timeout = args[2] if len(args) > 2 else "10"
+                headers = args[3] if len(args) > 3 else "null"
+                return (f"({cast}) NewrRt.httpPost({args[0]}, "
+                        f"{args[1]}, {timeout}, {headers}, {shape})",
+                        _PREC["primary"])
+            self._need_rt("httpRequest")
+            timeout = args[3] if len(args) > 3 else "10"
+            headers = args[4] if len(args) > 4 else "null"
+            return (f"({cast}) NewrRt.httpRequest({args[0]}, "
+                    f"{args[1]}, {args[2]}, {timeout}, {headers}, "
+                    f"{shape})", _PREC["primary"])
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`json.*` calls (SPEC.md section 12.7): runtime helpers in
+        NewrRt.java. `json.encode` takes its shape from the
+        argument's static type; `json.decode` takes its shape from
+        `node.expr_type`, the expected type set by json_check."""
+        name = node.func.name
+        if name == "encode":
+            shape = self._shape_literal(self._type_of(node.args[0]))
+            self._need_rt("jsonEncode")
+            return (f"NewrRt.jsonEncode({args[0]}, {shape})",
+                    _PREC["primary"])
+        if name == "decode":
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            cast = self._java_boxed_type(t)
+            self._need_rt("jsonDecode")
+            return (f"({cast}) NewrRt.jsonDecode({args[0]}, {shape})",
+                    _PREC["primary"])
+        self._fail(f"module `json` has no function `{name}`")
 
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:

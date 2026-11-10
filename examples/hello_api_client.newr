@@ -1,0 +1,26 @@
+/// hello_api_client.newr, a tiny JSON API client (M8b example).
+/// Fetches the todo list from hello_api_server.newr (run that
+/// first, it listens on port 8080), then posts a new todo and
+/// prints the echo.
+/// Build it with: newr build examples/hello_api_client.newr
+struct Todo:
+  id: int
+  title: str
+  done: bool
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let resp: HttpResponse = http.get("http://127.0.0.1:8080/todos")
+let todos: list[Todo] = json.decode(resp.body)
+print "todos:"
+for todo in todos:
+  print todo.title
+let fresh = Todo(id: 3, title: "baca buku", done: false)
+let created: HttpResponse = http.post("http://127.0.0.1:8080/todos", json.encode(fresh))
+print created.status
+let echoed: Todo = json.decode(created.body)
+print "created:"
+print echoed.title

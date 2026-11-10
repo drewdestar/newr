@@ -91,7 +91,9 @@ from .checker import check_program
 from .db_check import check_db
 from .discord_check import check_discord, discord_providers
 from .errors import Diagnostic, NewrError, Span
-from .init import VALID_TARGETS
+from .http_check import check_http
+from .init import VALID_TARGETS, ManifestError, http_allowlist_for
+from .json_check import check_json
 from .resolver import resolve_source
 
 # The test runner's own markers, printed by the synthesized harness.
@@ -312,16 +314,19 @@ def _resolve_program(path: Path) -> tuple[A.Program, list[Diagnostic],
     return resolved.program, list(resolved.diagnostics), source
 
 
-def _check_full(program: A.Program) -> list[Diagnostic]:
-    """The full check of a program (core + discord), like
-    `newr build`. Runs after the harness is synthesized, so the
-    checker's inferred types cover the harness nodes too: the
+def _check_full(program: A.Program,
+                allowlist=None) -> list[Diagnostic]:
+    """The full check of a program (core + discord + db + http +
+    json), like `newr build`. Runs after the harness is synthesized,
+    so the checker's inferred types cover the harness nodes too: the
     emitters read those types, and a harness node with no type
     cannot be emitted."""
     providers = discord_providers(program)
     core = check_program(program, providers=providers)
-    return list(core.diagnostics) + check_discord(program) \
-        + check_db(program)
+    return (list(core.diagnostics) + check_discord(program)
+            + check_db(program)
+            + check_http(program, allowlist=allowlist)
+            + check_json(program))
 
 
 def _diag_text(diag: Diagnostic, source: str) -> str:
@@ -607,7 +612,15 @@ def run_test_file(path: Path, target: str, *,
         # checker fills in the harness nodes' types (the emitters
         # need them) and any harness mistake is a build error.
         synthesize_harness(program, tests)
-    diagnostics = _check_full(program)
+    # M8b: the http allowlist comes from the manifest; a malformed
+    # manifest is a file error naming the file, never a silent
+    # fallback (fail closed, like `newr check` / `newr build`).
+    try:
+        allowlist = http_allowlist_for(path)
+    except ManifestError as exc:
+        result.error = str(exc)
+        return result
+    diagnostics = _check_full(program, allowlist=allowlist)
     errors = [d for d in diagnostics if d.is_error()]
     if errors:
         result.error = "\n".join(

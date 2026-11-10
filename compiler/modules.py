@@ -96,7 +96,8 @@ BUILTINS: dict[str, dict] = {
 # bare ``log <expr>`` is a statement (a Log node) and never reaches the
 # resolver as a name.
 RESERVED_BUILTIN_NAMES = set(BUILTINS) | {
-    "math", "time", "random", "file", "env", "t", "discord", "db", "log",
+    "math", "time", "random", "file", "env", "t", "discord", "db", "http",
+    "json", "log",
 }
 
 # ---------------------------------------------------------------- core modules

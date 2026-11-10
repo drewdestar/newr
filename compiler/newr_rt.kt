@@ -24,11 +24,21 @@
 // `NewrRt.add(a, b)`; error classes are `NewrRt.NewrError` and
 // friends.
 
+import com.sun.net.httpserver.HttpExchange
+import com.sun.net.httpserver.HttpServer
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
 import java.math.BigDecimal
 import java.math.BigInteger
+import java.net.InetSocketAddress
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.ByteBuffer
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -38,9 +48,12 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.PreparedStatement
 import java.sql.SQLException
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.ThreadLocalRandom
 import java.util.regex.Pattern
 
@@ -1658,5 +1671,1031 @@ object NewrRt {
         } catch (e: SQLException) {
             throw asError(e)
         }
+    }
+
+    // -- json / http (SPEC.md sections 12.6, 12.7, M8b) -----------
+    // Typed JSON over a shape descriptor built by the emitter: a
+    // scalar is "int" / "float" / "str" / "bool" / "none", a
+    // nullable is arrayOf("?", inner), a list is arrayOf("list",
+    // elem), a dict is arrayOf("dict", value), a struct is
+    // arrayOf("struct", factory, arrayOf(arrayOf(field, shape),
+    // ...)) in declaration order, where factory builds the struct
+    // from its field values in order. The JSON parser and
+    // serializer are hand-written (strict RFC 8259): the JDK has
+    // no JSON library, and the parser must tell a JSON float from
+    // a JSON int by syntax (1.0 into an int field throws) and keep
+    // big ints exact (Long is 64-bit, so 9007199254740993
+    // round-trips). A JSON integer outside int64 parses as a
+    // BigInteger and throws only when a shape actually consumes
+    // it as an int or a float, so an extra field holding one is
+    // still ignored, like on the Python target.
+
+    private class JsonState(val text: String, var pos: Int = 0)
+
+    private fun _jsonSkipWs(st: JsonState) {
+        while (st.pos < st.text.length) {
+            val c = st.text[st.pos]
+            if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                st.pos++
+            } else {
+                break
+            }
+        }
+    }
+
+    private fun _jsonParseHex4(st: JsonState): Int {
+        if (st.pos + 4 > st.text.length) {
+            throw NewrError("json: invalid JSON: bad unicode escape")
+        }
+        var v = 0
+        for (i in 0 until 4) {
+            val d = st.text[st.pos++].digitToIntOrNull(16)
+                ?: throw NewrError("json: invalid JSON: bad unicode escape")
+            v = v * 16 + d
+        }
+        return v
+    }
+
+    private fun _jsonParseString(st: JsonState): String {
+        // st.text[st.pos] is the opening quote.
+        st.pos++
+        val sb = StringBuilder()
+        while (true) {
+            if (st.pos >= st.text.length) {
+                throw NewrError("json: invalid JSON: unterminated string")
+            }
+            val c = st.text[st.pos]
+            st.pos++
+            when (c) {
+                '"' -> return sb.toString()
+                '\\' -> {
+                    if (st.pos >= st.text.length) {
+                        throw NewrError(
+                            "json: invalid JSON: unterminated escape")
+                    }
+                    val e = st.text[st.pos]
+                    st.pos++
+                    when (e) {
+                        '"' -> sb.append('"')
+                        '\\' -> sb.append('\\')
+                        '/' -> sb.append('/')
+                        'b' -> sb.append('\b')
+                        'f' -> sb.append('\u000C')
+                        'n' -> sb.append('\n')
+                        'r' -> sb.append('\r')
+                        't' -> sb.append('\t')
+                        'u' -> {
+                            val cp = _jsonParseHex4(st)
+                            if (cp in 0xD800..0xDBFF) {
+                                // A high surrogate followed by a low
+                                // surrogate combines into one code
+                                // point; a lone high surrogate stays
+                                // as-is.
+                                if (st.pos + 1 < st.text.length
+                                    && st.text[st.pos] == '\\'
+                                    && st.text[st.pos + 1] == 'u') {
+                                    val save = st.pos
+                                    st.pos += 2
+                                    val lo = _jsonParseHex4(st)
+                                    if (lo in 0xDC00..0xDFFF) {
+                                        sb.append(String(Character.toChars(
+                                            Character.toCodePoint(
+                                                cp.toChar(), lo.toChar()))))
+                                    } else {
+                                        st.pos = save
+                                        sb.append(cp.toChar())
+                                    }
+                                } else {
+                                    sb.append(cp.toChar())
+                                }
+                            } else {
+                                sb.append(cp.toChar())
+                            }
+                        }
+                        else -> throw NewrError(
+                            "json: invalid JSON: bad escape \\" + e)
+                    }
+                }
+                else -> {
+                    if (c.code < 0x20) {
+                        throw NewrError(
+                            "json: invalid JSON: control character "
+                            + "in string")
+                    }
+                    sb.append(c)
+                }
+            }
+        }
+    }
+
+    private fun _jsonParseNumber(st: JsonState): Any? {
+        val start = st.pos
+        if (st.pos < st.text.length && st.text[st.pos] == '-') {
+            st.pos++
+        }
+        if (st.pos >= st.text.length) {
+            throw NewrError("json: invalid JSON: bad number")
+        }
+        if (st.text[st.pos] == '0') {
+            st.pos++
+        } else if (st.text[st.pos] in '1'..'9') {
+            while (st.pos < st.text.length
+                && st.text[st.pos] in '0'..'9') {
+                st.pos++
+            }
+        } else {
+            throw NewrError("json: invalid JSON: bad number")
+        }
+        var isFloat = false
+        if (st.pos < st.text.length && st.text[st.pos] == '.') {
+            isFloat = true
+            st.pos++
+            if (st.pos >= st.text.length
+                || st.text[st.pos] !in '0'..'9') {
+                throw NewrError("json: invalid JSON: bad number")
+            }
+            while (st.pos < st.text.length
+                && st.text[st.pos] in '0'..'9') {
+                st.pos++
+            }
+        }
+        if (st.pos < st.text.length
+            && (st.text[st.pos] == 'e' || st.text[st.pos] == 'E')) {
+            isFloat = true
+            st.pos++
+            if (st.pos < st.text.length
+                && (st.text[st.pos] == '+' || st.text[st.pos] == '-')) {
+                st.pos++
+            }
+            if (st.pos >= st.text.length
+                || st.text[st.pos] !in '0'..'9') {
+                throw NewrError("json: invalid JSON: bad number")
+            }
+            while (st.pos < st.text.length
+                && st.text[st.pos] in '0'..'9') {
+                st.pos++
+            }
+        }
+        val raw = st.text.substring(start, st.pos)
+        if (!isFloat) {
+            val asLong = raw.toLongOrNull()
+            if (asLong != null) {
+                return asLong
+            }
+            return BigInteger(raw)
+        }
+        return java.lang.Double.parseDouble(raw)
+    }
+
+    private fun _jsonParseLiteral(st: JsonState, word: String,
+                                  value: Any?): Any? {
+        if (!st.text.startsWith(word, st.pos)) {
+            throw NewrError("json: invalid JSON: bad literal")
+        }
+        st.pos += word.length
+        return value
+    }
+
+    private fun _jsonParseObject(st: JsonState): LinkedHashMap<String, Any?> {
+        st.pos++ // '{'
+        val out = LinkedHashMap<String, Any?>()
+        _jsonSkipWs(st)
+        if (st.pos < st.text.length && st.text[st.pos] == '}') {
+            st.pos++
+            return out
+        }
+        while (true) {
+            _jsonSkipWs(st)
+            if (st.pos >= st.text.length || st.text[st.pos] != '"') {
+                throw NewrError(
+                    "json: invalid JSON: object key must be a string")
+            }
+            val key = _jsonParseString(st)
+            _jsonSkipWs(st)
+            if (st.pos >= st.text.length || st.text[st.pos] != ':') {
+                throw NewrError(
+                    "json: invalid JSON: expected ':' in object")
+            }
+            st.pos++
+            _jsonSkipWs(st)
+            out[key] = _jsonParseValue(st)
+            _jsonSkipWs(st)
+            if (st.pos >= st.text.length) {
+                throw NewrError("json: invalid JSON: unterminated object")
+            }
+            val c = st.text[st.pos]
+            st.pos++
+            if (c == '}') {
+                return out
+            }
+            if (c != ',') {
+                throw NewrError(
+                    "json: invalid JSON: expected ',' in object")
+            }
+        }
+    }
+
+    private fun _jsonParseArray(st: JsonState): ArrayList<Any?> {
+        st.pos++ // '['
+        val out = ArrayList<Any?>()
+        _jsonSkipWs(st)
+        if (st.pos < st.text.length && st.text[st.pos] == ']') {
+            st.pos++
+            return out
+        }
+        while (true) {
+            _jsonSkipWs(st)
+            out.add(_jsonParseValue(st))
+            _jsonSkipWs(st)
+            if (st.pos >= st.text.length) {
+                throw NewrError("json: invalid JSON: unterminated array")
+            }
+            val c = st.text[st.pos]
+            st.pos++
+            if (c == ']') {
+                return out
+            }
+            if (c != ',') {
+                throw NewrError(
+                    "json: invalid JSON: expected ',' in array")
+            }
+        }
+    }
+
+    private fun _jsonParseValue(st: JsonState): Any? {
+        if (st.pos >= st.text.length) {
+            throw NewrError("json: invalid JSON: unexpected end of input")
+        }
+        return when (val c = st.text[st.pos]) {
+            '{' -> _jsonParseObject(st)
+            '[' -> _jsonParseArray(st)
+            '"' -> _jsonParseString(st)
+            't' -> _jsonParseLiteral(st, "true", true)
+            'f' -> _jsonParseLiteral(st, "false", false)
+            'n' -> _jsonParseLiteral(st, "null", null)
+            '-', in '0'..'9' -> _jsonParseNumber(st)
+            else -> throw NewrError(
+                "json: invalid JSON: unexpected character "
+                + jsonString(c.toString()))
+        }
+    }
+
+    private fun _jsonParse(text: String): Any? {
+        val st = JsonState(text)
+        _jsonSkipWs(st)
+        val v = _jsonParseValue(st)
+        _jsonSkipWs(st)
+        if (st.pos != text.length) {
+            throw NewrError("json: trailing data after JSON value")
+        }
+        return v
+    }
+
+    private fun _jsonWriteString(sb: StringBuilder, s: String) {
+        sb.append('"')
+        for (c in s) {
+            when (c) {
+                '"' -> sb.append("\\\"")
+                '\\' -> sb.append("\\\\")
+                '\n' -> sb.append("\\n")
+                '\r' -> sb.append("\\r")
+                '\t' -> sb.append("\\t")
+                '\b' -> sb.append("\\b")
+                '\u000C' -> sb.append("\\f")
+                else -> {
+                    if (c.code < 0x20) {
+                        sb.append("\\u"
+                            + c.code.toString(16).padStart(4, '0'))
+                    } else {
+                        sb.append(c)
+                    }
+                }
+            }
+        }
+        sb.append('"')
+    }
+
+    private fun _jsonWrite(sb: StringBuilder, v: Any?) {
+        when (v) {
+            null -> sb.append("null")
+            is Boolean -> sb.append(if (v) "true" else "false")
+            is Long -> sb.append(v.toString())
+            is Int -> sb.append(v.toString())
+            is BigInteger -> sb.append(v.toString())
+            is Double -> {
+                if (!v.isFinite()) {
+                    throw NewrError(
+                        "json: cannot encode a non-finite float")
+                }
+                sb.append(floatStr(v))
+            }
+            is String -> _jsonWriteString(sb, v)
+            is List<*> -> {
+                sb.append('[')
+                for (i in v.indices) {
+                    if (i > 0) {
+                        sb.append(',')
+                    }
+                    _jsonWrite(sb, v[i])
+                }
+                sb.append(']')
+            }
+            is Map<*, *> -> {
+                sb.append('{')
+                var first = true
+                for ((k, item) in v.entries) {
+                    if (!first) {
+                        sb.append(',')
+                    }
+                    first = false
+                    _jsonWriteString(sb, k as String)
+                    sb.append(':')
+                    _jsonWrite(sb, item)
+                }
+                sb.append('}')
+            }
+            else -> throw NewrError(
+                "json: cannot encode " + typeName(v))
+        }
+    }
+
+    /** One struct field, by its newr name. A field whose name is a
+     * Kotlin keyword is emitted with a trailing underscore, so fall
+     * back to that spelling when the plain name is missing; the
+     * getter is the last resort. Used for json.encode and for
+     * reading a handler's response struct. */
+    private fun _structField(value: Any?, name: String): Any? {
+        if (value == null) {
+            throw NewrError("json: expected a struct, got none")
+        }
+        val cls = value.javaClass
+        for (fname in arrayOf(name, name + "_")) {
+            try {
+                val field = cls.getDeclaredField(fname)
+                field.isAccessible = true
+                return field.get(value)
+            } catch (e: NoSuchFieldException) {
+                // Try the next spelling.
+            }
+        }
+        val getter = "get" + name.replaceFirstChar { it.uppercaseChar() }
+        try {
+            return cls.getMethod(getter).invoke(value)
+        } catch (e: Exception) {
+            throw NewrError("json: struct has no field " + jsonString(name))
+        }
+    }
+
+    private fun _jsonKindName(value: Any?): String {
+        if (value == null) {
+            return "null"
+        }
+        if (value is Boolean) {
+            return "bool"
+        }
+        if (value is Long || value is Int || value is BigInteger) {
+            return "int"
+        }
+        if (value is Double) {
+            return "float"
+        }
+        if (value is String) {
+            return "str"
+        }
+        if (value is List<*>) {
+            return "list"
+        }
+        if (value is Map<*, *>) {
+            return "object"
+        }
+        return typeName(value)
+    }
+
+    private fun _jsonEncodeValue(value: Any?, shape: Any?): Any? {
+        if (shape is String) {
+            when (shape) {
+                "int" -> {
+                    when (value) {
+                        is Boolean -> throw NewrError(
+                            "json: expected int, got bool")
+                        is Long -> return checkInt(value)
+                        is Int -> return value.toLong()
+                        is BigInteger -> return checkInt(value)
+                        else -> throw NewrError(
+                            "json: expected int, got "
+                            + _jsonKindName(value))
+                    }
+                }
+                "float" -> {
+                    when (value) {
+                        is Boolean -> throw NewrError(
+                            "json: expected float, got bool")
+                        is Double -> return value
+                        is Long -> return value.toDouble()
+                        is Int -> return value.toDouble()
+                        is BigInteger -> return toFloat(value)
+                        else -> throw NewrError(
+                            "json: expected float, got "
+                            + _jsonKindName(value))
+                    }
+                }
+                "str" -> {
+                    if (value !is String) {
+                        throw NewrError("json: expected str, got "
+                            + _jsonKindName(value))
+                    }
+                    return value
+                }
+                "bool" -> {
+                    if (value !is Boolean) {
+                        throw NewrError("json: expected bool, got "
+                            + _jsonKindName(value))
+                    }
+                    return value
+                }
+                "none" -> {
+                    if (value != null) {
+                        throw NewrError("json: expected null")
+                    }
+                    return null
+                }
+                else -> throw NewrError("json: unknown shape " + shape)
+            }
+        }
+        val arr = shape as? Array<*>
+            ?: throw NewrError("json: unknown shape " + shape)
+        when (arr[0] as? String) {
+            "?" -> {
+                if (value == null) {
+                    return null
+                }
+                return _jsonEncodeValue(value, arr[1])
+            }
+            "list" -> {
+                if (value !is List<*>) {
+                    throw NewrError("json: expected list, got "
+                        + _jsonKindName(value))
+                }
+                val out = ArrayList<Any?>()
+                for (e in value) {
+                    out.add(_jsonEncodeValue(e, arr[1]))
+                }
+                return out
+            }
+            "dict" -> {
+                if (value !is Map<*, *>) {
+                    throw NewrError("json: expected dict, got "
+                        + _jsonKindName(value))
+                }
+                val out = LinkedHashMap<String, Any?>()
+                for ((k, item) in value.entries) {
+                    if (k !is String) {
+                        throw NewrError("json: dict keys must be str")
+                    }
+                    out[k] = _jsonEncodeValue(item, arr[1])
+                }
+                return out
+            }
+            "struct" -> {
+                val fields = arr[2] as? Array<*>
+                    ?: throw NewrError("json: unknown shape " + shape)
+                val out = LinkedHashMap<String, Any?>()
+                for (f in fields) {
+                    val fe = f as Array<*>
+                    val fname = fe[0] as String
+                    out[fname] = _jsonEncodeValue(
+                        _structField(value, fname), fe[1])
+                }
+                return out
+            }
+            else -> throw NewrError("json: unknown shape " + shape)
+        }
+    }
+
+    private fun _jsonDecodeValue(value: Any?, shape: Any?): Any? {
+        if (shape is String) {
+            when (shape) {
+                "int" -> {
+                    if (value is Long) {
+                        return checkInt(value)
+                    }
+                    throw NewrError("json: expected int, got "
+                        + _jsonKindName(value))
+                }
+                "float" -> {
+                    when (value) {
+                        is Boolean -> throw NewrError(
+                            "json: expected float, got bool")
+                        is Long -> return value.toDouble()
+                        is Int -> return value.toDouble()
+                        is Double -> return value
+                        is BigInteger -> {
+                            val d = value.toDouble()
+                            if (!d.isFinite()) {
+                                throw NewrError(
+                                    "json: integer too large for float")
+                            }
+                            return d
+                        }
+                        else -> throw NewrError(
+                            "json: expected float, got "
+                            + _jsonKindName(value))
+                    }
+                }
+                "str" -> {
+                    if (value !is String) {
+                        throw NewrError("json: expected str, got "
+                            + _jsonKindName(value))
+                    }
+                    return value
+                }
+                "bool" -> {
+                    if (value !is Boolean) {
+                        throw NewrError("json: expected bool, got "
+                            + _jsonKindName(value))
+                    }
+                    return value
+                }
+                "none" -> {
+                    if (value != null) {
+                        throw NewrError("json: expected null")
+                    }
+                    return null
+                }
+                else -> throw NewrError("json: unknown shape " + shape)
+            }
+        }
+        val arr = shape as? Array<*>
+            ?: throw NewrError("json: unknown shape " + shape)
+        when (arr[0] as? String) {
+            "?" -> {
+                if (value == null) {
+                    return null
+                }
+                return _jsonDecodeValue(value, arr[1])
+            }
+            "list" -> {
+                if (value !is List<*>) {
+                    throw NewrError("json: expected list, got "
+                        + _jsonKindName(value))
+                }
+                val out = ArrayList<Any?>()
+                for (e in value) {
+                    out.add(_jsonDecodeValue(e, arr[1]))
+                }
+                return out.toMutableList()
+            }
+            "dict" -> {
+                if (value !is Map<*, *>) {
+                    throw NewrError("json: expected dict, got "
+                        + _jsonKindName(value))
+                }
+                val out = LinkedHashMap<String, Any?>()
+                for ((k, item) in value.entries) {
+                    if (k !is String) {
+                        throw NewrError("json: dict keys must be str")
+                    }
+                    out[k] = _jsonDecodeValue(item, arr[1])
+                }
+                return out
+            }
+            "struct" -> {
+                if (value !is Map<*, *>) {
+                    throw NewrError("json: expected object, got "
+                        + _jsonKindName(value))
+                }
+                @Suppress("UNCHECKED_CAST")
+                val factory = arr[1] as (Array<Any?>) -> Any?
+                val fields = arr[2] as? Array<*>
+                    ?: throw NewrError("json: unknown shape " + shape)
+                val args = arrayOfNulls<Any?>(fields.size)
+                for (i in fields.indices) {
+                    val fe = fields[i] as Array<*>
+                    val fname = fe[0] as String
+                    if (!value.containsKey(fname)) {
+                        throw NewrError(
+                            "json: missing field " + jsonString(fname))
+                    }
+                    args[i] = _jsonDecodeValue(value[fname], fe[1])
+                }
+                return factory(args)
+            }
+            else -> throw NewrError("json: unknown shape " + shape)
+        }
+    }
+
+    /** Build a struct from a plain map of field values,
+     * converting each field through its shape. Used for the fetch
+     * response and the server request, whose fields arrive as
+     * plain values, not as JSON text. */
+    private fun _buildFromShape(shape: Any?,
+                                values: Map<String, Any?>): Any? {
+        val arr = shape as? Array<*>
+            ?: throw NewrError("http: internal: expected a struct shape")
+        if (arr[0] != "struct") {
+            throw NewrError("http: internal: expected a struct shape")
+        }
+        @Suppress("UNCHECKED_CAST")
+        val factory = arr[1] as (Array<Any?>) -> Any?
+        val fields = arr[2] as? Array<*>
+            ?: throw NewrError("http: internal: expected a struct shape")
+        val args = arrayOfNulls<Any?>(fields.size)
+        for (i in fields.indices) {
+            val fe = fields[i] as Array<*>
+            val fname = fe[0] as String
+            if (!values.containsKey(fname)) {
+                throw NewrError(
+                    "http: missing field " + jsonString(fname))
+            }
+            args[i] = _jsonDecodeValue(values[fname], fe[1])
+        }
+        return factory(args)
+    }
+
+    /** newr `json.encode(value)`: JSON text, compact, in struct
+     * declaration order. Floats use the shortest round-trip
+     * decimal, with ".0" for integral floats (floatStr, the Python
+     * repr rule); ints are exact decimal, including int64.
+     * Non-ASCII text is written as UTF-8, not \u escapes. */
+    fun jsonEncode(value: Any?, shape: Any?): String {
+        val sb = StringBuilder()
+        _jsonWrite(sb, _jsonEncodeValue(value, shape))
+        return sb.toString()
+    }
+
+    /** newr `json.decode(text)`: the typed value for `text` under
+     * `shape`. An empty string throws, trailing data after the
+     * JSON value throws, duplicate keys keep the last value, a
+     * JSON fraction into an int field throws, an integer into a
+     * float field is fine, null only into a nullable shape, and an
+     * integer outside int64 throws when consumed. */
+    fun jsonDecode(text: String, shape: Any?): Any? {
+        return _jsonDecodeValue(_jsonParse(text), shape)
+    }
+
+    // ------------------------------------------------------------ http
+    // Sync HTTP server plus fetch client (SPEC.md section 12.6),
+    // JDK only: `com.sun.net.httpserver.HttpServer` for serve,
+    // `java.net.http.HttpClient` for fetch. Routes live in a
+    // registry, exact-match only; a request with no route, or a
+    // method mismatch, gets 404 with an empty body (not 405).
+
+    private val HTTP_METHODS: Set<String> = setOf(
+        "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
+    )
+
+    private val DEFAULT_HTTP_ALLOWLIST: Set<String> = setOf(
+        "localhost", "127.0.0.1",
+    )
+
+    private class HttpRouteEntry(
+        val method: String,
+        val path: String,
+        val handler: (Any?) -> Any?,
+        val reqShape: Any?,
+    )
+
+    private val _httpRoutes = ArrayList<HttpRouteEntry>()
+
+    /** newr `http.route(method, path, handler)`: register one
+     * exact-match route. A computed method that is not one of the
+     * uppercase methods, or a computed path without a leading
+     * slash, throws here (literal ones are E2012 from the
+     * checker). The handler is a lambda taking the request struct;
+     * the generic parameters let a let-bound or inline lambda pass
+     * without a cast at the call site. */
+    fun <Req, Resp> httpRoute(method: String, path: String,
+                              handler: (Req) -> Resp, reqShape: Any?) {
+        if (method !in HTTP_METHODS) {
+            throw NewrError("http: invalid method " + jsonString(method))
+        }
+        if (!path.startsWith("/")) {
+            throw NewrError(
+                "http: route path must start with '/', got "
+                + jsonString(path))
+        }
+        @Suppress("UNCHECKED_CAST")
+        val h: (Any?) -> Any? = { req -> handler(req as Req) as Any? }
+        _httpRoutes.add(HttpRouteEntry(method, path, h, reqShape))
+    }
+
+    private fun _queryDecode(s: String): String {
+        // "+" decodes as a space, %XX decodes as the byte (UTF-8);
+        // a bad % sequence stays literal, like the Python target.
+        val bytes = ArrayList<Byte>()
+        var i = 0
+        while (i < s.length) {
+            val c = s[i]
+            if (c == '+') {
+                bytes.add(' '.code.toByte())
+                i++
+            } else if (c == '%' && i + 2 < s.length) {
+                val hi = s[i + 1].digitToIntOrNull(16)
+                val lo = s[i + 2].digitToIntOrNull(16)
+                if (hi == null || lo == null) {
+                    bytes.add('%'.code.toByte())
+                    i++
+                } else {
+                    bytes.add(((hi shl 4) + lo).toByte())
+                    i += 3
+                }
+            } else {
+                for (b in c.toString().toByteArray(StandardCharsets.UTF_8)) {
+                    bytes.add(b)
+                }
+                i++
+            }
+        }
+        return String(bytes.toByteArray(), StandardCharsets.UTF_8)
+    }
+
+    private fun _parseQuery(rawQuery: String?): LinkedHashMap<String, String> {
+        val out = LinkedHashMap<String, String>()
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return out
+        }
+        for (pair in rawQuery.split('&')) {
+            val idx = pair.indexOf('=')
+            val rawKey = if (idx < 0) pair else pair.substring(0, idx)
+            val rawVal = if (idx < 0) "" else pair.substring(idx + 1)
+            out[_queryDecode(rawKey)] = _queryDecode(rawVal)
+        }
+        return out
+    }
+
+    private fun _httpSend(ex: HttpExchange, status: Int,
+                          headers: Map<String, String>,
+                          body: ByteArray) {
+        try {
+            for ((k, v) in headers) {
+                if (k.equals("Content-Length", ignoreCase = true)) {
+                    continue
+                }
+                ex.responseHeaders.set(k, v)
+            }
+            ex.sendResponseHeaders(status, body.size.toLong())
+            if (ex.requestMethod != "HEAD" && body.isNotEmpty()) {
+                ex.responseBody.use { it.write(body) }
+            } else {
+                ex.responseBody.close()
+            }
+        } catch (e: IOException) {
+            // The client went away; nothing to do.
+        } finally {
+            try {
+                ex.close()
+            } catch (ignored: Exception) {
+            }
+        }
+    }
+
+    private fun _httpDispatch(ex: HttpExchange) {
+        try {
+            val uri = ex.requestURI
+            val path = uri.rawPath ?: uri.path ?: "/"
+            val query = _parseQuery(uri.rawQuery)
+            val raw = try {
+                ex.requestBody.readAllBytes()
+            } catch (e: IOException) {
+                ByteArray(0)
+            }
+            val body: String = try {
+                StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(raw)).toString()
+            } catch (e: CharacterCodingException) {
+                _httpSend(ex, 500, emptyMap(), ByteArray(0))
+                return
+            }
+            val headers = LinkedHashMap<String, String>()
+            for ((k, vs) in ex.requestHeaders) {
+                if (vs.isNotEmpty()) {
+                    headers[k] = vs[0]
+                }
+            }
+            var found: HttpRouteEntry? = null
+            for (route in _httpRoutes) {
+                if (route.method == ex.requestMethod
+                    && route.path == path) {
+                    found = route
+                    break
+                }
+            }
+            if (found == null) {
+                _httpSend(ex, 404, emptyMap(), ByteArray(0))
+                return
+            }
+            val values = LinkedHashMap<String, Any?>()
+            values["method"] = ex.requestMethod
+            values["path"] = path
+            values["headers"] = headers
+            values["body"] = body
+            values["query"] = query
+            val req = _buildFromShape(found.reqShape, values)
+            val resp = found.handler(req)
+            val statusRaw = _structField(resp, "status")
+            val respHeadersRaw = _structField(resp, "headers")
+            val respBodyRaw = _structField(resp, "body")
+            if (statusRaw !is Long || statusRaw < 100 || statusRaw > 599) {
+                throw NewrError(
+                    "http: response status must be 100 to 599, got "
+                    + toStr(statusRaw))
+            }
+            if (respHeadersRaw !is Map<*, *>) {
+                throw NewrError("http: response headers must be a dict")
+            }
+            if (respBodyRaw !is String) {
+                throw NewrError("http: response body must be a str")
+            }
+            val respHeaders = LinkedHashMap<String, String>()
+            for ((k, v) in respHeadersRaw.entries) {
+                if (k !is String || v !is String) {
+                    throw NewrError(
+                        "http: response headers must be dict[str, str]")
+                }
+                respHeaders[k] = v
+            }
+            _httpSend(ex, statusRaw.toInt(), respHeaders,
+                respBodyRaw.toByteArray(StandardCharsets.UTF_8))
+        } catch (e: Exception) {
+            try {
+                _httpSend(ex, 500, emptyMap(), ByteArray(0))
+            } catch (ignored: Exception) {
+            }
+        }
+    }
+
+    /** newr `http.serve(port)` / `http.serve(port, host)`: serve the
+     * registered routes forever, until the process is killed.
+     * Prints `listening on <host>:<port>` (the real port when 0)
+     * as its first line, then blocks. */
+    fun httpServe(port: Long, host: String = "127.0.0.1") {
+        if (port < 0 || port > 65535) {
+            throw NewrError(
+                "http: port must be 0 to 65535, got " + port)
+        }
+        val server: HttpServer
+        try {
+            server = HttpServer.create(
+                InetSocketAddress(host, port.toInt()), 0)
+        } catch (e: IOException) {
+            throw asError(e)
+        }
+        server.createContext("/") { ex -> _httpDispatch(ex) }
+        server.executor = Executors.newCachedThreadPool()
+        server.start()
+        val realPort = server.address.port
+        System.out.println("listening on " + host + ":" + realPort)
+        System.out.flush()
+        try {
+            CountDownLatch(1).await()
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    /** The fetch primitive behind `http.get` / `http.post` /
+     * `http.request`: one request, whole-request timeout in
+     * seconds (default 10, connect plus body). POST/request set
+     * `Content-Type: application/json` unless the program sets
+     * one; GET sets none. A 4xx/5xx status is a response, not a
+     * throw: the caller reads `resp.status`. Anything else that
+     * fails (an unreachable host, a timeout, a bad URL, a host
+     * outside the allowlist) throws. */
+    private fun httpFetch(method: String, url: String, body: String?,
+                          timeout: Long,
+                          headers: Map<String, String>?,
+                          shape: Any?): Any? {
+        // This VM's container network drops IPv6-socket connects to
+        // an IPv4 loopback (a plain JDK HttpClient probe times out
+        // there, while the same probe with
+        // -Djava.net.preferIPv4Stack=true answers at once). Ask for
+        // IPv4 sockets before creating any: in a fetch program no
+        // socket exists yet, so the property still takes effect.
+        System.setProperty("java.net.preferIPv4Stack", "true")
+        if (method !in HTTP_METHODS) {
+            throw NewrError("http: invalid method " + jsonString(method))
+        }
+        if (timeout <= 0) {
+            throw NewrError(
+                "http: timeout must be a positive number of seconds, "
+                + "got " + timeout)
+        }
+        val parsed: URI
+        try {
+            parsed = URI(url)
+        } catch (e: Exception) {
+            throw NewrError(
+                "http: fetch URL must start with http:// or https://, "
+                + "got " + jsonString(url))
+        }
+        val scheme = parsed.scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") {
+            throw NewrError(
+                "http: fetch URL must start with http:// or https://, "
+                + "got " + jsonString(url))
+        }
+        val host = parsed.host
+        if (host == null) {
+            throw NewrError(
+                "http: fetch URL has no host: " + jsonString(url))
+        }
+        if (parsed.userInfo != null) {
+            throw NewrError(
+                "http: a URL must not carry userinfo; read the token "
+                + "from env and pass it as a header")
+        }
+        if (!DEFAULT_HTTP_ALLOWLIST.contains(host.lowercase())) {
+            throw NewrError(
+                "http: fetch host " + jsonString(host.lowercase())
+                + " is not on the allowlist (localhost, 127.0.0.1)")
+        }
+        val reqHeaders = LinkedHashMap<String, String>()
+        if (headers != null) {
+            for ((k, v) in headers) {
+                reqHeaders[k] = v
+            }
+        }
+        val client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(timeout))
+            .build()
+        val builder = HttpRequest.newBuilder()
+            .uri(parsed)
+            .timeout(Duration.ofSeconds(timeout))
+        if (body != null) {
+            var hasContentType = false
+            for (k in reqHeaders.keys) {
+                if (k.equals("Content-Type", ignoreCase = true)) {
+                    hasContentType = true
+                }
+            }
+            if (!hasContentType) {
+                reqHeaders["Content-Type"] = "application/json"
+            }
+            builder.method(method,
+                HttpRequest.BodyPublishers.ofString(
+                    body, StandardCharsets.UTF_8))
+        } else {
+            builder.method(method, HttpRequest.BodyPublishers.noBody())
+        }
+        for ((k, v) in reqHeaders) {
+            builder.header(k, v)
+        }
+        val resp: HttpResponse<ByteArray>
+        try {
+            resp = client.send(builder.build(),
+                HttpResponse.BodyHandlers.ofByteArray())
+        } catch (e: Exception) {
+            throw NewrError(
+                "http: fetch " + method + " " + url + " failed: "
+                + (e.message ?: e.javaClass.simpleName))
+        }
+        val text: String
+        try {
+            text = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT)
+                .decode(ByteBuffer.wrap(resp.body())).toString()
+        } catch (e: CharacterCodingException) {
+            throw NewrError("http: response body is not valid UTF-8")
+        }
+        val respHeaders = LinkedHashMap<String, String>()
+        for ((k, vs) in resp.headers().map()) {
+            if (vs.isNotEmpty()) {
+                respHeaders[k] = vs[0]
+            }
+        }
+        val values = LinkedHashMap<String, Any?>()
+        values["status"] = resp.statusCode().toLong()
+        values["headers"] = respHeaders
+        values["body"] = text
+        return _buildFromShape(shape, values)
+    }
+
+    /** newr `http.get(url[, timeout[, headers]])`: GET, no body,
+     * no Content-Type unless the program sets one. */
+    fun httpGet(url: String, timeout: Long = 10,
+                headers: Map<String, String>? = null,
+                shape: Any?): Any? {
+        return httpFetch("GET", url, null, timeout, headers, shape)
+    }
+
+    /** newr `http.post(url, body[, timeout[, headers]])`. */
+    fun httpPost(url: String, body: String, timeout: Long = 10,
+                 headers: Map<String, String>? = null,
+                 shape: Any?): Any? {
+        return httpFetch("POST", url, body, timeout, headers, shape)
+    }
+
+    /** newr `http.request(method, url, body[, timeout[, headers]])`:
+     * the generic fetch primitive. */
+    fun httpRequest(method: String, url: String, body: String,
+                    timeout: Long = 10,
+                    headers: Map<String, String>? = null,
+                    shape: Any?): Any? {
+        return httpFetch(method, url, body, timeout, headers, shape)
     }
 }

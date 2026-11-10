@@ -24,10 +24,14 @@ keeps the golden header deterministic.
 import argparse
 import difflib
 import os
+import queue
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -116,6 +120,8 @@ GOLDENS = {
     "shop": ("examples/shop.newr", ["shop.py", "shop_items.py"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.py"]),
     "todo": ("examples/todo.newr", ["todo.py"]),
+    "hello_api_client": ("examples/hello_api_client.newr",
+                         ["hello_api_client.py"]),
 }
 
 # The JS twin of GOLDENS (M3): the same sources, `.js` outputs.
@@ -130,6 +136,8 @@ GOLDENS_JS = {
              ["shop.js", "shop_items.js", "shop_deploy.js"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.js"]),
     "todo": ("examples/todo.newr", ["todo.js"]),
+    "hello_api_client": ("examples/hello_api_client.newr",
+                         ["hello_api_client.js"]),
 }
 
 # The Java twin of GOLDENS (M4): the same sources, `.java` outputs.
@@ -143,6 +151,8 @@ GOLDENS_JAVA = {
              ["shop.java", "shop_items.java", "shop_deploy.java"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.java"]),
     "todo": ("examples/todo.newr", ["todo.java"]),
+    "hello_api_client": ("examples/hello_api_client.newr",
+                         ["hello_api_client.java"]),
 }
 
 # The C# twin of GOLDENS (M4): the same sources, `.cs` outputs.
@@ -155,6 +165,8 @@ GOLDENS_CS = {
              ["shop.cs", "shop_items.cs", "shop_deploy.cs"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.cs"]),
     "todo": ("examples/todo.newr", ["todo.cs"]),
+    "hello_api_client": ("examples/hello_api_client.newr",
+                         ["hello_api_client.cs"]),
 }
 
 # The Rust twin of GOLDENS (M5): the same sources, `.rs` outputs.
@@ -171,6 +183,8 @@ GOLDENS_RS = {
              ["shop.rs", "shop_deploy.rs"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.rs"]),
     "todo": ("examples/todo.newr", ["todo.rs"]),
+    "hello_api_client": ("examples/hello_api_client.newr",
+                         ["hello_api_client.rs"]),
 }
 
 # The Kotlin twin of GOLDENS (M5): the same sources, `.kt` outputs.
@@ -185,6 +199,8 @@ GOLDENS_KT = {
              ["shop.kt", "shop_deploy.kt"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.kt"]),
     "todo": ("examples/todo.newr", ["todo.kt"]),
+    "hello_api_client": ("examples/hello_api_client.newr",
+                         ["hello_api_client.kt"]),
 }
 
 # The Dart twin of GOLDENS (M5): the same sources, `.dart` outputs.
@@ -201,6 +217,8 @@ GOLDENS_DART = {
              ["shop.dart", "shop_items.dart", "shop_deploy.dart"]),
     "shop_items": ("examples/shop_items.newr", ["shop_items.dart"]),
     "todo": ("examples/todo.newr", ["todo.dart"]),
+    "hello_api_client": ("examples/hello_api_client.newr",
+                         ["hello_api_client.dart"]),
 }
 
 _SUFFIX = {"py": ".py", "js": ".js", "java": ".java", "cs": ".cs",
@@ -296,6 +314,240 @@ def bless(only: str | None = None, target: str = "py") -> int:
     return 0
 
 
+def _wait_listening(proc: subprocess.Popen, timeout: float = 10.0) -> str | None:
+    """Read the server's stdout until its `listening on
+    127.0.0.1:PORT` line (the first line it prints), and return
+    the port. None when the line never arrives: the server exited
+    early, or the wait timed out (a runtime that does not flush
+    the line stalls here, which is a real bug, not a slow box)."""
+    lines: queue.Queue[str | None] = queue.Queue()
+
+    def _read() -> None:
+        try:
+            for line in proc.stdout:  # type: ignore[union-attr]
+                lines.put(line)
+        except Exception:  # noqa: BLE001 - reader thread, just end
+            pass
+        lines.put(None)  # EOF: the server exited
+
+    threading.Thread(target=_read, daemon=True).start()
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        try:
+            line = lines.get(timeout=remaining)
+        except queue.Empty:
+            return None
+        if line is None:
+            return None
+        m = re.match(r"listening on 127\.0\.0\.1:(\d+)\s*$",
+                     line.strip())
+        if m:
+            return m.group(1)
+        # Any other line before the listening line is ignored.
+
+
+def _pair_cmds(target: str, server_dir: Path,
+               client_dir: Path) -> tuple[list[str], list[str],
+                                         dict | None] | None:
+    """(server argv, client argv without the port, extra env) for
+    the http pair test, after any per-target compile step. Returns
+    None (after printing SKIP) when the target toolchain is
+    missing, matching the single-process loop. Raises
+    RuntimeError on a compile failure."""
+    suffix = _SUFFIX[target]
+    server_main = str(server_dir / (_PAIR_SERVER + suffix))
+    client_main = str(client_dir / (_PAIR_CLIENT + suffix))
+    if target == "py":
+        return ([sys.executable, server_main],
+                [sys.executable, client_main], None)
+    if target == "js":
+        return (["node", server_main], ["node", client_main], None)
+    if target == "java":
+        if JAVAC is None or JAVA is None:
+            print("SKIP java: no JDK found "
+                  "(JAVA_HOME / ~/jdk-21 / PATH)")
+            return None
+        for d in (server_dir, client_dir):
+            c = subprocess.run(
+                [JAVAC, *[str(p) for p in d.glob("*.java")]],
+                capture_output=True, text=True, cwd=d)
+            if c.returncode != 0:
+                raise RuntimeError(f"javac exit {c.returncode}\n"
+                                   f"{c.stderr}")
+        return ([JAVA, _PAIR_SERVER], [JAVA, _PAIR_CLIENT], None)
+    if target == "rs":
+        if RUSTC is None:
+            print("SKIP rs: no rustc found "
+                  "(CARGO_HOME / ~/.cargo/bin / PATH)")
+            return None
+        if (server_dir / "Cargo.toml").exists():
+            # An http/json program: the crate needs cargo
+            # (tiny_http, ureq, serde_json). Build FIRST and run
+            # the binary directly: `cargo run` would compile
+            # inside the server start, and the 10s listening
+            # wait would expire while cargo is still building
+            # (ring takes minutes on a cold cache). The [[bin]]
+            # name is the program stem.
+            if CARGO is None:
+                print("SKIP rs: no cargo found "
+                      "(CARGO_HOME / ~/.cargo/bin / PATH)")
+                return None
+            for d in (server_dir, client_dir):
+                c = subprocess.run(
+                    [CARGO, "build", "--quiet"],
+                    capture_output=True, text=True, cwd=d)
+                if c.returncode != 0:
+                    raise RuntimeError(f"cargo build exit "
+                                       f"{c.returncode}\n{c.stderr}")
+            return ([str(server_dir / "target" / "debug"
+                         / _PAIR_SERVER)],
+                    [str(client_dir / "target" / "debug"
+                         / _PAIR_CLIENT)], None)
+        # Plain program: rustc compiles the bin directly.
+        for d, stem in ((server_dir, _PAIR_SERVER),
+                        (client_dir, _PAIR_CLIENT)):
+            c = subprocess.run(
+                [RUSTC, str(d / (stem + suffix)), "-o",
+                 str(d / stem)],
+                capture_output=True, text=True, cwd=d)
+            if c.returncode != 0:
+                raise RuntimeError(f"rustc exit {c.returncode}\n"
+                                   f"{c.stderr}")
+        return ([str(server_dir / _PAIR_SERVER)],
+                [str(client_dir / _PAIR_CLIENT)], None)
+    if target == "kt":
+        if KOTLINC is None or JAVA is None:
+            print("SKIP kt: no kotlinc/java found "
+                  "(KOTLIN_HOME / ~/kotlin / PATH)")
+            return None
+        for d in (server_dir, client_dir):
+            c = subprocess.run(
+                [KOTLINC, *[str(p) for p in d.glob("*.kt")],
+                 "-include-runtime", "-d", str(d / "app.jar")],
+                capture_output=True, text=True, cwd=d)
+            if c.returncode != 0:
+                raise RuntimeError(f"kotlinc exit {c.returncode}\n"
+                                   f"{c.stderr}")
+        return ([JAVA, "-jar", str(server_dir / "app.jar")],
+                [JAVA, "-jar", str(client_dir / "app.jar")], None)
+    if target == "dart":
+        if DART is None:
+            print("SKIP dart: no dart found "
+                  "(DART_HOME / ~/dart-sdk / PATH)")
+            return None
+        return ([DART, server_main], [DART, client_main], None)
+    # cs
+    if DOTNET is None:
+        print("SKIP cs: no dotnet found "
+              "(DOTNET_ROOT / ~/.dotnet / PATH)")
+        return None
+    env = dict(os.environ)
+    env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+    return ([DOTNET, "run", "--project",
+             str(server_dir / (_PAIR_SERVER + ".csproj"))],
+            [DOTNET, "run", "--project",
+             str(client_dir / (_PAIR_CLIENT + ".csproj")), "--"], env)
+
+
+def _run_http_pair(target: str) -> int:
+    """The http pair test (M8b): mod_http_server binds an
+    ephemeral port and blocks forever, so the single-process loop
+    cannot run it. Start the server, wait up to 10s for its
+    `listening on 127.0.0.1:PORT` line, run mod_http_client with
+    the port as argv[1], expect exit 0 with PASS as its last
+    line, then kill the server. The server's exit code is never
+    checked (it is killed, not exited). Returns 0 on PASS, 1 on
+    failure (the FAIL line is printed here)."""
+    try:
+        server_files = _build_to_temp(
+            ROOT / "conformance" / "ok" / (_PAIR_SERVER + ".newr"),
+            target=target)
+        client_files = _build_to_temp(
+            ROOT / "conformance" / "ok" / (_PAIR_CLIENT + ".newr"),
+            target=target)
+    except RuntimeError as exc:
+        print(f"FAIL {_PAIR_CLIENT}.newr (pair): {exc}")
+        return 1
+    rt_src = _RT_SRC[target]
+    rt_copy = _RT_COPY[target]
+    rt_text = (ROOT / "compiler" / rt_src).read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as sd, \
+            tempfile.TemporaryDirectory() as cd:
+        server_dir, client_dir = Path(sd), Path(cd)
+        for name, text in server_files.items():
+            (server_dir / name).write_text(text, encoding="utf-8")
+        (server_dir / rt_copy).write_text(rt_text, encoding="utf-8")
+        for name, text in client_files.items():
+            (client_dir / name).write_text(text, encoding="utf-8")
+        (client_dir / rt_copy).write_text(rt_text, encoding="utf-8")
+        try:
+            cmds = _pair_cmds(target, server_dir, client_dir)
+        except RuntimeError as exc:
+            print(f"FAIL {_PAIR_CLIENT}.newr (pair): {exc}")
+            return 1
+        if cmds is None:
+            return 0  # toolchain SKIP, printed by _pair_cmds
+        server_cmd, client_cmd, env = cmds
+        proc = subprocess.Popen(
+            server_cmd, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, cwd=server_dir,
+            env=env)
+        try:
+            port = _wait_listening(proc)
+            if port is None:
+                err = ""
+                if proc.poll() is not None:
+                    err = proc.stderr.read() if proc.stderr else ""
+                print(f"FAIL {_PAIR_CLIENT}.newr (pair): server "
+                      f"never printed its listening line "
+                      f"(exit {proc.poll()})\n{err}")
+                return 1
+            try:
+                r = subprocess.run(
+                    [*client_cmd, port], capture_output=True,
+                    text=True, cwd=client_dir, env=env, timeout=60)
+            except subprocess.TimeoutExpired:
+                print(f"FAIL {_PAIR_CLIENT}.newr (pair): client "
+                      "timed out after 60s")
+                return 1
+            last = (r.stdout.strip().splitlines()[-1]
+                    if r.stdout.strip() else "")
+            if r.returncode != 0:
+                print(f"FAIL {_PAIR_CLIENT}.newr (pair): client "
+                      f"exit {r.returncode}\n{r.stderr}")
+                return 1
+            if last != "PASS":
+                print(f"FAIL {_PAIR_CLIENT}.newr (pair): client "
+                      f"last line {last!r} != 'PASS' "
+                      f"(stdout {r.stdout!r})")
+                return 1
+            print(f"ok {_PAIR_SERVER}.newr (pair)")
+            print(f"ok {_PAIR_CLIENT}.newr (pair, port {port})")
+            return 0
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+
+
+# The http pair programs (M8b): the server binds an ephemeral
+# port and blocks forever, so the single-process loop cannot run
+# it; the client takes the port as argv[1]. Handled together by
+# _run_http_pair.
+_PAIR_SERVER = "mod_http_server"
+_PAIR_CLIENT = "mod_http_client"
+
+
 def run_conformance(target: str = "py") -> int:
     """Build + run every ok program; each must exit 0 and print
     `PASS` as its last line (the program self-verifies — the
@@ -308,6 +560,13 @@ def run_conformance(target: str = "py") -> int:
     rt_src = _RT_SRC[target]
     rt_copy = _RT_COPY[target]
     for path in sorted(ok_dir.glob("*.newr")):
+        if path.stem == _PAIR_SERVER:
+            # Runs only as half of the pair test (it blocks
+            # forever); skip it in the single-process loop.
+            continue
+        if path.stem == _PAIR_CLIENT:
+            failures += _run_http_pair(target)
+            continue
         files = _build_to_temp(Path(str(path.relative_to(ROOT))),
                                target=target)
         main = path.stem + suffix

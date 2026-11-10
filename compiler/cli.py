@@ -38,10 +38,13 @@ from .init import (
     ManifestError,
     VALID_TARGETS,
     default_target_for,
+    http_allowlist_for,
     scaffold,
 )
 from .db_check import check_db
 from .discord_check import check_discord, discord_providers
+from .http_check import check_http
+from .json_check import check_json
 from .errors import Diagnostic, NewrError, Span
 from .resolver import resolve_source
 
@@ -392,6 +395,27 @@ with no expected row type (annotate the let with `list[RowStruct]`),
 a row struct field that cannot be read from a row, a second
 `db.begin` on a handle already in a transaction, or a use of a closed
 handle. The diagnostic names the rule and the fix.""",
+    "E2012": """E2012: http module rule violation.
+
+A rule of the http module was broken: an unknown http function, the
+wrong number of arguments, a method literal that is not one of GET,
+POST, PUT, PATCH, DELETE, HEAD, OPTIONS, a route path without a
+leading slash, a duplicate route, a handler that is not a lambda or
+whose parameter/return structs do not have exactly the HttpRequest /
+HttpResponse fields, a fetch with no expected response type
+(annotate the let with `HttpResponse`), a timeout of 0 or negative,
+headers that are not `dict[str, str]`, a URL without an http(s)
+scheme or host, userinfo in a URL, or a URL host outside the
+allowlist (add it to `http_allowlist` in newr.json). The diagnostic
+names the rule and the fix.""",
+    "E2013": """E2013: json module rule violation.
+
+A rule of the json module was broken: an unknown json function, the
+wrong number of arguments, a value that cannot be encoded as JSON
+(an enum, a set, a function, or a Result), a `json.decode` with no
+expected type (annotate the let with the type to decode into), or a
+`json.decode` argument that is not a str. The diagnostic names the
+rule and the fix.""",
     "E3001": """E3001: undefined name.
 
 There is no binding with this name in scope. Check the spelling — the
@@ -543,6 +567,22 @@ def _run_pipeline(path: Path, *, fast: bool) -> tuple[
         diagnostics += core.diagnostics
         diagnostics += check_discord(resolved.program)
         diagnostics += check_db(resolved.program)
+        # M8b: the http allowlist comes from the manifest (newr.json
+        # `http_allowlist`, searched upward from the program's
+        # directory); without a manifest or key the checker applies
+        # the default localhost-only list. A malformed manifest is
+        # NOT a check error: `newr check` and `newr build --check`
+        # ignore the manifest by contract (a broken manifest must
+        # not fail the check), and `newr build` validates the
+        # manifest separately through default_target_for, so a bad
+        # manifest still fails the build loudly. The check falls
+        # back to the default allowlist here.
+        try:
+            allowlist = http_allowlist_for(path)
+        except ManifestError:
+            allowlist = None
+        diagnostics += check_http(resolved.program, allowlist=allowlist)
+        diagnostics += check_json(resolved.program)
     return resolved.program, diagnostics, source
 
 

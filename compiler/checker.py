@@ -815,7 +815,18 @@ class Checker:
         return fn_of([p.type for p in expr.params], ret)
 
     def _synth_TryExpr(self, expr: A.TryExpr, expected) -> Type:
-        t = self.synth(expr.expr)
+        # A `try` used where a `Result[T, E]` is expected passes T
+        # down to its operand: calls that need an expected type
+        # (http.get, json.decode, db.query) only get one this way,
+        # and without it the operand stays UNKNOWN, the `try` stays
+        # untyped (synth clears expr_type for UNKNOWN), and the
+        # emitters refuse it with E4001. A plain `try 6 / 0` is
+        # unaffected (no expected type to pass).
+        inner_expected = None
+        if expected is not None and expected.name == "Result" \
+                and expected.params:
+            inner_expected = expected.params[0]
+        t = self.synth(expr.expr, inner_expected)
         if _is_unknown(t):
             return UNKNOWN
         return result_of(t, ERROR_TYPE)
@@ -1166,7 +1177,8 @@ class Checker:
                 return self._module_member_type(obj.name, expr.name,
                                                 expr.span, as_value=True)
             if binding is None and (obj.name in MODULES
-                                or obj.name == "db"):
+                                or obj.name == "db"
+                                or obj.name in ("http", "json")):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
                 # `db` is a domain module like `discord`: it is not
@@ -1236,7 +1248,8 @@ class Checker:
         mod = None
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
-        elif target is None and (bound in MODULES or bound == "db"):
+        elif target is None and (bound in MODULES or bound == "db"
+                                 or bound == "http" or bound == "json"):
             # N-09/N-10: named modules are usable by name without an
             # import (SPEC.md SS12.2). `db` is a domain module: not
             # in MODULES, but the same fallback applies (SPEC.md
@@ -1247,6 +1260,10 @@ class Checker:
                 return UNKNOWN  # discord module surface: not core's job
             if mod == "db":
                 return UNKNOWN  # db module surface: not core's job
+            if mod == "http":
+                return UNKNOWN  # http module surface: not core's job
+            if mod == "json":
+                return UNKNOWN  # json module surface: not core's job
             members = MODULES.get(mod, {})
             if name in members:
                 sig = members[name]
@@ -1539,7 +1556,8 @@ class Checker:
                 return self._call_module_member(obj.name, func.name, expr,
                                                 expected)
             if binding is None and (obj.name in MODULES
-                                or obj.name == "db"):
+                                or obj.name == "db"
+                                or obj.name in ("http", "json")):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
                 # `db` is a domain module: not in MODULES, but the
@@ -1685,7 +1703,8 @@ class Checker:
         mod = None
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
-        elif target is None and (bound in MODULES or bound == "db"):
+        elif target is None and (bound in MODULES or bound == "db"
+                                 or bound == "http" or bound == "json"):
             # N-09/N-10: named modules are usable by name without an
             # import (SPEC.md SS12.2); the import is optional. `db`
             # is a domain module: not in MODULES, but the same
@@ -1721,6 +1740,59 @@ class Checker:
                         exp = exp.params[0]
                     if exp is not None and exp.name == "list" \
                             and len(exp.params) == 1:
+                        return exp
+                return UNKNOWN
+            if mod == "http":
+                # M8b: the fixed http return types live here, in the
+                # core checker, for the same reason as the db ones
+                # above (M8a). `route` and `serve` return none; a
+                # fetch returns the expected response struct when
+                # the call site carries one (a struct name, not a
+                # builtin and not generic); without one http_check
+                # reports E2012. The struct shape itself (exactly
+                # the HttpResponse fields) is validated by
+                # http_check, not here. The headers argument (get:
+                # 3rd, post: 4th, request: 5th) is synthed with the
+                # expected `dict[str, str]` type, so an empty `{}`
+                # there types instead of E2002; the type is only
+                # threaded, never enforced here — http_check reports
+                # a wrong headers type as E2012.
+                headers_idx = {"get": 2, "post": 3,
+                               "request": 4}.get(name)
+                for i, arg in enumerate(expr.args):
+                    if headers_idx is not None and i == headers_idx \
+                            and len(expr.args) == headers_idx + 1:
+                        self.synth(arg, Type("dict", (STR, STR)))
+                    else:
+                        self.synth(arg)
+                if name in ("route", "serve"):
+                    return NONE_TYPE
+                if name in ("get", "post", "request"):
+                    exp = expected
+                    if exp is not None and exp.name == "Result" \
+                            and exp.params:
+                        exp = exp.params[0]
+                    if exp is not None and exp.name not in \
+                            A.BUILTIN_TYPE_NAMES and not exp.params:
+                        return exp
+                return UNKNOWN
+            if mod == "json":
+                # M8b: the fixed json return types live here, in the
+                # core checker, for the same reason as the db ones
+                # above. `encode` returns str; `decode` returns the
+                # expected type at the call site (a struct, list,
+                # dict, scalar, or nullable of those); without one
+                # json_check reports E2013.
+                for arg in expr.args:
+                    self.synth(arg)
+                if name == "encode":
+                    return STR
+                if name == "decode":
+                    exp = expected
+                    if exp is not None and exp.name == "Result" \
+                            and exp.params:
+                        exp = exp.params[0]
+                    if exp is not None:
                         return exp
                 return UNKNOWN
             members = MODULES.get(mod, {})

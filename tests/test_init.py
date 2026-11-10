@@ -25,6 +25,7 @@ from compiler.init import (  # noqa: E402
     VALID_TARGETS,
     default_target_for,
     find_manifest,
+    http_allowlist_for,
     load_manifest,
     main_source,
     manifest_source,
@@ -123,6 +124,66 @@ class TestManifest(unittest.TestCase):
                 path = self._write(tmp, json.dumps(data))
                 with self.assertRaises(ManifestError, msg=str(data)):
                     load_manifest(path)
+
+    def test_load_http_allowlist(self):
+        # M8b: newr.json gains an optional http_allowlist of bare
+        # hostnames; it loads as a tuple, and round-trips through
+        # to_dict as a list.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, json.dumps({
+                "name": "demo", "version": "0.1.0",
+                "http_allowlist": ["localhost", "127.0.0.1",
+                                   "api.example.com"],
+            }))
+            manifest = load_manifest(path)
+            self.assertEqual(manifest.http_allowlist,
+                             ("localhost", "127.0.0.1", "api.example.com"))
+            self.assertEqual(manifest.to_dict()["http_allowlist"],
+                             ["localhost", "127.0.0.1", "api.example.com"])
+
+    def test_load_http_allowlist_absent_is_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, json.dumps({
+                "name": "demo", "version": "0.1.0",
+            }))
+            self.assertIsNone(load_manifest(path).http_allowlist)
+
+    def test_load_http_allowlist_malformed(self):
+        # Not a list, a non-string entry, or a bare-hostname
+        # violation (scheme, port, userinfo, path) is a manifest
+        # error naming the file.
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in ("localhost",
+                        ["localhost", 8080],
+                        ["https://api.example.com"],
+                        ["api.example.com:8080"],
+                        ["user@api.example.com"],
+                        ["api.example.com/todos"],
+                        [""]):
+                path = self._write(tmp, json.dumps({
+                    "name": "demo", "version": "0.1.0",
+                    "http_allowlist": bad,
+                }))
+                with self.assertRaises(ManifestError, msg=str(bad)) as ctx:
+                    load_manifest(path)
+                self.assertIn(str(path), str(ctx.exception))
+
+    def test_http_allowlist_for_no_manifest_is_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            prog = Path(tmp) / "main.newr"
+            prog.write_text('print "hi"\n', encoding="utf-8")
+            self.assertIsNone(http_allowlist_for(prog))
+
+    def test_http_allowlist_for_reads_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(tmp, json.dumps({
+                "name": "demo", "version": "0.1.0",
+                "http_allowlist": ["api.example.com"],
+            }))
+            prog = Path(tmp) / "main.newr"
+            prog.write_text('print "hi"\n', encoding="utf-8")
+            self.assertEqual(http_allowlist_for(prog),
+                             ("api.example.com",))
 
     def test_load_missing_file(self):
         with tempfile.TemporaryDirectory() as tmp:

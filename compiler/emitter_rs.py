@@ -320,6 +320,14 @@ class _RsEmitter:
         # This file uses `db.*` (set by `_emit_db_call`) — the
         # `newr_db` helper module is emitted into the file only then.
         self._file_uses_db: bool = False
+        # The same pair for `http.*` / `json.*` (M8b): `uses_http` /
+        # `uses_json` gate the Cargo.toml (see `emit_program_rs`),
+        # `_file_uses_http` / `_file_uses_json` gate the inline
+        # `newr_http` / `newr_json` helper modules.
+        self.uses_http: bool = False
+        self.uses_json: bool = False
+        self._file_uses_http: bool = False
+        self._file_uses_json: bool = False
         self.rt_helpers: set[str] = set()
         # Module-level declarations of the file being emitted.
         self.fns: dict[str, A.FnDecl] = {}
@@ -534,6 +542,12 @@ class _RsEmitter:
 
     def _need_sqlite(self):
         self.uses_sqlite = True
+
+    def _need_http(self):
+        self.uses_http = True
+
+    def _need_json(self):
+        self.uses_json = True
 
     # ------------------------------------------------------------ hoists
 
@@ -1425,6 +1439,9 @@ class _RsEmitter:
                 # the Cargo.toml too (the gate reads only the main
                 # emitter — see emit_program_rs).
                 self.uses_sqlite = self.uses_sqlite or sub_em.uses_sqlite
+                # The same for `http.*` / `json.*` (M8b).
+                self.uses_http = self.uses_http or sub_em.uses_http
+                self.uses_json = self.uses_json or sub_em.uses_json
             return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -2055,7 +2072,9 @@ class _RsEmitter:
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
                 if binding is None and (obj.name in MODULES
-                                       or obj.name == "db"):
+                                       or obj.name == "db"
+                                       or obj.name == "http"
+                                       or obj.name == "json"):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -2507,7 +2526,8 @@ class _RsEmitter:
                     self._fail(
                         f"function `{obj.name}` is not a value - call it",
                         span=node.span)
-            if obj.name in MODULES or obj.name == "db":
+            if obj.name in MODULES or obj.name == "db" \
+                    or obj.name == "http" or obj.name == "json":
                 # A named module used without an import: the name is
                 # both the real module and the reference.
                 fake = _Binding(rs=obj.name, kind="module",
@@ -3858,6 +3878,12 @@ class _RsEmitter:
         if real == "db":
             args = [self.emit_expr(a, 0) for a in node.args]
             return self._emit_db_call(node, args)
+        if real == "http":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_http_call(node, args)
+        if real == "json":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_json_call(node, args)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.rs,
                                            node.func.name, args)
@@ -3997,6 +4023,296 @@ class _RsEmitter:
                 "str": "as_str", "bool": "as_bool"}[t.name]
         return (f"newr_db::{base}_opt" if t.nullable
                 else f"newr_db::{base}")
+
+    # ------------------------------------------------------------ http/json
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring the Python emitter's `_struct_decl`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """Rust source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7), mirroring the Python
+        emitter's `_shape_literal`: a scalar is a `Shape::Int` /
+        `Float` / `Str` / `Bool` / `None` unit, a nullable is
+        `Shape::Opt(inner)`, a list is `Shape::List(elem)`, a dict
+        is `Shape::Dict(value)`, a struct is `Shape::Struct(name,
+        [(field, shape), ...])` in declaration order. The runtime
+        (`newr_json`) walks the shape for json.encode/decode."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return ("&newr_json::Shape::Opt("
+                    f"{self._shape_literal(inner)})")
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return f"&newr_json::Shape::{t.name.capitalize()}"
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            return ("&newr_json::Shape::List("
+                    f"{self._shape_literal(t.params[0])})")
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            return ("&newr_json::Shape::Dict("
+                    f"{self._shape_literal(t.params[1])})")
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        fields = ", ".join(
+            f"({_rs_str(f.name)}, {self._shape_literal(f.type)})"
+            for f in decl.fields)
+        return (f"&newr_json::Shape::Struct({_rs_str(decl.name)}, "
+                f"&[{fields}])")
+
+    def _http_handler_types(
+            self, handler_arg: A.Expr) -> tuple[Type, Type]:
+        """The (request, response) struct types of a route handler:
+        the parameter and return types of an inline lambda, or of
+        the fn type of a let-bound lambda variable (the checker
+        tracks let-bound lambdas the same way, in
+        http_check._lambdas). A named function is not a handler in
+        M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            if handler_arg.return_type is None:
+                self._fail("a route handler must declare a response "
+                           "struct return type",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type, handler_arg.return_type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and len(t.params) >= 2:
+                    return t.params[0], t.params[-1]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _json_build(self, t: Type, vexpr: str) -> str:
+        """Rust source for the typed newr value of static type `t`
+        built from `vexpr`, a Rust expression of type
+        `newr_json::JVal` (owned). The runtime has already validated
+        the JSON value against the shape, so the `as_*` helpers
+        only ever see a matching variant; a mismatch still panics
+        rather than producing a wrong value. Struct fields are read
+        by name (extra JSON fields were ignored by the runtime,
+        a missing field already threw there)."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return (f"match {vexpr} {{ newr_json::JVal::Null => None, "
+                    f"_x => Some({self._json_build(inner, '_x')}) }}")
+        if t.name == "int":
+            return f"newr_json::as_int(&{vexpr})"
+        if t.name == "float":
+            return f"newr_json::as_float(&{vexpr})"
+        if t.name == "str":
+            return f"newr_json::as_str(&{vexpr})"
+        if t.name == "bool":
+            return f"newr_json::as_bool(&{vexpr})"
+        if t.name == "none":
+            return "()"
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            elem = t.params[0]
+            return (f"{{ let _v = {vexpr}; "
+                    f"newr_json::into_list(_v).into_iter()"
+                    f".map(|_e| {self._json_build(elem, '_e')})"
+                    f".collect() }}")
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            val = t.params[1]
+            return (f"{{ let _v = {vexpr}; "
+                    f"let mut _d = newr_rt::Dict::new(); "
+                    f"for (_k, _e) in newr_json::into_obj(_v) {{ "
+                    f"_d.insert(_k, {self._json_build(val, '_e')}); }} "
+                    f"_d }}")
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        rs_name = self._struct_rs_name(t.name)
+        fields = ", ".join(
+            f"{self._mangle(f.name)}: "
+            f"{self._json_build(f.type, 'newr_json::field(&_v, ' + _rs_str(f.name) + ')')}"
+            for f in decl.fields)
+        return f"{{ let _v = {vexpr}; {rs_name} {{ {fields} }} }}"
+
+    def _json_conv(self, t: Type, vexpr: str) -> str:
+        """Rust source for the `newr_json::JVal` of a value of
+        static type `t`, from `vexpr`, a Rust expression holding the
+        value by value (the caller binds the encode argument to a
+        temp first, so a struct field is moved out of the temp once
+        per field and a call result is evaluated once). The runtime
+        walks the shape over the JVal to produce the JSON text."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return (f"match {vexpr} {{ None => newr_json::JVal::Null, "
+                    f"Some(_x) => {self._json_conv(inner, '_x')} }}")
+        if t.name == "int":
+            return f"newr_json::JVal::Int({vexpr})"
+        if t.name == "float":
+            return f"newr_json::JVal::Float({vexpr})"
+        if t.name == "str":
+            return f"newr_json::JVal::Str({vexpr})"
+        if t.name == "bool":
+            return f"newr_json::JVal::Bool({vexpr})"
+        if t.name == "none":
+            return "newr_json::JVal::Null"
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            elem = t.params[0]
+            return (f"newr_json::JVal::List({vexpr}.into_iter()"
+                    f".map(|_e| {self._json_conv(elem, '_e')}).collect())")
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            val = t.params[1]
+            return (f"{{ let _d = {vexpr}; newr_json::JVal::Obj("
+                    f"_d.keys().into_iter().map(|_k| {{ "
+                    f"let _e = _d.get(&_k).unwrap(); "
+                    f"(_k, {self._json_conv(val, '_e')}) }}).collect()) }}")
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        fields = ", ".join(
+            f"({_rs_str(f.name)}.to_string(), "
+            f"{self._json_conv(f.type, '_s.' + self._mangle(f.name))})"
+            for f in decl.fields)
+        return (f"{{ let _s = {vexpr}; "
+                f"newr_json::JVal::Obj(vec![{fields}]) }}")
+
+    def _emit_http_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`http.*` calls (SPEC.md section 12.6): the helpers live
+        in the `newr_http` module emitted into this file (see
+        `_emit_http_mod`), inline, not in newr_rt.rs, because the
+        runtime file is std-only and a program that never uses
+        `http` must not need tiny_http, ureq, or serde_json. The
+        checker (http_check) has already validated the call, so the
+        arity here is trusted. Fetch calls carry the response
+        struct type in `node.expr_type`, set by http_check; route
+        calls carry the request/response struct types from the
+        handler lambda. The runtime builds the request struct
+        through a caller-supplied factory closure and reads the
+        response struct through a caller-supplied extractor, so it
+        never needs reflection over user structs."""
+        name = node.func.name
+        self._need_http()
+        self._need_rt("Dict")
+        self._file_uses_http = True
+        if name == "route":
+            req_type, resp_type = self._http_handler_types(node.args[2])
+            req_rs = self._struct_rs_name(req_type.name)
+            resp_rs = self._struct_rs_name(resp_type.name)
+            factory = (f"|_m: String, _p: String, "
+                       f"_h: newr_rt::Dict<String>, _b: String, "
+                       f"_q: newr_rt::Dict<String>| {req_rs} {{ "
+                       f"{self._mangle('method')}: _m, "
+                       f"{self._mangle('path')}: _p, "
+                       f"{self._mangle('headers')}: _h, "
+                       f"{self._mangle('body')}: _b, "
+                       f"{self._mangle('query')}: _q }}")
+            extract = (f"|_r: &{resp_rs}| (_r."
+                       f"{self._mangle('status')}, _r."
+                       f"{self._mangle('headers')}.clone(), _r."
+                       f"{self._mangle('body')}.clone())")
+            return (f"newr_http::http_route(&({args[0]}), &({args[1]}), "
+                    f"{args[2]}, {factory}, {extract})",
+                    _PREC["primary"])
+        if name == "serve":
+            if len(args) == 2:
+                return (f"newr_http::http_serve({args[0]}, "
+                        f"&({args[1]}))", _PREC["primary"])
+            return (f"newr_http::http_serve({args[0]}, "
+                    f"\"127.0.0.1\")", _PREC["primary"])
+        if name in ("get", "post", "request"):
+            t = self._type_of(node)
+            resp_rs = self._struct_rs_name(t.name)
+            make = (f"|_s: i64, _h: newr_rt::Dict<String>, "
+                    f"_b: String| {resp_rs} {{ "
+                    f"{self._mangle('status')}: _s, "
+                    f"{self._mangle('headers')}: _h, "
+                    f"{self._mangle('body')}: _b }}")
+            if name == "get":
+                timeout = args[1] if len(args) > 1 else "10"
+                headers = (args[2] if len(args) > 2
+                           else "newr_rt::Dict::new()")
+                return (f"newr_http::http_get(&({args[0]}), {timeout}, "
+                        f"&({headers}), {make})", _PREC["primary"])
+            if name == "post":
+                timeout = args[2] if len(args) > 2 else "10"
+                headers = (args[3] if len(args) > 3
+                           else "newr_rt::Dict::new()")
+                return (f"newr_http::http_post(&({args[0]}), &({args[1]}), "
+                        f"{timeout}, &({headers}), {make})",
+                        _PREC["primary"])
+            timeout = args[3] if len(args) > 3 else "10"
+            headers = (args[4] if len(args) > 4
+                       else "newr_rt::Dict::new()")
+            return (f"newr_http::http_request(&({args[0]}), &({args[1]}), "
+                    f"&({args[2]}), {timeout}, &({headers}), {make})",
+                    _PREC["primary"])
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`json.*` calls (SPEC.md section 12.7): the helpers live
+        in the `newr_json` module emitted into this file (see
+        `_emit_json_mod`), inline, like `newr_db`. `json.encode`
+        takes its shape from the argument's static type and converts
+        the value to a `JVal` through a caller-generated converter;
+        `json.decode` takes its shape from `node.expr_type`, the
+        expected type set by json_check, and builds the typed value
+        through a caller-generated builder. The runtime walks the
+        shape in both directions (the Python `json_encode` /
+        `json_decode` rules: compact output, UTF-8, float ".0",
+        missing field throws, extra field ignored, null only into
+        nullable, float into int always throws, int into float is
+        fine, trailing data throws, empty string throws, duplicate
+        keys last wins, integer outside int64 throws)."""
+        name = node.func.name
+        self._need_json()
+        self._need_rt("Dict")
+        self._file_uses_json = True
+        if name == "encode":
+            t = self._type_of(node.args[0])
+            shape = self._shape_literal(t)
+            temp = self._new_temp_name()
+            conv = self._json_conv(t, temp)
+            return (f"{{ let {temp} = {self._owned(node.args[0])}; "
+                    f"newr_json::json_encode({shape}, {conv}) }}",
+                    _PREC["primary"])
+        if name == "decode":
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            build = self._json_build(t, "_j")
+            return (f"newr_json::json_decode(&({args[0]}), {shape}, "
+                    f"|_j: newr_json::JVal| {build})",
+                    _PREC["primary"])
+        self._fail(f"module `json` has no function `{name}`")
 
     def _emit_db_mod(self) -> list[str]:
         """The `newr_db` helper module, emitted into a file that
@@ -4241,6 +4557,511 @@ class _RsEmitter:
             "    if db.conns.remove(&handle).is_none() {",
             "      panic!(\"db: unknown or closed handle {}\", handle);",
             "    }",
+            "  }",
+            "}",
+        ]
+
+    def _emit_json_mod(self) -> list[str]:
+        """The `newr_json` helper module, emitted into a file that
+        uses `json.*` (at top level, before `fn main`). The shape
+        descriptor (`Shape`, built by `_shape_literal` from the
+        static type) drives both directions: `json_encode` walks
+        the shape over a `JVal` (the emitter-generated converter
+        turns a typed value into one) and serializes with
+        serde_json (compact, UTF-8, no `\\u` escapes; integral
+        floats render with ".0" because serde_json's shortest
+        round-trip float formatting does that, verified live);
+        `json_decode` parses with serde_json (trailing data and an
+        empty string are parse errors, duplicate keys keep the last
+        value) and walks the shape to a `JVal`, applying the
+        cross-target rules (a missing field throws, an extra field
+        is ignored, null only into a nullable shape, a JSON float
+        into an int field always throws, including an integral 1.0,
+        an integer into a float field is fine, an integer outside
+        int64 throws), then the emitter-generated builder turns the
+        `JVal` into the typed value. The `preserve_order` feature
+        on serde_json keeps struct fields and dict entries in
+        insertion order, so encoded output follows declaration
+        order."""
+        return [
+            "#[allow(dead_code)]",
+            "mod newr_json {",
+            "  #[derive(Clone, Copy)]",
+            "  pub enum Shape {",
+            "    Int,",
+            "    Float,",
+            "    Str,",
+            "    Bool,",
+            "    None,",
+            "    Opt(&'static Shape),",
+            "    List(&'static Shape),",
+            "    Dict(&'static Shape),",
+            "    Struct(&'static str, &'static [(&'static str, &'static Shape)]),",
+            "  }",
+            "",
+            "  #[derive(Clone, Debug)]",
+            "  pub enum JVal {",
+            "    Null,",
+            "    Bool(bool),",
+            "    Int(i64),",
+            "    Float(f64),",
+            "    Str(String),",
+            "    List(Vec<JVal>),",
+            "    Obj(Vec<(String, JVal)>),",
+            "  }",
+            "",
+            "  pub fn field(j: &JVal, name: &str) -> JVal {",
+            "    match j {",
+            "      JVal::Obj(entries) => entries.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()).unwrap_or_else(|| panic!(\"json: missing field '{}'\", name)),",
+            "      _ => panic!(\"json: expected object\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_int(j: &JVal) -> i64 {",
+            "    match j {",
+            "      JVal::Int(i) => *i,",
+            "      _ => panic!(\"json: expected int\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_float(j: &JVal) -> f64 {",
+            "    match j {",
+            "      JVal::Float(f) => *f,",
+            "      JVal::Int(i) => *i as f64,",
+            "      _ => panic!(\"json: expected float\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_str(j: &JVal) -> String {",
+            "    match j {",
+            "      JVal::Str(s) => s.clone(),",
+            "      _ => panic!(\"json: expected str\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn as_bool(j: &JVal) -> bool {",
+            "    match j {",
+            "      JVal::Bool(b) => *b,",
+            "      _ => panic!(\"json: expected bool\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn into_list(j: JVal) -> Vec<JVal> {",
+            "    match j {",
+            "      JVal::List(items) => items,",
+            "      _ => panic!(\"json: expected list\"),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn into_obj(j: JVal) -> Vec<(String, JVal)> {",
+            "    match j {",
+            "      JVal::Obj(entries) => entries,",
+            "      _ => panic!(\"json: expected object\"),",
+            "    }",
+            "  }",
+            "",
+            "  fn from_value(shape: &Shape, value: &serde_json::Value) -> JVal {",
+            "    match shape {",
+            "      Shape::Int => match value {",
+            "        serde_json::Value::Number(n) => {",
+            "          if let Some(i) = n.as_i64() {",
+            "            JVal::Int(i)",
+            "          } else if n.is_u64() {",
+            "            panic!(\"json: integer outside int64 range\");",
+            "          } else {",
+            "            panic!(\"json: expected int\");",
+            "          }",
+            "        }",
+            "        _ => panic!(\"json: expected int\"),",
+            "      },",
+            "      Shape::Float => match value.as_f64() {",
+            "        Some(f) => JVal::Float(f),",
+            "        None => panic!(\"json: expected float\"),",
+            "      },",
+            "      Shape::Str => match value.as_str() {",
+            "        Some(s) => JVal::Str(s.to_string()),",
+            "        None => panic!(\"json: expected str\"),",
+            "      },",
+            "      Shape::Bool => match value.as_bool() {",
+            "        Some(b) => JVal::Bool(b),",
+            "        None => panic!(\"json: expected bool\"),",
+            "      },",
+            "      Shape::None => {",
+            "        if value.is_null() { JVal::Null } else { panic!(\"json: expected null\"); }",
+            "      }",
+            "      Shape::Opt(inner) => {",
+            "        if value.is_null() { JVal::Null } else { from_value(inner, value) }",
+            "      }",
+            "      Shape::List(elem) => match value.as_array() {",
+            "        Some(items) => JVal::List(items.iter().map(|v| from_value(elem, v)).collect()),",
+            "        None => panic!(\"json: expected list\"),",
+            "      },",
+            "      Shape::Dict(val) => match value.as_object() {",
+            "        Some(obj) => JVal::Obj(obj.iter().map(|(k, v)| (k.clone(), from_value(val, v))).collect()),",
+            "        None => panic!(\"json: expected object\"),",
+            "      },",
+            "      Shape::Struct(_name, fields) => match value.as_object() {",
+            "        Some(obj) => {",
+            "          let mut out: Vec<(String, JVal)> = Vec::new();",
+            "          for (fname, fshape) in *fields {",
+            "            match obj.get(*fname) {",
+            "              Some(v) => out.push((fname.to_string(), from_value(fshape, v))),",
+            "              None => panic!(\"json: missing field '{}'\", fname),",
+            "            }",
+            "          }",
+            "          JVal::Obj(out)",
+            "        }",
+            "        None => panic!(\"json: expected object\"),",
+            "      },",
+            "    }",
+            "  }",
+            "",
+            "  fn to_value(shape: &Shape, value: JVal) -> serde_json::Value {",
+            "    match shape {",
+            "      Shape::Int => match value {",
+            "        JVal::Int(i) => serde_json::Value::from(i),",
+            "        _ => panic!(\"json: expected int\"),",
+            "      },",
+            "      Shape::Float => match value {",
+            "        JVal::Float(f) => match serde_json::Number::from_f64(f) {",
+            "          Some(n) => serde_json::Value::Number(n),",
+            "          None => panic!(\"json: cannot encode non-finite float\"),",
+            "        },",
+            "        _ => panic!(\"json: expected float\"),",
+            "      },",
+            "      Shape::Str => match value {",
+            "        JVal::Str(s) => serde_json::Value::String(s),",
+            "        _ => panic!(\"json: expected str\"),",
+            "      },",
+            "      Shape::Bool => match value {",
+            "        JVal::Bool(b) => serde_json::Value::Bool(b),",
+            "        _ => panic!(\"json: expected bool\"),",
+            "      },",
+            "      Shape::None => match value {",
+            "        JVal::Null => serde_json::Value::Null,",
+            "        _ => panic!(\"json: expected null\"),",
+            "      },",
+            "      Shape::Opt(inner) => match value {",
+            "        JVal::Null => serde_json::Value::Null,",
+            "        other => to_value(inner, other),",
+            "      },",
+            "      Shape::List(elem) => match value {",
+            "        JVal::List(items) => serde_json::Value::Array(items.into_iter().map(|v| to_value(elem, v)).collect()),",
+            "        _ => panic!(\"json: expected list\"),",
+            "      },",
+            "      Shape::Dict(val) => match value {",
+            "        JVal::Obj(entries) => {",
+            "          let mut map = serde_json::Map::new();",
+            "          for (k, v) in entries {",
+            "            map.insert(k, to_value(val, v));",
+            "          }",
+            "          serde_json::Value::Object(map)",
+            "        }",
+            "        _ => panic!(\"json: expected object\"),",
+            "      },",
+            "      Shape::Struct(_name, fields) => match value {",
+            "        JVal::Obj(entries) => {",
+            "          let mut map = serde_json::Map::new();",
+            "          for (fname, fshape) in *fields {",
+            "            match entries.iter().find(|(k, _)| k == fname) {",
+            "              Some((_, v)) => { map.insert(fname.to_string(), to_value(fshape, v.clone())); }",
+            "              None => panic!(\"json: missing field '{}'\", fname),",
+            "            }",
+            "          }",
+            "          serde_json::Value::Object(map)",
+            "        }",
+            "        _ => panic!(\"json: expected object\"),",
+            "      },",
+            "    }",
+            "  }",
+            "",
+            "  pub fn json_encode(shape: &Shape, value: JVal) -> String {",
+            "    let v = to_value(shape, value);",
+            "    serde_json::to_string(&v).unwrap_or_else(|e| panic!(\"json: cannot encode value: {}\", e))",
+            "  }",
+            "",
+            "  pub fn json_decode<T>(text: &str, shape: &Shape, build: impl Fn(JVal) -> T) -> T {",
+            "    let parsed: serde_json::Value = serde_json::from_str(text).unwrap_or_else(|e| panic!(\"json: invalid JSON: {}\", e));",
+            "    build(from_value(shape, &parsed))",
+            "  }",
+            "}",
+        ]
+
+    def _emit_http_mod(self) -> list[str]:
+        """The `newr_http` helper module, emitted into a file that
+        uses `http.*` (at top level, before `fn main`). The server
+        runs on tiny_http 0.12.0 (`Server::http`, port 0 for an
+        ephemeral port, `server_addr().to_ip()` for the real port);
+        the client runs on ureq 3.5.1, agent-based
+        (`Agent::config_builder().timeout_global(...).http_status_as_error(false).build()`,
+        then `Agent::new_with_config`, per-request timeout in whole
+        seconds, default 10, covering connect plus body; 4xx/5xx
+        come back as a response, not an error, because
+        `http_status_as_error` is false). Routes are exact-match
+        only and live in one global registry; a request with no
+        route, or a method mismatch, gets 404 with an empty body
+        (not 405). The server reads the whole body before calling
+        the handler, parses the query string into a dict (repeated
+        key keeps the last value, "+" decodes as space, %XX decodes
+        as UTF-8 bytes), validates the status (100 to 599) and
+        always sets Content-Length (tiny_http sets it from the
+        response data length). Handler exceptions, an invalid
+        status, and a non-UTF-8 body surface as 500 with an empty
+        body and the server stays alive (the handler call is inside
+        `catch_unwind`, and the per-request loop catches panics
+        around the whole dispatch). Fetch POST/request sets
+        Content-Type: application/json unless the program sets one;
+        GET sets none. The runtime enforces the default localhost
+        allowlist only (localhost, 127.0.0.1); the manifest
+        allowlist is a static checker concern."""
+        return [
+            "#[allow(dead_code)]",
+            "mod newr_http {",
+            "  pub struct RequestParts {",
+            "    pub method: String,",
+            "    pub path: String,",
+            "    pub headers: crate::newr_rt::Dict<String>,",
+            "    pub body: String,",
+            "    pub query: crate::newr_rt::Dict<String>,",
+            "  }",
+            "",
+            "  type Handler = std::sync::Arc<dyn Fn(RequestParts) -> (i64, crate::newr_rt::Dict<String>, String) + Send + Sync>;",
+            "",
+            "  static ROUTES: std::sync::LazyLock<std::sync::Mutex<Vec<(String, String, Handler)>>> =",
+            "    std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));",
+            "",
+            "  pub fn http_route<Req: 'static, Resp: 'static>(method: &str, path: &str, handler: std::sync::Arc<dyn Fn(Req) -> Resp + Send + Sync>, factory: impl Fn(String, String, crate::newr_rt::Dict<String>, String, crate::newr_rt::Dict<String>) -> Req + Send + Sync + 'static, extract: impl Fn(&Resp) -> (i64, crate::newr_rt::Dict<String>, String) + Send + Sync + 'static) {",
+            "    if !matches!(method, \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\") {",
+            "      panic!(\"http: invalid method '{}'\", method);",
+            "    }",
+            "    if !path.starts_with('/') {",
+            "      panic!(\"http: route path must start with '/', got '{}'\", path);",
+            "    }",
+            "    let wrapped: Handler = std::sync::Arc::new(move |parts: RequestParts| {",
+            "      let req = factory(parts.method, parts.path, parts.headers, parts.body, parts.query);",
+            "      let resp = handler(req);",
+            "      let (status, headers, body) = extract(&resp);",
+            "      if !(100..=599).contains(&status) {",
+            "        panic!(\"http: response status must be 100 to 599, got {}\", status);",
+            "      }",
+            "      (status, headers, body)",
+            "    });",
+            "    ROUTES.lock().unwrap().push((method.to_string(), path.to_string(), wrapped));",
+            "  }",
+            "",
+            "  fn hex_val(b: u8) -> Option<u8> {",
+            "    match b {",
+            "      b'0'..=b'9' => Some(b - b'0'),",
+            "      b'a'..=b'f' => Some(b - b'a' + 10),",
+            "      b'A'..=b'F' => Some(b - b'A' + 10),",
+            "      _ => None,",
+            "    }",
+            "  }",
+            "",
+            "  fn percent_decode(raw: &str) -> String {",
+            "    let bytes = raw.as_bytes();",
+            "    let mut out: Vec<u8> = Vec::new();",
+            "    let mut i = 0;",
+            "    while i < bytes.len() {",
+            "      if bytes[i] == b'%' && i + 2 < bytes.len() {",
+            "        if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {",
+            "          out.push((hi << 4) | lo);",
+            "          i += 3;",
+            "          continue;",
+            "        }",
+            "      }",
+            "      if bytes[i] == b'+' {",
+            "        out.push(b' ');",
+            "      } else {",
+            "        out.push(bytes[i]);",
+            "      }",
+            "      i += 1;",
+            "    }",
+            "    String::from_utf8_lossy(&out).into_owned()",
+            "  }",
+            "",
+            "  fn parse_query(query: &str) -> crate::newr_rt::Dict<String> {",
+            "    let mut dict = crate::newr_rt::Dict::new();",
+            "    if query.is_empty() {",
+            "      return dict;",
+            "    }",
+            "    for pair in query.split('&') {",
+            "      let (raw_key, raw_val) = match pair.split_once('=') {",
+            "        Some((k, v)) => (k, v),",
+            "        None => (pair, \"\"),",
+            "      };",
+            "      dict.insert(percent_decode(raw_key), percent_decode(raw_val));",
+            "    }",
+            "    dict",
+            "  }",
+            "",
+            "  fn handle_one(req: &mut tiny_http::Request) -> (u16, Vec<(String, String)>, Vec<u8>) {",
+            "    let url = req.url().to_string();",
+            "    let (path, query) = match url.split_once('?') {",
+            "      Some((p, q)) => (p.to_string(), q.to_string()),",
+            "      None => (url.clone(), String::new()),",
+            "    };",
+            "    let method = req.method().as_str().to_string();",
+            "    let mut headers = crate::newr_rt::Dict::new();",
+            "    for h in req.headers() {",
+            "      headers.insert(h.field.as_str().to_string(), h.value.as_str().to_string());",
+            "    }",
+            "    let mut raw: Vec<u8> = Vec::new();",
+            "    if req.as_reader().read_to_end(&mut raw).is_err() {",
+            "      return (500, Vec::new(), Vec::new());",
+            "    }",
+            "    let body = match String::from_utf8(raw) {",
+            "      Ok(s) => s,",
+            "      Err(_) => return (500, Vec::new(), Vec::new()),",
+            "    };",
+            "    let query_dict = parse_query(&query);",
+            "    let found = {",
+            "      let routes = ROUTES.lock().unwrap();",
+            "      routes.iter().find(|(m, p, _)| *m == method && *p == path).map(|(_, _, h)| h.clone())",
+            "    };",
+            "    let handler = match found {",
+            "      Some(h) => h,",
+            "      None => return (404, Vec::new(), Vec::new()),",
+            "    };",
+            "    let parts = RequestParts { method, path, headers, body, query: query_dict };",
+            "    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(parts))) {",
+            "      Ok((status, resp_headers, resp_body)) => {",
+            "        let mut out_headers: Vec<(String, String)> = Vec::new();",
+            "        for k in resp_headers.keys() {",
+            "          if let Some(v) = resp_headers.get(&k) {",
+            "            out_headers.push((k, v));",
+            "          }",
+            "        }",
+            "        (status as u16, out_headers, resp_body.into_bytes())",
+            "      }",
+            "      Err(_) => (500, Vec::new(), Vec::new()),",
+            "    }",
+            "  }",
+            "",
+            "  pub fn http_serve(port: i64, host: &str) {",
+            "    if !(0..=65535).contains(&port) {",
+            "      panic!(\"http: port must be 0 to 65535, got {}\", port);",
+            "    }",
+            "    let addr = format!(\"{}:{}\", host, port);",
+            "    let server = tiny_http::Server::http(addr.as_str()).unwrap_or_else(|e| panic!(\"http: cannot listen: {}\", e));",
+            "    let real_port = server.server_addr().to_ip().map(|s| s.port()).unwrap_or(port as u16);",
+            "    println!(\"listening on {}:{}\", host, real_port);",
+            "    {",
+            "      use std::io::Write as _;",
+            "      let _ = std::io::stdout().flush();",
+            "    }",
+            "    for request in server.incoming_requests() {",
+            "      let mut request = request;",
+            "      let (status, headers, body) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handle_one(&mut request))) {",
+            "        Ok(t) => t,",
+            "        Err(_) => (500, Vec::new(), Vec::new()),",
+            "      };",
+            "      let mut resp = tiny_http::Response::from_data(body).with_status_code(status);",
+            "      for (k, v) in headers {",
+            "        if let Ok(h) = tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()) {",
+            "          resp = resp.with_header(h);",
+            "        }",
+            "      }",
+            "      let _ = request.respond(resp);",
+            "    }",
+            "  }",
+            "",
+            "  fn check_url(url: &str) {",
+            "    let (scheme, rest) = match url.split_once(\"://\") {",
+            "      Some((s, r)) => (s, r),",
+            "      None => panic!(\"http: fetch URL must start with http:// or https://, got '{}'\", url),",
+            "    };",
+            "    if scheme != \"http\" && scheme != \"https\" {",
+            "      panic!(\"http: fetch URL must start with http:// or https://, got '{}'\", url);",
+            "    }",
+            "    let authority = rest.split(['/', '?', '#']).next().unwrap_or(\"\");",
+            "    if authority.is_empty() {",
+            "      panic!(\"http: fetch URL has no host: '{}'\", url);",
+            "    }",
+            "    if authority.contains('@') {",
+            "      panic!(\"http: a URL must not carry userinfo; read the token from env and pass it as a header\");",
+            "    }",
+            "    let host_part = authority.split(':').next().unwrap_or(\"\");",
+            "    let host = host_part.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();",
+            "    if host != \"localhost\" && host != \"127.0.0.1\" {",
+            "      panic!(\"http: fetch host '{}' is not on the allowlist (localhost, 127.0.0.1)\", host);",
+            "    }",
+            "  }",
+            "",
+            "  pub fn http_fetch<Resp>(method: &str, url: &str, body: Option<&str>, timeout_secs: i64, headers: &crate::newr_rt::Dict<String>, make: impl Fn(i64, crate::newr_rt::Dict<String>, String) -> Resp) -> Resp {",
+            "    if !matches!(method, \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\") {",
+            "      panic!(\"http: invalid method '{}'\", method);",
+            "    }",
+            "    if timeout_secs <= 0 {",
+            "      panic!(\"http: timeout must be a positive number of seconds, got {}\", timeout_secs);",
+            "    }",
+            "    check_url(url);",
+            "    let config = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(timeout_secs as u64))).http_status_as_error(false).build();",
+            "    let agent = ureq::Agent::new_with_config(config);",
+            "    let mut pairs: Vec<(String, String)> = Vec::new();",
+            "    for k in headers.keys() {",
+            "      if let Some(v) = headers.get(&k) {",
+            "        pairs.push((k, v));",
+            "      }",
+            "    }",
+            "    let has_content_type = pairs.iter().any(|(k, _)| k.eq_ignore_ascii_case(\"content-type\"));",
+            "    let result = match method {",
+            "      \"GET\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\" => {",
+            "        let mut b = match method {",
+            "          \"GET\" => agent.get(url),",
+            "          \"DELETE\" => agent.delete(url),",
+            "          \"HEAD\" => agent.head(url),",
+            "          _ => agent.options(url),",
+            "        };",
+            "        for (k, v) in &pairs {",
+            "          b = b.header(k.as_str(), v.as_str());",
+            "        }",
+            "        match body {",
+            "          Some(text) if !text.is_empty() => b.force_send_body().send(text),",
+            "          _ => b.call(),",
+            "        }",
+            "      }",
+            "      _ => {",
+            "        let mut b = match method {",
+            "          \"POST\" => agent.post(url),",
+            "          \"PUT\" => agent.put(url),",
+            "          _ => agent.patch(url),",
+            "        };",
+            "        for (k, v) in &pairs {",
+            "          b = b.header(k.as_str(), v.as_str());",
+            "        }",
+            "        if !has_content_type {",
+            "          b = b.header(\"Content-Type\", \"application/json\");",
+            "        }",
+            "        b.send(body.unwrap_or(\"\"))",
+            "      }",
+            "    };",
+            "    let resp = match result {",
+            "      Ok(r) => r,",
+            "      Err(e) => panic!(\"http: fetch {} {} failed: {}\", method, url, e),",
+            "    };",
+            "    let status = resp.status().as_u16() as i64;",
+            "    let mut resp_headers = crate::newr_rt::Dict::new();",
+            "    for (name, value) in resp.headers().iter() {",
+            "      resp_headers.insert(name.as_str().to_string(), String::from_utf8_lossy(value.as_bytes()).into_owned());",
+            "    }",
+            "    let text = match resp.into_body().read_to_string() {",
+            "      Ok(t) => t,",
+            "      Err(e) => panic!(\"http: failed to read response body: {}\", e),",
+            "    };",
+            "    make(status, resp_headers, text)",
+            "  }",
+            "",
+            "  pub fn http_get<Resp>(url: &str, timeout_secs: i64, headers: &crate::newr_rt::Dict<String>, make: impl Fn(i64, crate::newr_rt::Dict<String>, String) -> Resp) -> Resp {",
+            "    http_fetch(\"GET\", url, None, timeout_secs, headers, make)",
+            "  }",
+            "",
+            "  pub fn http_post<Resp>(url: &str, body: &str, timeout_secs: i64, headers: &crate::newr_rt::Dict<String>, make: impl Fn(i64, crate::newr_rt::Dict<String>, String) -> Resp) -> Resp {",
+            "    http_fetch(\"POST\", url, Some(body), timeout_secs, headers, make)",
+            "  }",
+            "",
+            "  pub fn http_request<Resp>(method: &str, url: &str, body: &str, timeout_secs: i64, headers: &crate::newr_rt::Dict<String>, make: impl Fn(i64, crate::newr_rt::Dict<String>, String) -> Resp) -> Resp {",
+            "    http_fetch(method, url, Some(body), timeout_secs, headers, make)",
             "  }",
             "}",
         ]
@@ -7133,6 +7954,14 @@ class _RsEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_db_mod())
+        if self._file_uses_http:
+            if body:
+                body.append("")
+            body.extend(self._emit_http_mod())
+        if self._file_uses_json:
+            if body:
+                body.append("")
+            body.extend(self._emit_json_mod())
         # Top-level statements: main() for the entry file,
         # __newr_init() for a file module. The module inits run
         # first (in import order), then this file's statements.
@@ -7228,6 +8057,22 @@ def _rs_db_cargo_toml(stem: str, file_stem: str) -> str:
     `db.*`: rusqlite 0.41 with the bundled feature only (a plain
     program otherwise builds with bare rustc and no Cargo.toml).
     One binary, no deploy script, no serenity/poise."""
+    return _rs_plain_cargo_toml(stem, file_stem, uses_sqlite=True,
+                                uses_http_json=False)
+
+
+def _rs_plain_cargo_toml(stem: str, file_stem: str, *,
+                         uses_sqlite: bool,
+                         uses_http_json: bool) -> str:
+    """The Cargo build file for a plain (non-bot) program that uses
+    `db.*` and/or `http.*`/`json.*`: exactly the deps the program
+    uses, no serenity/poise, no deploy script. `db` adds rusqlite
+    0.41 with the bundled feature; `http` or `json` (or both) add
+    tiny_http 0.12.0, ureq 3.5.1 with the rustls feature, and
+    serde_json 1.0.154 with preserve_order (insertion order for
+    struct fields and dict entries), all verified live on
+    crates.io. A plain program using none of the three builds with
+    bare rustc and no Cargo.toml at all."""
     artifact = "".join(ch.lower() if ch.isalnum() else "-"
                        for ch in stem).strip("-") or "main"
     lines = [
@@ -7242,8 +8087,16 @@ def _rs_db_cargo_toml(stem: str, file_stem: str) -> str:
         f'path = "{file_stem}.rs"',
         "",
         "[dependencies]",
-        'rusqlite = { version = "0.41", features = ["bundled"] }',
     ]
+    if uses_sqlite:
+        lines.append('rusqlite = { version = "0.41", features = '
+                     '["bundled"] }')
+    if uses_http_json:
+        lines.append('tiny_http = "0.12.0"')
+        lines.append('ureq = { version = "3.5.1", features = '
+                     '["rustls"] }')
+        lines.append('serde_json = { version = "1.0.154", features = '
+                     '["preserve_order"] }')
     return "\n".join(lines) + "\n"
 
 
@@ -7291,12 +8144,16 @@ def emit_program_rs(program: A.Program, *, main_path: str,
         files[file_stem + "_deploy.rs"] = deploy
         files["Cargo.toml"] = _rs_cargo_toml(stem, file_stem,
                                              uses_sqlite=em.uses_sqlite)
-    elif em.uses_sqlite:
-        # A plain program that uses `db.*` needs a Cargo build
-        # file too (B8): rusqlite only, no serenity/poise and no
-        # deploy script — plain programs otherwise build with
+    elif em.uses_sqlite or em.uses_http or em.uses_json:
+        # A plain program that uses `db.*` and/or `http.*`/`json.*`
+        # needs a Cargo build file too (B8): exactly the deps it
+        # uses: rusqlite only for db, tiny_http + ureq + serde_json
+        # for http/json, both sets combined, no serenity/poise and
+        # no deploy script. Plain programs otherwise build with
         # bare rustc and no Cargo.toml at all.
-        files["Cargo.toml"] = _rs_db_cargo_toml(stem, file_stem)
+        files["Cargo.toml"] = _rs_plain_cargo_toml(
+            stem, file_stem, uses_sqlite=em.uses_sqlite,
+            uses_http_json=em.uses_http or em.uses_json)
     return EmitResult(files=files,
                       main_file=file_stem + ".rs",
                       uses_rt=uses_rt)

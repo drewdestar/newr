@@ -10,6 +10,26 @@ hello.newr, a program written in the newr language.
 Build it with: newr build examples/hello.newr
 Then run it with: python examples/hello.py
 
+## `hello_api_client.newr`
+
+### struct `Todo`
+
+hello_api_client.newr, a tiny JSON API client (M8b example).
+Fetches the todo list from hello_api_server.newr (run that
+first, it listens on port 8080), then posts a new todo and
+prints the echo.
+Build it with: newr build examples/hello_api_client.newr
+
+## `hello_api_server.newr`
+
+### struct `Todo`
+
+hello_api_server.newr, a tiny JSON API server (M8b example).
+GET /todos lists the todos as JSON, POST /todos echoes the
+posted todo back with status 201. Run it, then fetch it with
+hello_api_client.newr (or curl http://127.0.0.1:8080/todos).
+Build it with: newr build examples/hello_api_server.newr
+
 ## `hello_bot.newr`
 
 hello_bot.newr, a bot written in the newr language.

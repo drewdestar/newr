@@ -15,12 +15,18 @@ program. `newr init` scaffolds one:
 The manifest schema is SPEC section 11:
 
     { "name": str, "version": str, "target": "py" | "js" | ...,
-      "default_locale": str, "db_path": str }
+      "default_locale": str, "db_path": str,
+      "http_allowlist": list[str] }
 
-`name` and `version` are required; `target`, `default_locale`, and
-`db_path` are optional. `db_path` is schema-only in v1: nothing reads
-it yet (the store's database path is decided by the runtime), so the
-scaffold omits it rather than writing a value nothing honours.
+`name` and `version` are required; `target`, `default_locale`,
+`db_path`, and `http_allowlist` are optional. `db_path` is
+schema-only in v1: nothing reads it yet (the store's database path
+is decided by the runtime), so the scaffold omits it rather than
+writing a value nothing honours. `http_allowlist` lists the bare
+hostnames a program may fetch from (no scheme, no port, exact
+match); when it is absent, fetches are localhost-only
+(`localhost`, `127.0.0.1`). The scaffold omits it too: a new
+project fetches localhost until the author adds a host.
 
 `newr build` without `--target` reads the manifest for the default
 target: it searches for `newr.json` starting in the main file's
@@ -36,6 +42,7 @@ seven targets, is an error naming the file, never a silent fallback.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,6 +53,11 @@ MANIFEST_FILENAME = "newr.json"
 PROJECT_VERSION = "0.2.0"
 
 DEFAULT_LOCALE = "en"
+
+#: A bare hostname for `http_allowlist`: no scheme, no port, no
+#: userinfo, no path. The same shape the http checker enforces
+#: (SPEC.md SS12.6).
+_HOST_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # How to run the scaffolded program once built, per target. Plain
 # programs only: a bot program also gets deploy/registration steps
@@ -78,6 +90,7 @@ class Manifest:
     target: str | None = None
     default_locale: str | None = None
     db_path: str | None = None
+    http_allowlist: tuple[str, ...] | None = None
 
     def to_dict(self) -> dict:
         """The manifest as a JSON object (omits absent optionals)."""
@@ -88,6 +101,8 @@ class Manifest:
             data["default_locale"] = self.default_locale
         if self.db_path is not None:
             data["db_path"] = self.db_path
+        if self.http_allowlist is not None:
+            data["http_allowlist"] = list(self.http_allowlist)
         return data
 
 
@@ -97,8 +112,10 @@ def load_manifest(path: Path) -> Manifest:
     Raises ManifestError naming the file when the JSON is malformed,
     when the top level is not an object, when `name` or `version` is
     missing or not a string, when `target` is not one of the seven
-    targets, or when `default_locale` / `db_path` is not a string.
-    Unknown keys are ignored (forward compatibility).
+    targets, when `default_locale` / `db_path` is not a string, or
+    when `http_allowlist` is not a list of bare hostnames (no scheme,
+    no port, no userinfo, no path). Unknown keys are ignored (forward
+    compatibility).
     """
     try:
         text = path.read_text(encoding="utf-8")
@@ -138,8 +155,21 @@ def load_manifest(path: Path) -> Manifest:
     if db_path is not None and not isinstance(db_path, str):
         raise ManifestError(
             f"{path}: `db_path` must be a string (got {db_path!r})")
+    http_allowlist = data.get("http_allowlist")
+    allowlist: tuple[str, ...] | None = None
+    if http_allowlist is not None:
+        if not isinstance(http_allowlist, list) or any(
+                not isinstance(h, str) or not _HOST_RE.match(h)
+                for h in http_allowlist):
+            raise ManifestError(
+                f"{path}: `http_allowlist` must be a list of bare "
+                f"hostnames (no scheme, no port, no userinfo, no "
+                f"path), for example `[\"localhost\", \"127.0.0.1\"]` "
+                f"(got {http_allowlist!r})")
+        allowlist = tuple(http_allowlist)
     return Manifest(name=name, version=version, target=target,
-                    default_locale=default_locale, db_path=db_path)
+                    default_locale=default_locale, db_path=db_path,
+                    http_allowlist=allowlist)
 
 
 def find_manifest(start: Path) -> Path | None:
@@ -172,6 +202,20 @@ def default_target_for(main_path: Path) -> str:
         return "py"
     manifest = load_manifest(manifest_path)
     return manifest.target or "py"
+
+
+def http_allowlist_for(main_path: Path) -> tuple[str, ...] | None:
+    """The http allowlist for a program: its manifest's
+    `http_allowlist`, or None when there is no manifest or the
+    manifest sets no key (the http checker applies the default
+    localhost-only list then).
+
+    Raises ManifestError when a manifest is found but unusable.
+    """
+    manifest_path = find_manifest(Path(main_path))
+    if manifest_path is None:
+        return None
+    return load_manifest(manifest_path).http_allowlist
 
 
 def main_source(name: str, target: str) -> str:

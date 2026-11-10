@@ -66,8 +66,8 @@ RESERVED_HANDLER_BINDINGS = {
 }
 
 #: Named (stdlib / domain) modules available in v1 (SPEC.md §11, §12).
-#: ``json`` is v1.1, not v1 — importing it is E3008 with a v1.1 pointer.
-NAMED_MODULES = {"math", "time", "random", "file", "env", "discord", "db"}
+NAMED_MODULES = {"math", "time", "random", "file", "env", "discord", "db",
+                 "http", "json"}
 
 #: Handler bindings per context (SPEC.md §13.4–§13.5). Select handlers add
 #: ``values``; modal handlers add their field names.
@@ -374,13 +374,7 @@ class Resolver:
     def _resolve_import(self, info: _ModuleInfo, imp: A.Import) -> None:
         bound = imp.bound_name
         if imp.module is not None:
-            if imp.module == "json":
-                self._error(imp.span, "E3008",
-                            "module `json` is not available in v1 "
-                            "(arrives in v1.1)",
-                            help="json needs a typed JSON value first "
-                                 "(SPEC.md §12.2)")
-            elif imp.module not in NAMED_MODULES:
+            if imp.module not in NAMED_MODULES:
                 known = ", ".join(sorted(NAMED_MODULES))
                 self._error(imp.span, "E3008",
                             f"unknown module `{imp.module}`",

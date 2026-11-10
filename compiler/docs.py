@@ -33,6 +33,8 @@ from pathlib import Path
 
 from . import __version__
 from .db_limits import DB_MEMBERS
+from .http_limits import HTTP_MEMBERS
+from .json_limits import JSON_MEMBERS
 from .modules import BUILTINS, METHODS, MODULES
 from .parser import parse
 
@@ -126,6 +128,33 @@ def api_markdown() -> str:
     ]
     for name, entry in DB_MEMBERS.items():
         lines += [f"### `db.{name}`", "",
+                  f"`{entry['sig']}`", "", entry["doc"], ""]
+    lines += [
+        "## http module (SPEC.md section 12.6)",
+        "",
+        "HTTP server plus fetch client, sync. Routes are exact-match "
+        "only. The request and response are user-declared structs, "
+        "validated by field shape. Fetch returns a typed HttpResponse "
+        "struct, resolved from the expected type at the call site. "
+        "Every http call throws on failure. Fetches are allowlisted "
+        "(newr.json `http_allowlist`, default localhost only).",
+        "",
+    ]
+    for name, entry in HTTP_MEMBERS.items():
+        lines += [f"### `http.{name}`", "",
+                  f"`{entry['sig']}`", "", entry["doc"], ""]
+    lines += [
+        "## json module (SPEC.md section 12.7)",
+        "",
+        "Typed JSON. `encode` takes any encodable value (struct, "
+        "list, dict, scalar, or nullable of those); `decode` takes "
+        "its type from the call site. Enums are not encodable in "
+        "M8b. Floats encode as their shortest round-trip decimal, "
+        "with \".0\" for integral floats.",
+        "",
+    ]
+    for name, entry in JSON_MEMBERS.items():
+        lines += [f"### `json.{name}`", "",
                   f"`{entry['sig']}`", "", entry["doc"], ""]
     lines += [
         "## Methods (SPEC.md section 12.4)",

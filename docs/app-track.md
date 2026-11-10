@@ -248,9 +248,28 @@ shape end to end first.
   list, never stringified dicts). Suite 1276 tests OK (skipped=15);
   conformance 80/80 on all seven targets; `examples/todo.newr` stores
   and lists rows, goldens pinned for it on all seven targets.
-- M8b `http` plus `json`: research server and fetch natives per
-  target, then build, then a `hello_api` example: backend serves one
-  JSON route, frontend fetches and prints it.
+- M8b `http` plus `json`: LANDED 10 Nov 2026 (research in
+  `newr-research/m8b-http-eval/EVAL.md`, build report in
+  `newr-research/m8b-http-build/BUILD_REPORT.md`). `http` server
+  plus fetch client and typed `json` encode/decode, on all seven
+  targets: py stdlib http.server/urllib/json, js node:http plus
+  a subprocess fetch (Node has no sync fetch) plus a
+  number-preserving JSON pre-pass, java/kt JDK HttpServer plus
+  HttpClient with hand-written strict RFC 8259 JSON
+  parser/serializer, cs HttpListener/HttpClient/System.Text.Json
+  (no NuGet), rs tiny_http 0.12.0 plus ureq 3.5.1 (rustls) plus
+  serde_json 1.0.154, dart dart:io plus dart:convert (no pubspec
+  change). Routes are exact-match only; fetch returns a typed
+  HttpResponse struct via expected-type inference; timeout
+  default 10s; allowlist localhost only by default (manifest
+  `http_allowlist` is a static checker concern); E2012 (http)
+  and E2013 (json) are the two new codes (error index 41).
+  Suite 1392 tests OK (skipped=15); conformance 83/83 on all
+  seven targets (new mod_json, mod_http_server/client pair
+  with a two-process harness in conformance/run.py, two err
+  programs); `examples/hello_api_server.newr` plus
+  `examples/hello_api_client.newr`, goldens pinned for the
+  client on all seven targets, pair verified live on py and js.
 - M8c `ui`: research the seven UI toolkits (versions, what is
   installable on this VM, what needs a Mac or an Android SDK), then
   build the small widget set, then a `hello_ui` example on every target
@@ -292,6 +311,23 @@ Limits:
   downloads the native libsqlite3. On java/kt the user supplies the
   sqlite-jdbc jar on the runtime classpath (the conformance runner
   downloads it automatically; `newr build` does not).
+- M8b `http` plus `json` limits (10 Nov 2026): the runtime
+  enforces the default localhost allowlist only; the manifest
+  `http_allowlist` is a static checker concern (the CLI does not
+  pass it to the emitter). Redirect policy is unpinned across
+  targets (java follows redirects like py urllib; the others are
+  unverified). `http` inside a bot handler is not in M8b
+  (general programs only); `json.encode`/`decode` are pure and
+  work anywhere. A JSON float into an int field always throws,
+  including an integral 1.0. On js, fetch runs in a subprocess
+  (newr JS programs are synchronous top-level code; a proper
+  async design is a follow-up) and `http.serve` returns after
+  listening instead of blocking (the listening server keeps the
+  event loop and the process alive). On this VM, java/kt need
+  `java.net.preferIPv4Stack=true` and cs needs an explicit IPv4
+  socket with the proxy disabled (the VM mangles
+  dual-stack/unspecified-family sockets); each target carries
+  its own equivalent workaround.
 - UI parity is the hard part. A button will not look identical on all
   seven targets in M8, and the doc does not claim it will. Same layout,
   same behavior, native look per target.
@@ -314,7 +350,11 @@ Open questions (to settle in the M8a research, before building):
   dicts, never `list[dict[str, str]]`; the honest fallback (had
   inference failed) would have been a cursor-style API, not dicts.
 - Should the frontend fetch go through `http` only, or also a
-  generated client from the shared route table?
+  generated client from the shared route table? SETTLED in M8b
+  (10 Nov 2026): fetch goes through `http` only. A generated
+  client from the shared route table is M8d/M9 material, not
+  M8b; the M8b example client (`examples/hello_api_client.newr`)
+  calls `http.get`/`http.post` directly.
 - Which UI toolkit per target is the M8 default where two exist
   (for example WinUI vs MAUI on C#, JavaFX vs Compose on desktop)?
 - Single-file full-stack in M9: what syntax marks the split?

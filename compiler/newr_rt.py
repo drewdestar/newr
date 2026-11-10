@@ -16,11 +16,16 @@ D5–D9, D24). Every rule here is unit-tested in tests/test_newr_rt.py.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import sqlite3
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal, localcontext
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qsl, urlparse, urlsplit
 
 # ---------------------------------------------------------------- int64
 
@@ -639,3 +644,468 @@ def db_close(handle: int) -> None:
     if conn is None:
         raise NewrError(f"db: unknown or closed handle {handle}")
     conn.close()
+
+
+# ------------------------------------------------------------ json module
+# Typed JSON (SPEC.md section 12.7). The emitter passes a recursive
+# shape descriptor built from the static type: a scalar is "int" /
+# "float" / "str" / "bool" / "none", a nullable is ["?", inner], a
+# list is ["list", elem], a dict is ["dict", value], a struct is
+# ["struct", <class>, [[field, shape], ...]] in declaration order,
+# where <class> is the emitted struct class itself (the runtime
+# cannot name a user struct, so the emitter hands it the class).
+# Structs are built positionally, in field order, so a field whose
+# newr name is a Python keyword still constructs correctly.
+
+def _json_reject_constant(value: str):
+    """Reject the non-JSON literals Python accepts by default
+    (NaN, Infinity, -Infinity): RFC 8259 has no such numbers."""
+    raise ValueError(f"invalid JSON constant {value!r}")
+
+
+def _struct_field_value(value, field_name: str):
+    """One struct field, by its newr name. A field whose name is a
+    Python keyword is emitted with a trailing underscore, so fall
+    back to that spelling when the plain name is missing."""
+    try:
+        return getattr(value, field_name)
+    except AttributeError:
+        return getattr(value, field_name + "_")
+
+
+def _json_encode_value(value, shape):
+    """The plain Python value (dicts, lists, scalars, None) for
+    ``value`` under ``shape``, in struct declaration order."""
+    if isinstance(shape, str):
+        if shape == "int":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise NewrError(
+                    f"json: expected int, got {type(value).__name__}")
+            return check_int(value)
+        if shape == "float":
+            if isinstance(value, bool):
+                raise NewrError("json: expected float, got bool")
+            if isinstance(value, int):
+                return float(value)
+            if isinstance(value, float):
+                return value
+            raise NewrError(
+                f"json: expected float, got {type(value).__name__}")
+        if shape == "str":
+            if not isinstance(value, str):
+                raise NewrError(
+                    f"json: expected str, got {type(value).__name__}")
+            return value
+        if shape == "bool":
+            if not isinstance(value, bool):
+                raise NewrError(
+                    f"json: expected bool, got {type(value).__name__}")
+            return value
+        if shape == "none":
+            if value is not None:
+                raise NewrError("json: expected none")
+            return None
+        raise NewrError(f"json: unknown shape {shape!r}")
+    kind = shape[0]
+    if kind == "?":
+        if value is None:
+            return None
+        return _json_encode_value(value, shape[1])
+    if kind == "list":
+        if not isinstance(value, list):
+            raise NewrError(
+                f"json: expected list, got {type(value).__name__}")
+        return [_json_encode_value(v, shape[1]) for v in value]
+    if kind == "dict":
+        if not isinstance(value, dict):
+            raise NewrError(
+                f"json: expected dict, got {type(value).__name__}")
+        out = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise NewrError("json: dict keys must be str")
+            out[key] = _json_encode_value(item, shape[1])
+        return out
+    if kind == "struct":
+        out = {}
+        for field_name, field_shape in shape[2]:
+            out[field_name] = _json_encode_value(
+                _struct_field_value(value, field_name), field_shape)
+        return out
+    raise NewrError(f"json: unknown shape {shape!r}")
+
+
+def _json_decode_value(value, shape):
+    """The newr value for a parsed JSON value under ``shape``. A
+    struct is built positionally from its fields, in declaration
+    order; a missing field throws, an extra field is ignored."""
+    if isinstance(shape, str):
+        if shape == "int":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise NewrError(
+                    f"json: expected int, got {type(value).__name__}")
+            return check_int(value)
+        if shape == "float":
+            if isinstance(value, bool):
+                raise NewrError("json: expected float, got bool")
+            if isinstance(value, int):
+                try:
+                    return float(value)
+                except OverflowError:
+                    raise NewrError(
+                        "json: integer too large for float")
+            if isinstance(value, float):
+                return value
+            raise NewrError(
+                f"json: expected float, got {type(value).__name__}")
+        if shape == "str":
+            if not isinstance(value, str):
+                raise NewrError(
+                    f"json: expected str, got {type(value).__name__}")
+            return value
+        if shape == "bool":
+            if not isinstance(value, bool):
+                raise NewrError(
+                    f"json: expected bool, got {type(value).__name__}")
+            return value
+        if shape == "none":
+            if value is not None:
+                raise NewrError("json: expected null")
+            return None
+        raise NewrError(f"json: unknown shape {shape!r}")
+    kind = shape[0]
+    if kind == "?":
+        if value is None:
+            return None
+        return _json_decode_value(value, shape[1])
+    if kind == "list":
+        if not isinstance(value, list):
+            raise NewrError(
+                f"json: expected list, got {type(value).__name__}")
+        return [_json_decode_value(v, shape[1]) for v in value]
+    if kind == "dict":
+        if not isinstance(value, dict):
+            raise NewrError(
+                f"json: expected dict, got {type(value).__name__}")
+        return {k: _json_decode_value(v, shape[1])
+                for k, v in value.items()}
+    if kind == "struct":
+        if not isinstance(value, dict):
+            raise NewrError(
+                f"json: expected object, got {type(value).__name__}")
+        cls = shape[1]
+        args = []
+        for field_name, field_shape in shape[2]:
+            if field_name not in value:
+                raise NewrError(
+                    f"json: missing field {field_name!r}")
+            args.append(_json_decode_value(value[field_name],
+                                           field_shape))
+        return cls(*args)
+    raise NewrError(f"json: unknown shape {shape!r}")
+
+
+def json_encode(value, shape) -> str:
+    """newr `json.encode(value)`: JSON text, compact, in struct
+    declaration order. Floats use the shortest round-trip decimal,
+    with ".0" for integral floats (Python `json.dumps` already does
+    this: `json.dumps(1.0)` is "1.0"); ints are exact decimal,
+    including int64 and beyond (Python ints are arbitrary
+    precision, and the shape check keeps them in int64 range).
+    Non-ASCII text is written as UTF-8, not \\u escapes, matching
+    the other targets. `allow_nan=False` keeps inf/nan out of the
+    output: they are not valid JSON numbers, so encoding one
+    throws instead of writing Infinity."""
+    plain = _json_encode_value(value, shape)
+    try:
+        return json.dumps(plain, ensure_ascii=False,
+                          separators=(",", ":"), allow_nan=False)
+    except (ValueError, TypeError) as exc:
+        raise NewrError(f"json: cannot encode value: {exc}") from exc
+
+
+def json_decode(text: str, shape):
+    """newr `json.decode(text)`: the typed value for ``text`` under
+    ``shape``. An empty string throws, trailing data after the JSON
+    value throws, duplicate keys keep the last value (the parser
+    behaviour), a JSON fraction into an int field throws, an integer
+    into a float field is fine, null only into a nullable shape,
+    and an integer outside int64 throws."""
+    if not isinstance(text, str):
+        raise NewrError("json: decode takes a string")
+    try:
+        parsed = json.loads(text,
+                            parse_constant=_json_reject_constant)
+    except ValueError as exc:
+        raise NewrError(f"json: invalid JSON: {exc}") from exc
+    return _json_decode_value(parsed, shape)
+
+
+def _build_from_shape(shape, values: dict):
+    """Build a struct from a plain dict of field values, converting
+    each field through its shape. Used for the fetch response and
+    the server request, whose fields arrive as plain values, not
+    as JSON text."""
+    if not isinstance(shape, (list, tuple)) or len(shape) != 3 \
+            or shape[0] != "struct":
+        raise NewrError("http: internal: expected a struct shape")
+    cls = shape[1]
+    args = []
+    for field_name, field_shape in shape[2]:
+        if field_name not in values:
+            raise NewrError(f"http: missing field {field_name!r}")
+        args.append(_json_decode_value(values[field_name], field_shape))
+    return cls(*args)
+
+
+# ------------------------------------------------------------ http module
+# Sync HTTP server plus fetch client (SPEC.md section 12.6), stdlib
+# only: `http.server` (ThreadingHTTPServer) for serve, `urllib`
+# for fetch. Routes live in a module-level registry, exact-match
+# only; a request with no route, or a method mismatch, gets 404
+# with an empty body (not 405).
+
+_HTTP_METHODS = {
+    "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
+}
+
+#: The fetch allowlist the runtime can enforce without a manifest
+#: (SPEC.md section 12.6): localhost only. The checker enforces the
+#: manifest allowlist for literal URLs; the runtime enforces this
+#: default list for computed URLs, and for every URL at call time.
+#: A manifest that allows another host is honoured by the checker
+#: for literal URLs, but the runtime has no manifest access, so a
+#: fetch to such a host still throws here (see the Phase B report).
+_DEFAULT_HTTP_ALLOWLIST = ("localhost", "127.0.0.1")
+
+# (method, path, handler, request shape), in registration order.
+_HTTP_ROUTES: list = []
+
+
+def http_route(method: str, path: str, handler, req_shape) -> None:
+    """newr `http.route(method, path, handler)`: register one
+    exact-match route. A computed method that is not one of the
+    uppercase methods, or a computed path without a leading slash,
+    throws here (literal ones are E2012 from the checker)."""
+    if not isinstance(method, str) or method not in _HTTP_METHODS:
+        raise NewrError(f"http: invalid method {method!r}")
+    if not isinstance(path, str) or not path.startswith("/"):
+        raise NewrError(
+            f"http: route path must start with '/', got {path!r}")
+    if not callable(handler):
+        raise NewrError("http: route handler must be callable")
+    _HTTP_ROUTES.append((method, path, handler, req_shape))
+
+
+class _NewrHttpHandler(BaseHTTPRequestHandler):
+    """One request: read the whole body, build the request struct,
+    call the handler, write the response. Handler exceptions and an
+    out-of-range status surface as a 500 with an empty body, so one
+    bad request never takes the server down."""
+
+    def log_message(self, fmt, *args):
+        pass
+
+    def do_GET(self):
+        self._dispatch()
+
+    def do_POST(self):
+        self._dispatch()
+
+    def do_PUT(self):
+        self._dispatch()
+
+    def do_PATCH(self):
+        self._dispatch()
+
+    def do_DELETE(self):
+        self._dispatch()
+
+    def do_HEAD(self):
+        self._dispatch()
+
+    def do_OPTIONS(self):
+        self._dispatch()
+
+    def _send(self, status: int, headers: dict, body: bytes) -> None:
+        try:
+            self.send_response(status)
+            for key, value in headers.items():
+                if key.lower() == "content-length":
+                    continue
+                self.send_header(key, value)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            if self.command != "HEAD" and body:
+                self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+    def _dispatch(self) -> None:
+        try:
+            parsed = urlsplit(self.path)
+            path = parsed.path
+            # parse_qsl decodes "+" as space and %XX as the byte
+            # (UTF-8); dict() keeps the LAST value for a repeated key.
+            query = dict(parse_qsl(parsed.query,
+                                   keep_blank_values=True))
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            raw = self.rfile.read(length) if length > 0 else b""
+            try:
+                body = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                self._send(500, {}, b"")
+                return
+            headers = {k: v for k, v in self.headers.items()}
+            found = None
+            for route in _HTTP_ROUTES:
+                if route[0] == self.command and route[1] == path:
+                    found = route
+                    break
+            if found is None:
+                self._send(404, {}, b"")
+                return
+            _method, _path, handler, req_shape = found
+            values = {"method": self.command, "path": path,
+                      "headers": headers, "body": body, "query": query}
+            req = _build_from_shape(req_shape, values)
+            resp = handler(req)
+            status = _struct_field_value(resp, "status")
+            resp_headers = _struct_field_value(resp, "headers")
+            resp_body = _struct_field_value(resp, "body")
+            if isinstance(status, bool) or not isinstance(status, int) \
+                    or not 100 <= status <= 599:
+                raise NewrError(
+                    f"http: response status must be 100 to 599, "
+                    f"got {status!r}")
+            if not isinstance(resp_headers, dict):
+                raise NewrError("http: response headers must be a dict")
+            if not isinstance(resp_body, str):
+                raise NewrError("http: response body must be a str")
+            self._send(status, resp_headers, resp_body.encode("utf-8"))
+        except Exception:
+            try:
+                self._send(500, {}, b"")
+            except Exception:
+                pass
+
+
+def http_serve(port: int, host: str = "127.0.0.1") -> None:
+    """newr `http.serve(port)` / `http.serve(port, host)`: serve the
+    registered routes forever, until the process is killed. Prints
+    `listening on <host>:<port>` (the real port when 0) as its first
+    line, then blocks. A KeyboardInterrupt exits 0."""
+    if isinstance(port, bool) or not isinstance(port, int) \
+            or not 0 <= port <= 65535:
+        raise NewrError(
+            f"http: port must be 0 to 65535, got {port!r}")
+    if not isinstance(host, str):
+        raise NewrError(f"http: host must be a str, got {host!r}")
+    server = ThreadingHTTPServer((host, port), _NewrHttpHandler)
+    real_port = server.server_address[1]
+    print(f"listening on {host}:{real_port}", flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+def http_fetch(method: str, url: str, body, timeout: int = 10,
+               headers=None, shape=None):
+    """The fetch primitive behind `http.get` / `http.post` /
+    `http.request`: one request, whole-request timeout in seconds
+    (default 10, connect plus body). POST/request set
+    `Content-Type: application/json` unless the program sets one;
+    GET sets none. A 4xx/5xx status is a response, not a throw: the
+    caller reads `resp.status`. Anything else that fails (an
+    unreachable host, a timeout, a bad URL, a host outside the
+    allowlist) throws."""
+    if not isinstance(method, str) or method not in _HTTP_METHODS:
+        raise NewrError(f"http: invalid method {method!r}")
+    if isinstance(timeout, bool) or not isinstance(timeout, int) \
+            or timeout <= 0:
+        raise NewrError(
+            f"http: timeout must be a positive number of seconds, "
+            f"got {timeout!r}")
+    if not isinstance(url, str):
+        raise NewrError(f"http: URL must be a str, got {url!r}")
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise NewrError(
+            f"http: fetch URL must start with http:// or https://, "
+            f"got {url!r}")
+    if not parsed.hostname:
+        raise NewrError(f"http: fetch URL has no host: {url!r}")
+    if parsed.username is not None:
+        raise NewrError(
+            "http: a URL must not carry userinfo; read the token "
+            "from env and pass it as a header")
+    host = parsed.hostname.lower()
+    if host not in _DEFAULT_HTTP_ALLOWLIST:
+        raise NewrError(
+            f"http: fetch host {host!r} is not on the allowlist "
+            f"(localhost, 127.0.0.1)")
+    if shape is None:
+        raise NewrError("http: internal: fetch without a response shape")
+    req_headers: dict[str, str] = {}
+    if headers is not None:
+        if not isinstance(headers, dict):
+            raise NewrError("http: headers must be a dict")
+        for key, value in headers.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise NewrError("http: headers must be dict[str, str]")
+            req_headers[key] = value
+    data = None
+    if body is not None:
+        if not isinstance(body, str):
+            raise NewrError("http: body must be a str")
+        data = body.encode("utf-8")
+        if not any(k.lower() == "content-type"
+                   for k in req_headers):
+            req_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=data, method=method,
+                                     headers=req_headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            status = resp.status
+            resp_headers = dict(resp.headers.items())
+            raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        resp_headers = dict(exc.headers.items()) if exc.headers else {}
+        raw = exc.read()
+    except Exception as exc:
+        raise NewrError(
+            f"http: fetch {method} {url} failed: {exc}") from exc
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise NewrError("http: response body is not valid UTF-8") \
+            from exc
+    values = {"status": status, "headers": resp_headers, "body": text}
+    return _build_from_shape(shape, values)
+
+
+def http_get(url: str, timeout: int = 10, headers=None,
+             shape=None):
+    """newr `http.get(url[, timeout[, headers]])`: GET, no body,
+    no Content-Type unless the program sets one."""
+    return http_fetch("GET", url, None, timeout, headers, shape)
+
+
+def http_post(url: str, body: str, timeout: int = 10, headers=None,
+              shape=None):
+    """newr `http.post(url, body[, timeout[, headers]])`."""
+    return http_fetch("POST", url, body, timeout, headers, shape)
+
+
+def http_request(method: str, url: str, body: str, timeout: int = 10,
+                 headers=None, shape=None):
+    """newr `http.request(method, url, body[, timeout[, headers]])`:
+    the generic fetch primitive."""
+    return http_fetch(method, url, body, timeout, headers, shape)

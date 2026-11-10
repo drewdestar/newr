@@ -1181,9 +1181,9 @@ finally:
 - Imported files are compiled with the importing file (one program, one
   build). The cache (§4.1) tracks the import graph.
 - **Manifest (`newr.json`), compiler support in M6 (Phase 2b):**
-  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str }` — `name` and
-  `version` are required; `target`, `default_locale`, and `db_path`
-  are optional. (Secrets NEVER go in it — the token stays in `.env`.)
+  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str, "http_allowlist": list[str] }` — `name` and
+  `version` are required; `target`, `default_locale`, `db_path`, and
+  `http_allowlist` are optional. (Secrets NEVER go in it — the token stays in `.env`.)
   The schema is the one `newr init` scaffolds and `newr build` reads
   (M6 Phase 2b); v1 resolution needs no manifest,
   relative paths only. `newr init` (M6) scaffolds it.
@@ -1236,25 +1236,28 @@ UNKNOWN for db calls (§2.1).
 | `file` | `read(path: str) -> str`, `write(path: str, content: str)`, `append(path: str, content: str)`, `exists(path: str) -> bool` | Text files, UTF-8 (§3.4). `read`/`write` throw on failure (§10). Paths use `/` (§3.2). |
 | `env` | `get(name: str) -> str?`, `get(name: str, default: str) -> str`, `args -> list[str]` | The only env access (§3.4). `env.args` is the command-line arguments **including the program name at index 0** (the Python/Go/Rust/Node convention). |
 | `db` | `open(path: str) -> int`, `exec(handle: int, sql: str, args...) -> int`, `query(handle: int, sql: str, args...) -> list[RowStruct]`, `begin(handle: int)`, `commit(handle: int)`, `rollback(handle: int)`, `last_id(handle: int) -> int`, `close(handle: int)` | SQLite, sync (§12.5). A domain module, not core: checked by `db_check.py`, not the core checker. |
+| `http` | `route(method: str, path: str, handler: fn) -> none`, `serve(port: int) -> none`, `serve(port: int, host: str) -> none`, `get(url: str) -> HttpResponse`, `post(url: str, body: str) -> HttpResponse`, `request(method: str, url: str, body: str) -> HttpResponse` (each fetch also takes an optional timeout in seconds, then optional headers) | HTTP server plus fetch client, sync (§12.6). A domain module, not core: checked by `http_check.py`, not the core checker. |
+| `json` | `encode(value) -> str`, `decode(text: str) -> T` | Typed JSON (§12.7). A domain module, not core: checked by `json_check.py`, not the core checker. |
 
-**`json` is v1.1, not v1.** `json.parse` cannot be typed honestly without
-an `any` type (the spec has none, §7.1), and typing it as
-`dict[str, str]` would be a lie. It arrives with a typed JSON value (or
-with `any`, if a later spec amendment adds one) — documented, not
-forgotten.
+**`json` landed in v1 with M8b** (it was v1.1 in an earlier draft of
+this section). The v1.1 objection was that `json.parse` cannot be
+typed honestly without an `any` type (the spec has none, §7.1), and
+typing it as `dict[str, str]` would be a lie. M8b settles it the
+same way M8a settled `db.query`: expected-type inference, not
+`any`. `json.decode` takes its type from the call site, and
+`json.encode` takes any encodable value (§12.7).
 
 ### 12.3 I/O scope for v1 (DECIDED)
 
 - **In v1:** `print`, `input`, `file.read/write/append/exists`, `env.get`,
   `env.args`.
-- **NOT in v1 — HTTP `fetch`.** Reasons: it needs timeouts, secret handling,
-  and an allowlist (a language that can phone home to arbitrary URLs is a
-  security review, not a builtin); and every target needs an HTTP client
-  dependency with different semantics. **Deferred to v1.1 with a dated
-  design sketch (G6):** a sandboxed `fetch` with a per-request timeout, an
-  allowlist of hosts declared in `newr.json`, secrets never in source
-  (env vars only), and a single response type (`str` body + status code).
-  Programs that need HTTP in v1 use the host language.
+- **In v1, since M8b — HTTP `fetch` and `serve`.** The earlier draft
+  deferred fetch to v1.1; it landed early in v1, per the app-track
+  decision (`docs/app-track.md` §7), the way `db` did in M8a: a
+  sandboxed fetch with a per-request timeout, an allowlist of hosts
+  declared in `newr.json`, secrets never in source (env vars only),
+  and a single typed response struct (§12.6). Programs that need
+  HTTP in v1 use `http`, not the host language.
 - **NOT in v1 — subprocess/shell, `eval`, crypto builtins, regex.**
   Subprocess: §3.4 (portability). `eval`: never (it defeats the compiler).
   Crypto: a program should never hand-roll hashing/signing — the host
@@ -1283,7 +1286,7 @@ set-literal syntax in v1 (keeps `{...}` unambiguous for dict literals).
 shape, §2.1): its rules live in `compiler/db_check.py` /
 `compiler/db_limits.py`, and the core checker returns UNKNOWN for db
 calls. It landed in v1 early, per the app-track decision
-(`docs/app-track.md` §7); `json` stays v1.1 (§12.2). The module is
+(`docs/app-track.md` §7). The module is
 SQLite only, sync on all seven targets.
 
 ```newr
@@ -1343,6 +1346,197 @@ db.close(h)
   parent directory does not exist. `db.open(":memory:")` is
   supported and is what the conformance programs use, so
   conformance stays hermetic.
+
+### 12.6 The `http` module — server plus fetch, sync (M8b)
+
+`http` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/http_check.py` /
+`compiler/http_limits.py`, and the core checker returns UNKNOWN for
+http calls. It landed in v1 early, per the app-track decision
+(`docs/app-track.md` §7). The module is sync on all seven targets;
+JSON is the only body format in M8b. No auth, no sessions, no
+cookies (M9 material); a token travels as a header the program reads
+from `env.get`, never in source, never in a URL.
+
+```newr
+struct HttpRequest:
+  method: str
+  path: str
+  headers: dict[str, str]
+  body: str
+  query: dict[str, str]
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let list_todos = fn(req: HttpRequest) -> HttpResponse:
+  return HttpResponse(status: 200, headers: {}, body: "[ ]")
+http.route("GET", "/todos", list_todos)
+http.serve(8080)
+
+let resp: HttpResponse = http.get("http://127.0.0.1:8080/todos")
+```
+
+A block-body lambda cannot be written inline as a call argument (the
+parser rejects it), so a multi-statement handler is bound with a
+`let` first and passed by name; a single-expression handler may be
+written inline (`fn(req: HttpRequest) -> HttpResponse: ...`).
+
+- **Request and response are user-declared structs, validated by
+  field shape.** `HttpRequest` needs exactly `method: str`,
+  `path: str`, `headers: dict[str, str]`, `body: str`,
+  `query: dict[str, str]`; `HttpResponse` needs exactly
+  `status: int`, `headers: dict[str, str]`, `body: str`. All fields
+  required, exactly these types, no extras (the runtime cannot fill
+  extra fields, so accepting them would be a lie). A struct with a
+  different name is fine: the checker validates by field shape, not
+  by name. An enum in either place is E2012.
+- **Routes are exact-match only.** A route for "/todos" does not
+  match "/todos/1" and does not match "/todos/". Path parameters
+  ("/todos/:id") are a later item; single items are addressed
+  through the query string ("/todo?id=1"). A request for a path with
+  no route returns 404 with an empty body. A route registered for a
+  method that does not match returns 404 too (not 405 in M8b; keep
+  one code). Two routes with the same method and path in one program
+  are E2012.
+- **The route method is one of GET, POST, PUT, PATCH, DELETE, HEAD,
+  OPTIONS, uppercase.** A lowercase or unknown method literal is
+  E2012. When the method is computed, the check is skipped and an
+  invalid method throws at runtime. The same rule covers
+  `http.request`. A literal path must start with "/"; a computed bad
+  path throws at runtime.
+- **The handler is a lambda, exactly one parameter, returning the
+  response struct.** A named function as a handler is not in M8b.
+  The server reads the whole request body before calling the handler
+  (no streaming). Bodies are text (UTF-8); a body that is not valid
+  UTF-8 throws when the handler reads `req.body`. The response
+  status must be 100 to 599; any other value throws at the point the
+  handler returns. The server always sets `Content-Length`; it does
+  not force a `Content-Type` on responses (the handler decides
+  through the response headers dict).
+- **`http.serve` blocks forever, until the process is killed.**
+  It binds 127.0.0.1 by default; `http.serve(port, host)` binds the
+  given host, and only an explicit host argument listens on all
+  interfaces ("0.0.0.0"). Port 0 means the OS picks an ephemeral
+  port, and the server prints `listening on <host>:<port>` with the
+  real port as its first line. Put `serve` last: it never returns,
+  so code after it never runs. M8b does not add a checker rule for
+  this (documented only); the core checker already warns about code
+  after a `return` (W1003), and teaching it that `serve` never
+  returns would touch core. The port must be 0 to 65535 (E2012).
+- **Fetch returns a typed `HttpResponse` via expected-type
+  inference.** The call site MUST carry the expected type (a `let`
+  annotation, a return type, or a function argument type); without
+  one the checker reports E2012 naming the fix. The expected type
+  must be a struct with exactly the `HttpResponse` fields. `get`
+  sends no body; `post` and `request` send the body as given.
+  `request` is the generic primitive (PUT, PATCH, DELETE, HEAD,
+  OPTIONS go through it); `get` and `post` are conveniences.
+- **Timeout is whole seconds, default 10 when omitted**, covering
+  the whole request (connect plus body), on every target. A timeout
+  of 0 or negative is E2012. A fetch that exceeds it throws.
+- **Headers are `dict[str, str]`.** A header value of any other type
+  is E2012. A fetch POST/request body gets `Content-Type:
+  application/json` unless the program sets one; GET sets none.
+  Header names are matched case-insensitively by the runtimes, per
+  HTTP.
+- **Allowlist (the §12.3 sketch, implemented in M8b, not
+  deferred).** `newr.json` gains an optional `http_allowlist:
+  list[str]` key, a list of bare hostnames (no scheme, no port,
+  exact match). When the manifest has no key, or when no manifest
+  exists, the default allowlist is `["localhost", "127.0.0.1"]`
+  (localhost only). When the fetch URL is a string literal, the
+  checker parses its host and reports E2012 when the host is not
+  allowed, naming the manifest key to add. When the URL is computed,
+  the runtime helper checks the host at call time and throws. The
+  allowlist is host-based and scheme-agnostic; it covers http and
+  https alike.
+- **URL literals need an `http://` or `https://` scheme and a
+  host.** A URL with userinfo (`user:pass@host`) is E2012: secrets
+  never go in a URL; read the token from env and pass it as a
+  header. When the URL is computed, the same checks run at runtime
+  and throw.
+- **Query strings parse into `dict[str, str]`;** a repeated key
+  keeps the LAST value. A `+` in a query value decodes as a space;
+  `%XX` decodes as the byte (UTF-8).
+- **Every http call throws on failure**, like `file.read` (§10). A
+  fetch to an unreachable host throws. A fetch that times out throws.
+  Callers use the existing `try:` / `catch:` / `finally:`.
+- **`http` inside a bot handler is not in M8b** (general programs
+  only). A fetch inside a bot handler would block the async event
+  loop on py (the fetch is sync), and the same limitation the M8a
+  build report records for bot+db applies. `json.encode` /
+  `json.decode` are pure functions and work anywhere, including bot
+  handlers; only the I/O calls are general-program-only.
+- **Per-target natives:** py stdlib `http.server`
+  (`ThreadingHTTPServer`) plus `urllib.request`; js builtin
+  `node:http` plus global `fetch`; java/kt JDK
+  `com.sun.net.httpserver.HttpServer` plus `java.net.http.HttpClient`;
+  cs `System.Net.HttpListener` plus `System.Net.Http.HttpClient`; rs
+  `tiny_http` 0.12.0 plus `ureq` 3.5.1 (rustls feature); dart
+  `dart:io` `HttpServer`/`HttpClient`. Only rs needs a manifest
+  change (Cargo.toml, gated on `uses_http`/`uses_json`).
+
+### 12.7 The `json` module — typed JSON (M8b)
+
+`json` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/json_check.py` /
+`compiler/json_limits.py`, and the core checker returns UNKNOWN for
+json calls. It landed in v1 early, per the app-track decision
+(`docs/app-track.md` §7), settling the §12.2 objection the same way
+M8a settled `db.query`: expected-type inference, not `any`.
+
+```newr
+let text: str = json.encode(todos)        # -> str
+let todos: list[Todo] = json.decode(text) # -> list[Todo]
+```
+
+- **`json.encode(value) -> str`.** The value may be a struct, a
+  `list[T]`, a `dict[str, T]`, a `str`, an `int`, a `float`, a
+  `bool`, or a nullable of any of those (`none` encodes as `null`),
+  nested recursively. A value of any other type is E2013. Structs
+  encode as JSON objects, field names as keys, in declaration
+  order. Nullable fields that are none encode as `null` (they are
+  NOT omitted). Dicts encode as objects. Lists encode as arrays.
+  Enums are NOT encodable in M8b (E2013: encode an enum field by
+  hand, or wait for enum encoding). Encoding a variant name would
+  be a guess at a format; the honest choice is to refuse until the
+  format is decided.
+- **`json.decode(text) -> T`.** The expected type comes from the call
+  site, exactly like `db.query`. Without an expected type the checker
+  reports E2013 naming the fix. The expected type may be a struct, a
+  `list[T]`, a `dict[str, T]`, a `str`, an `int`, a `float`, a
+  `bool`, or a nullable of any of those. A JSON `null` decodes to
+  `none` only for a nullable expected type; into a non-nullable type
+  it throws.
+- **Struct fields match BY NAME, like db rows.** A missing field
+  throws at runtime. An extra field in the JSON is ignored (APIs add
+  fields; db.query ignores extra columns the same way). A value that
+  cannot convert to the field type throws at runtime. A JSON number
+  with a fraction into an `int` field throws; a JSON integer into a
+  `float` field is fine. A JSON string into a `bool` field throws.
+  A JSON number that is an integer but outside int64 throws when the
+  expected field type is `int` (it never silently wraps).
+- **Trailing data after the JSON value throws. An empty string
+  throws. Duplicate keys: last wins** (the common parser behavior,
+  documented, not silent).
+- **Float encoding, pinned:** a float encodes as its shortest
+  round-trip decimal, with ".0" appended when the value is integral.
+  So 1.0 encodes as "1.0", 1.5 as "1.5", -2.25 as "-2.25", 0.0 as
+  "0.0". Int encoding is exact decimal on all seven targets,
+  including int64. Byte-identical ENCODED output across targets is
+  guaranteed only inside [0.001, 1e15]; outside it the
+  representations diverge (exponent forms) while decoding stays
+  identical.
+- **Per-target natives:** py stdlib `json`; js global `JSON` plus
+  custom int64 handling (a number-preserving pre-pass on decode,
+  manual int formatting on encode); java/kt hand-written strict RFC
+  8259 parser/serializer in the runtime (the JDK has no JSON
+  library); cs `System.Text.Json` (the helper formats integral
+  floats with ".0" itself); rs `serde_json` 1.0.154; dart
+  `dart:convert`.
 - **`db.exec` runs exactly one statement.** Multi-statement SQL
   is a runtime error. Migrations are successive `db.exec` calls
   inside one transaction.
@@ -2235,8 +2429,8 @@ to look:
 |---|---|---|
 | Full pattern exhaustiveness / usefulness | **Deferred to v2** | Core `match` is in v1 (§9.6); full usefulness checking is Rust's `rustc_pattern_analysis` algorithm — do not reimplement in v1. |
 | Generics (user-defined) | **Deferred to v2** | `list[T]`/`dict[str, T]`/`set[T]`/`T?`/`Result[T, E]` are generic from day one (§7.1); *user-defined* generic functions/types wait — they need a generic checker, which is v2 work (§7.7). |
-| HTTP `fetch` | **Deferred to v1.1** | §12.3 — sandboxed `fetch` + allowlist, after a security review. |
-| `json` module | **Deferred to v1.1** | §12.2 — needs a typed JSON value. |
+| HTTP `fetch` | **In v1, landed in M8b** | §12.6 — sandboxed `fetch` + allowlist, the §12.3 sketch implemented. |
+| `json` module | **In v1, landed in M8b** | §12.7 — typed JSON via expected-type inference, no `any` needed. |
 | Regex | **Deferred (no version)** | §12.3 — injection/DoS vector in a bot language; revisit with a timeout. |
 | Subcommands | **Deferred to v1.1** | §13.2. |
 | Command-name localization | **Deferred to v1.1** | §15. |
