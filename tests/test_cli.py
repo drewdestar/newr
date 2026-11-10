@@ -487,15 +487,15 @@ class TestBuildApp(unittest.TestCase):
             self.assertIn("--app", r.stderr)
             self.assertIn("--fast", r.stderr)
 
-    def test_app_non_py_target_is_exit_4(self):
-        # Phase 1 implements py only; other targets are a build
-        # error naming the target, never a traceback.
+    def test_app_unknown_target_is_exit_1(self):
+        # Phase 2 implements all seven targets; an unknown target
+        # is a usage error naming the target, never a traceback.
         with tempfile.TemporaryDirectory() as d:
             f = write(d, "hello.newr", 'print "Hello, world!"\n')
-            r = run_cli("build", str(f), "--target", "js", "--app",
+            r = run_cli("build", str(f), "--target", "bogus", "--app",
                         cwd=d)
-            self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
-            self.assertIn("js", r.stdout)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("bogus", r.stderr)
             self.assertNotIn("Traceback", r.stdout + r.stderr)
 
     def test_app_bad_manifest_is_exit_1_but_check_ignores_it(self):
