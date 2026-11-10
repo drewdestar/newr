@@ -125,6 +125,92 @@ class TestManifest(unittest.TestCase):
                 with self.assertRaises(ManifestError, msg=str(data)):
                     load_manifest(path)
 
+    def test_load_app_keys(self):
+        # M8d (SPEC section 22.1): description, icon, and id are
+        # optional manifest keys; icon must exist relative to the
+        # manifest directory, id must be reverse-domain.
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "icon.png").write_bytes(b"\x89PNG")
+            path = self._write(tmp, json.dumps({
+                "name": "shop", "version": "1.2.3",
+                "description": "A tiny shop demo.",
+                "icon": "icon.png", "id": "com.example.shop",
+            }))
+            manifest = load_manifest(path)
+            self.assertEqual(manifest.description, "A tiny shop demo.")
+            self.assertEqual(manifest.icon, "icon.png")
+            self.assertEqual(manifest.id, "com.example.shop")
+            self.assertEqual(manifest.to_dict()["description"],
+                             "A tiny shop demo.")
+            self.assertEqual(manifest.to_dict()["icon"], "icon.png")
+            self.assertEqual(manifest.to_dict()["id"],
+                             "com.example.shop")
+
+    def test_load_app_keys_absent_is_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, json.dumps({
+                "name": "demo", "version": "0.1.0",
+            }))
+            manifest = load_manifest(path)
+            self.assertIsNone(manifest.description)
+            self.assertIsNone(manifest.icon)
+            self.assertIsNone(manifest.id)
+
+    def test_load_icon_missing_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, json.dumps({
+                "name": "demo", "version": "0.1.0",
+                "icon": "nope.png",
+            }))
+            with self.assertRaises(ManifestError) as ctx:
+                load_manifest(path)
+            self.assertIn(str(path), str(ctx.exception))
+            self.assertIn("nope.png", str(ctx.exception))
+
+    def test_load_icon_wrong_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in (7, "", ["icon.png"]):
+                path = self._write(tmp, json.dumps({
+                    "name": "demo", "version": "0.1.0", "icon": bad,
+                }))
+                with self.assertRaises(ManifestError, msg=str(bad)):
+                    load_manifest(path)
+
+    def test_load_bad_id(self):
+        # The regex is ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$:
+        # one segment, an uppercase start, a leading digit, an
+        # empty segment, and a hyphen are all rejected.
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in ("com", "Com.example.shop", "1com.example",
+                        "com..example", "com.example-shop",
+                        "com.example shop", 7):
+                path = self._write(tmp, json.dumps({
+                    "name": "demo", "version": "0.1.0", "id": bad,
+                }))
+                with self.assertRaises(ManifestError, msg=str(bad)) as ctx:
+                    load_manifest(path)
+                self.assertIn(str(path), str(ctx.exception))
+                self.assertIn(str(bad), str(ctx.exception))
+
+    def test_load_good_id_forms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for good in ("com.example.shop", "com.example_shop",
+                         "a.b", "org.newr.app2"):
+                path = self._write(tmp, json.dumps({
+                    "name": "demo", "version": "0.1.0", "id": good,
+                }))
+                self.assertEqual(load_manifest(path).id, good,
+                                 msg=good)
+
+    def test_load_description_wrong_type(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, json.dumps({
+                "name": "demo", "version": "0.1.0",
+                "description": ["not", "a", "string"],
+            }))
+            with self.assertRaises(ManifestError):
+                load_manifest(path)
+
     def test_load_http_allowlist(self):
         # M8b: newr.json gains an optional http_allowlist of bare
         # hostnames; it loads as a tuple, and round-trips through
@@ -184,6 +270,29 @@ class TestManifest(unittest.TestCase):
             prog.write_text('print "hi"\n', encoding="utf-8")
             self.assertEqual(http_allowlist_for(prog),
                              ("api.example.com",))
+
+    def test_manifest_for_no_manifest_is_none(self):
+        from compiler.init import manifest_for
+
+        with tempfile.TemporaryDirectory() as tmp:
+            prog = Path(tmp) / "main.newr"
+            prog.write_text('print "hi"\n', encoding="utf-8")
+            self.assertIsNone(manifest_for(prog))
+
+    def test_manifest_for_reads_manifest(self):
+        from compiler.init import manifest_for
+
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write(tmp, json.dumps({
+                "name": "demo", "version": "0.1.0",
+                "description": "Demo app.",
+            }))
+            prog = Path(tmp) / "main.newr"
+            prog.write_text('print "hi"\n', encoding="utf-8")
+            manifest = manifest_for(prog)
+            self.assertIsNotNone(manifest)
+            assert manifest is not None
+            self.assertEqual(manifest.description, "Demo app.")
 
     def test_load_missing_file(self):
         with tempfile.TemporaryDirectory() as tmp:

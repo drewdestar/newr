@@ -33,12 +33,18 @@ from pathlib import Path
 from . import __version__
 from .checker import check_program
 from .fmt import format_source
+from .app_pack import (
+    AppPackError,
+    app_name_and_version,
+    package_app,
+)
 from .init import (
     InitError,
     ManifestError,
     VALID_TARGETS,
     default_target_for,
     http_allowlist_for,
+    manifest_for,
     scaffold,
 )
 from .db_check import check_db
@@ -55,13 +61,15 @@ USAGE = """Usage: newr [--json] [--error-format=json] <command> [args]
 
   check <file> [--fast]  verify a .newr program (parse, resolve, check);
                          writes nothing
-  build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast]
+  build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast] [--app]
                          build a .newr program into runnable Python
                          (default: the target in newr.json, else py),
                          JavaScript (--target js),
                          Java (--target java), C# (--target cs),
                          Rust (--target rs), Kotlin (--target kt) or
-                         Dart (--target dart)
+                         Dart (--target dart); --app packages the
+                         emitted program into dist/<name>-<target>/
+                         with BUILD-RECEIPT.json (SPEC.md section 22.2)
   fmt <file>... [--check]
                          rewrite .newr files in canonical form
                          (parse only; --check reports files that need
@@ -115,7 +123,7 @@ the program has no errors (warnings are fine), 4 when it has errors,
            all Discord validation. The result is not verified — say so
            in the output.
 """,
-    "build": """Usage: newr build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast]
+    "build": """Usage: newr build <file> [--target py|js|java|cs|rs|kt|dart] [-o <out>] [--line-comments] [--check] [--fast] [--app]
 
 Build a .newr program into runnable code for one target (Python and
 TypeScript are P0, Java/C#/Rust P1, Kotlin/Dart P2). When --target is
@@ -154,6 +162,13 @@ standalone `<stem>_deploy.kt`), and `--target dart` emits Dart (one
 code. `--fast` parses + resolves only, skipping the full type check
 AND all Discord validation — it cannot be combined with emission
 (use `--fast --check` to verify only).
+`--app` (SPEC.md section 22.2) packages the emitted program after a
+normal build: the artifact lands in `dist/<name>-<target>/` under the
+current directory, next to `BUILD-RECEIPT.json`. `--app` needs an
+explicit `--target` or a manifest target (a usage error otherwise),
+and cannot be combined with `--check` or `--fast`. M8d Phase 1
+implements the py packager only (a stdlib zipapp, `<name>.pyz`); other
+targets fail with a build error saying so.
 """,
     "version": """Usage: newr version
 
@@ -1156,6 +1171,7 @@ def _cmd_build(args: list[str], *, json_mode: bool,
     target_given = False
     output = None
     line_comments = False
+    app = False
     rest: list[str] = []
     i = 0
     while i < len(args):
@@ -1177,6 +1193,9 @@ def _cmd_build(args: list[str], *, json_mode: bool,
         elif arg == "--line-comments":
             line_comments = True
             i += 1
+        elif arg == "--app":
+            app = True
+            i += 1
         else:
             rest.append(arg)
             i += 1
@@ -1186,7 +1205,17 @@ def _cmd_build(args: list[str], *, json_mode: bool,
             f"{', '.join(VALID_TARGETS)})")
     fast = "--fast" in rest
     rest = [a for a in rest if a != "--fast"]
-    if "--check" in rest:
+    has_check = "--check" in rest
+    if app and has_check:
+        # SPEC section 22.2: packaging needs a full emit.
+        raise _UsageError(
+            "`newr build --app` cannot be combined with `--check`: "
+            "packaging needs a full emit, not a check-only run")
+    if app and fast:
+        raise _UsageError(
+            "`newr build --app` cannot be combined with `--fast`: "
+            "packaging needs a full emit, not a fast run")
+    if has_check:
         rest = [a for a in rest if a != "--check"]
         return _check_or_build(rest, command="build", json_mode=json_mode,
                                error_format_json=error_format_json,
@@ -1198,6 +1227,26 @@ def _cmd_build(args: list[str], *, json_mode: bool,
             "`newr build --fast` cannot emit — emission needs the "
             "full type check. Use `newr build --fast --check` to "
             "verify only, or drop `--fast` to build.")
+    manifest = None
+    if app:
+        # The manifest is loaded up front so a bad manifest fails
+        # before anything is emitted, and so the packager gets the
+        # app name, version, description, icon, and id from it.
+        positional = [a for a in rest if not a.startswith("-")]
+        if len(positional) == 1:
+            try:
+                manifest = manifest_for(Path(positional[0]))
+            except ManifestError as exc:
+                raise _UsageError(str(exc)) from exc
+            if not target_given:
+                if manifest is not None and manifest.target is not None:
+                    target = manifest.target
+                else:
+                    raise _UsageError(
+                        "`newr build --app` needs an explicit "
+                        "--target (no --target given and no target "
+                        "in newr.json); the packager is per-target "
+                        "and there is no default packaging target")
     if target is None:
         # No explicit --target: the default comes from newr.json
         # (SPEC.md section 11), searched upward from the program's
@@ -1213,16 +1262,19 @@ def _cmd_build(args: list[str], *, json_mode: bool,
             raise _UsageError(str(exc)) from exc
     return _build_emit(rest, output=output, line_comments=line_comments,
                        target=target, json_mode=json_mode,
-                       error_format_json=error_format_json)
+                       error_format_json=error_format_json,
+                       app=app, manifest=manifest)
 
 
 def _build_emit(args: list[str], *, output: str | None,
                 line_comments: bool, target: str = "py",
                 json_mode: bool,
-                error_format_json: bool) -> int:
+                error_format_json: bool, app: bool = False,
+                manifest=None) -> int:
     """`newr build <file>` — verify, then emit Python (M2),
     JavaScript (M3), Java (M4), C# (M4), Rust (M5), Kotlin (M5) or
-    Dart (M5)."""
+    Dart (M5). With `app`, package the emitted program afterwards
+    (SPEC.md section 22.2)."""
     unknown = [a for a in args if a.startswith("-")]
     if unknown:
         raise _UsageError("unknown flag(s) for `newr build`: "
@@ -1350,12 +1402,54 @@ def _build_emit(args: list[str], *, output: str | None,
                        ).read_text(encoding="utf-8")
         (main_out.parent / rt_copy_name).write_text(
             rt_text, encoding="utf-8")
+    app_result = None
+    if app:
+        # SPEC section 22.2: emit first (unchanged, above), then
+        # package the emitted files; packaging never re-emits.
+        app_name, app_version = app_name_and_version(path, manifest)
+        dist_dir = (Path.cwd() / "dist"
+                    / f"{app_name}-{target}")
+        emitted_files = [
+            main_out.name if name == result.main_file else name
+            for name in result.files
+        ]
+        if result.uses_rt:
+            emitted_files.append(rt_copy_name)
+        try:
+            app_result = package_app(
+                target=target, app_name=app_name,
+                version=app_version, manifest=manifest,
+                main_path=path,
+                source_files=[Path(f) for f in program.files],
+                emitted_dir=main_out.parent,
+                emitted_files=emitted_files,
+                main_file=main_out.name, dist_dir=dist_dir)
+        except AppPackError as exc:
+            # A packager failure is an exit-4 build error naming
+            # the failing command, never a traceback.
+            diag = Diagnostic(
+                span=Span(str(path), 0, 1), code="E4001",
+                message=f"cannot package this program: {exc}",
+                help="app packaging failed; the emitted files above "
+                     "are still usable, fix the packager problem "
+                     "and run `newr build --app` again")
+            return _finish("build", path, program, [diag], source,
+                           json_mode=json_mode,
+                           error_format_json=error_format_json)
     if json_mode:
         data = {"file": str(path),
                 "files": sorted(str(main_out.parent / n)
                                 for n in result.files),
                 "diagnostics": [d.to_json(get_source(d.span.file))
                                 for d in diagnostics]}
+        if app_result is not None:
+            data["app"] = {
+                "artifact": str(app_result.artifact_path),
+                "artifact_bytes":
+                    app_result.receipt["artifact_bytes"],
+                "sha256": app_result.receipt["sha256"],
+                "receipt": str(app_result.receipt_path),
+            }
         print(json.dumps(_envelope("build", data, diagnostics)))
         return 0
     warnings = [d for d in diagnostics if not d.is_error()]
@@ -1375,6 +1469,11 @@ def _build_emit(args: list[str], *, output: str | None,
               f"wrote {names}")
     else:
         print(f"{path}: ok — wrote {names}")
+    if app_result is not None:
+        if manifest is not None and manifest.description:
+            print(f"app: {manifest.description}")
+        print(f"app: wrote {app_result.artifact_path} "
+              f"({app_result.receipt['artifact_bytes']} bytes)")
     return 0
 
 

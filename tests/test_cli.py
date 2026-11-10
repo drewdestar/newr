@@ -6,7 +6,9 @@ TemporaryDirectory (no hardcoded /tmp); the repo's own examples are
 used for the v0-compat checks.
 """
 
+import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -446,6 +448,155 @@ class TestZipappDiff(unittest.TestCase):
                 self.assertEqual(via_zipapp.stdout, via_launcher.stdout,
                                  f"zipapp output differs from launcher "
                                  f"for {rel}")
+
+
+class TestBuildApp(unittest.TestCase):
+    """`newr build --app` (SPEC.md section 22.2, M8d Phase 1).
+
+    Phase 1 implements the py zipapp packager only. The smoke tests
+    copy examples/hello.newr into a temp dir (building the repo file
+    in place would rewrite the tracked examples/hello.py) and run
+    the build with cwd set to the temp dir, so dist/ lands there.
+    """
+
+    def _sha256(self, path):
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+    def test_app_without_target_no_manifest_is_exit_1(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", str(f), "--app", cwd=d)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("--target", r.stderr)
+
+    def test_app_with_check_is_exit_1(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", str(f), "--target", "py", "--app",
+                        "--check", cwd=d)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("--app", r.stderr)
+            self.assertIn("--check", r.stderr)
+
+    def test_app_with_fast_is_exit_1(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", str(f), "--target", "py", "--app",
+                        "--fast", cwd=d)
+            self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+            self.assertIn("--app", r.stderr)
+            self.assertIn("--fast", r.stderr)
+
+    def test_app_non_py_target_is_exit_4(self):
+        # Phase 1 implements py only; other targets are a build
+        # error naming the target, never a traceback.
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", str(f), "--target", "js", "--app",
+                        cwd=d)
+            self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
+            self.assertIn("js", r.stdout)
+            self.assertNotIn("Traceback", r.stdout + r.stderr)
+
+    def test_app_bad_manifest_is_exit_1_but_check_ignores_it(self):
+        # A broken manifest must not fail `newr check` (SPEC 22.1),
+        # but `newr build --app` loads it up front and fails exit 1
+        # naming the file.
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "newr.json", json.dumps({
+                "name": "demo", "version": "0.1.0", "id": "Bad ID",
+            }))
+            f = write(d, "hello.newr", 'print "Hello, world!"\n')
+            checked = run_cli("check", str(f), cwd=d)
+            self.assertEqual(checked.returncode, 0,
+                             checked.stdout + checked.stderr)
+            built = run_cli("build", str(f), "--target", "py",
+                            "--app", cwd=d)
+            self.assertEqual(built.returncode, 1,
+                             built.stdout + built.stderr)
+            self.assertIn("newr.json", built.stderr)
+            self.assertIn("Bad ID", built.stderr)
+
+    def test_app_hello_smoke_zipapp_runs_and_receipt_matches(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = ROOT / "examples" / "hello.newr"
+            f = Path(d) / "hello.newr"
+            shutil.copyfile(src, f)
+            r = run_cli("build", str(f), "--target", "py", "--app",
+                        cwd=d)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            artifact = Path(d) / "dist" / "hello-py" / "hello.pyz"
+            self.assertTrue(artifact.is_file())
+            self.assertIn("hello.pyz", r.stdout)
+            self.assertIn("bytes", r.stdout)
+            run = subprocess.run([sys.executable, str(artifact)],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(run.stdout, "Hello, world!\n")
+            receipt = json.loads(
+                (Path(d) / "dist" / "hello-py"
+                 / "BUILD-RECEIPT.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["name"], "hello")
+            self.assertEqual(receipt["version"], "0.2.0")
+            self.assertEqual(receipt["target"], "py")
+            self.assertEqual(receipt["artifact"], "hello.pyz")
+            self.assertEqual(receipt["artifact_bytes"],
+                             artifact.stat().st_size)
+            self.assertEqual(receipt["sha256"], self._sha256(artifact))
+            self.assertIn("toolchain", receipt)
+            self.assertIn("timestamp", receipt)
+            self.assertEqual(len(receipt["sources"]), 1)
+            self.assertEqual(receipt["sources"][0]["path"],
+                             "hello.newr")
+            self.assertEqual(receipt["sources"][0]["sha256"],
+                             self._sha256(f))
+
+    def test_app_manifest_target_and_keys(self):
+        # --app with no --target takes the manifest target, and the
+        # manifest description, icon, and id are carried into the
+        # receipt and the description is printed.
+        with tempfile.TemporaryDirectory() as d:
+            write(d, "newr.json", json.dumps({
+                "name": "My Shop", "version": "1.2.3", "target": "py",
+                "description": "A tiny shop demo.",
+                "icon": "icon.png", "id": "com.example.shop",
+            }))
+            (Path(d) / "icon.png").write_bytes(b"\x89PNG")
+            f = write(d, "main.newr", 'print "Hello, world!"\n')
+            r = run_cli("build", str(f), "--app", cwd=d)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("A tiny shop demo.", r.stdout)
+            artifact = Path(d) / "dist" / "my-shop-py" / "my-shop.pyz"
+            self.assertTrue(artifact.is_file())
+            run = subprocess.run([sys.executable, str(artifact)],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.stdout, "Hello, world!\n")
+            receipt = json.loads(
+                (Path(d) / "dist" / "my-shop-py"
+                 / "BUILD-RECEIPT.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["name"], "my-shop")
+            self.assertEqual(receipt["version"], "1.2.3")
+            self.assertEqual(receipt["description"],
+                             "A tiny shop demo.")
+            self.assertEqual(receipt["icon"], "icon.png")
+            self.assertEqual(receipt["id"], "com.example.shop")
+            self.assertEqual(receipt["sha256"], self._sha256(artifact))
+
+    def test_app_runtime_program_zipapp_runs(self):
+        # A program that uses the runtime (int arithmetic) stages
+        # newr_rt.py into the zipapp, and the zipapp runs.
+        with tempfile.TemporaryDirectory() as d:
+            f = write(d, "calc.newr",
+                      "let x: int = 2 + 3\nprint x\n")
+            r = run_cli("build", str(f), "--target", "py", "--app",
+                        cwd=d)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue((Path(d) / "newr_rt.py").is_file())
+            artifact = Path(d) / "dist" / "calc-py" / "calc.pyz"
+            run = subprocess.run([sys.executable, str(artifact)],
+                                 capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(run.stdout, "5\n")
 
 
 if __name__ == "__main__":

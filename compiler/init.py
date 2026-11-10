@@ -16,7 +16,8 @@ The manifest schema is SPEC section 11:
 
     { "name": str, "version": str, "target": "py" | "js" | ...,
       "default_locale": str, "db_path": str,
-      "http_allowlist": list[str] }
+      "http_allowlist": list[str],
+      "description": str, "icon": str, "id": str }
 
 `name` and `version` are required; `target`, `default_locale`,
 `db_path`, and `http_allowlist` are optional. `db_path` is
@@ -27,6 +28,14 @@ hostnames a program may fetch from (no scheme, no port, exact
 match); when it is absent, fetches are localhost-only
 (`localhost`, `127.0.0.1`). The scaffold omits it too: a new
 project fetches localhost until the author adds a host.
+
+M8d (SPEC section 22.1) adds three optional app keys: `description`
+(a one-line string, carried into the build receipt), `icon` (a path
+relative to the manifest directory, validated to exist at load
+time, carried into the receipt), and `id` (a reverse-domain
+identifier validated against
+`^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$`, carried into the receipt).
+No artifact consumes `icon` or `id` in M8d.
 
 `newr build` without `--target` reads the manifest for the default
 target: it searches for `newr.json` starting in the main file's
@@ -58,6 +67,12 @@ DEFAULT_LOCALE = "en"
 #: userinfo, no path. The same shape the http checker enforces
 #: (SPEC.md SS12.6).
 _HOST_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+#: A reverse-domain app identifier for the manifest `id` key
+#: (SPEC.md SS22.1): at least two dot-separated segments, each
+#: starting with a lowercase letter, then lowercase letters, digits,
+#: or underscores.
+_ID_RE = re.compile(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$")
 
 # How to run the scaffolded program once built, per target. Plain
 # programs only: a bot program also gets deploy/registration steps
@@ -91,6 +106,9 @@ class Manifest:
     default_locale: str | None = None
     db_path: str | None = None
     http_allowlist: tuple[str, ...] | None = None
+    description: str | None = None
+    icon: str | None = None
+    id: str | None = None
 
     def to_dict(self) -> dict:
         """The manifest as a JSON object (omits absent optionals)."""
@@ -103,6 +121,12 @@ class Manifest:
             data["db_path"] = self.db_path
         if self.http_allowlist is not None:
             data["http_allowlist"] = list(self.http_allowlist)
+        if self.description is not None:
+            data["description"] = self.description
+        if self.icon is not None:
+            data["icon"] = self.icon
+        if self.id is not None:
+            data["id"] = self.id
         return data
 
 
@@ -112,9 +136,12 @@ def load_manifest(path: Path) -> Manifest:
     Raises ManifestError naming the file when the JSON is malformed,
     when the top level is not an object, when `name` or `version` is
     missing or not a string, when `target` is not one of the seven
-    targets, when `default_locale` / `db_path` is not a string, or
-    when `http_allowlist` is not a list of bare hostnames (no scheme,
-    no port, no userinfo, no path). Unknown keys are ignored (forward
+    targets, when `default_locale` / `db_path` / `description` is not
+    a string, when `http_allowlist` is not a list of bare hostnames
+    (no scheme, no port, no userinfo, no path), when `icon` is not a
+    string or the file it names (relative to the manifest directory)
+    does not exist, or when `id` is not a string matching the
+    reverse-domain pattern. Unknown keys are ignored (forward
     compatibility).
     """
     try:
@@ -167,9 +194,35 @@ def load_manifest(path: Path) -> Manifest:
                 f"path), for example `[\"localhost\", \"127.0.0.1\"]` "
                 f"(got {http_allowlist!r})")
         allowlist = tuple(http_allowlist)
+    description = data.get("description")
+    if description is not None and not isinstance(description, str):
+        raise ManifestError(
+            f"{path}: `description` must be a string "
+            f"(got {description!r})")
+    icon = data.get("icon")
+    if icon is not None:
+        if not isinstance(icon, str) or not icon:
+            raise ManifestError(
+                f"{path}: `icon` must be a non-empty string "
+                f"(got {icon!r})")
+        icon_path = Path(icon)
+        if not icon_path.is_absolute():
+            icon_path = path.parent / icon_path
+        if not icon_path.is_file():
+            raise ManifestError(
+                f"{path}: `icon` file does not exist: {icon!r} "
+                f"(looked for {icon_path})")
+    app_id = data.get("id")
+    if app_id is not None:
+        if not isinstance(app_id, str) or not _ID_RE.match(app_id):
+            raise ManifestError(
+                f"{path}: `id` must be a reverse-domain identifier "
+                f"matching ^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$ "
+                f"(got {app_id!r})")
     return Manifest(name=name, version=version, target=target,
                     default_locale=default_locale, db_path=db_path,
-                    http_allowlist=allowlist)
+                    http_allowlist=allowlist, description=description,
+                    icon=icon, id=app_id)
 
 
 def find_manifest(start: Path) -> Path | None:
@@ -216,6 +269,18 @@ def http_allowlist_for(main_path: Path) -> tuple[str, ...] | None:
     if manifest_path is None:
         return None
     return load_manifest(manifest_path).http_allowlist
+
+
+def manifest_for(main_path: Path) -> Manifest | None:
+    """The manifest for a program, or None when there is no manifest
+    at or above the program's directory.
+
+    Raises ManifestError when a manifest is found but unusable.
+    """
+    manifest_path = find_manifest(Path(main_path))
+    if manifest_path is None:
+        return None
+    return load_manifest(manifest_path)
 
 
 def main_source(name: str, target: str) -> str:
