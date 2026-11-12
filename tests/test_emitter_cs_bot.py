@@ -152,6 +152,9 @@ def _dotnet_env():
     env = dict(os.environ)
     env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
     # /tmp is a 512MB tmpfs — keep dotnet temp dirs on the home disk.
+    # Fresh CI runners have no ~/dotnet-tmp yet; create it first
+    # (same pattern as compiler/app_pack_cs.py _dotnet_env).
+    (Path.home() / "dotnet-tmp").mkdir(parents=True, exist_ok=True)
     env["TMPDIR"] = str(Path.home() / "dotnet-tmp")
     return env
 
@@ -163,6 +166,10 @@ def build_files(files, csproj_text, startup=None):
     owns the temp dir (returned so a second command, e.g. `dotnet
     run`, can reuse it). Use `shutil.rmtree` when done.
     """
+    # mkdtemp() does not create a missing parent: on a fresh CI
+    # runner ~/dotnet-tmp does not exist yet and all five bot-compile
+    # tests error before any compilation runs (run 40, 5 ERRORs).
+    (Path.home() / "dotnet-tmp").mkdir(parents=True, exist_ok=True)
     d = Path(tempfile.mkdtemp(dir=str(Path.home() / "dotnet-tmp")))
     for name, text in files.items():
         (d / name).write_text(text, encoding="utf-8")
