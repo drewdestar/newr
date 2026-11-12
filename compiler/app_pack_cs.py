@@ -219,8 +219,11 @@ def package_cs(*, app_name: str, emitted_dir: Path,
     for diagnosis. Any previous file or directory at the artifact
     path is replaced, so a rebuild never leaves a stale artifact
     behind.
+
+    Input validation (main file, csproj, emitted files on disk)
+    runs before the dotnet requirement, so a missing file is
+    reported by name even on a machine without dotnet (CI).
     """
-    dotnet = _require_dotnet()
     if Path(main_file).name != main_file:
         raise AppPackError(
             f"{PUBLISH_COMMAND} failed: the emitted main file "
@@ -258,6 +261,7 @@ def package_cs(*, app_name: str, emitted_dir: Path,
                     f"{source}: {exc}; staging kept at {staging} "
                     f"for diagnosis") from exc
         publish_out = staging / "publish"
+        dotnet = _require_dotnet()
         args = [dotnet, "publish", str(staging / csproj_name),
                 "-c", "Release", "--self-contained",
                 "-r", RID, "-p:PublishSingleFile=true",

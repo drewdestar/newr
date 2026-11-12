@@ -169,6 +169,7 @@ class TestInput(unittest.TestCase):
         self.assertIn('NewrRt.Input("Name? ")', text)
 
 
+@unittest.skipUnless(DOTNET, "dotnet is not installed")
 class TestDb(unittest.TestCase):
     """db module on C# (SPEC.md section 12.5, M8a): `db.*` calls
     emit to the `NewrDb` class in the emitted file (inline, not

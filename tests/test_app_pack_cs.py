@@ -183,10 +183,17 @@ class TestPackageCsFailures(unittest.TestCase):
 
     def test_missing_dotnet_raises_app_pack_error(self):
         # dotnet is not findable when neither ~/.dotnet (via
-        # DOTNET_ROOT) nor PATH has it in it.
+        # DOTNET_ROOT) nor PATH has it in it. The emitted files
+        # exist on disk here, so the only thing missing is
+        # dotnet: input validation passes and the dotnet
+        # requirement is what raises.
         with temp_dir() as d:
             empty_bin = Path(d) / "empty-bin"
             empty_bin.mkdir()
+            (Path(d) / "hello.cs").write_text(
+                "class Hello {}", encoding="utf-8")
+            (Path(d) / "hello.csproj").write_text(
+                "<Project></Project>", encoding="utf-8")
             with mock.patch.dict(os.environ,
                                 {"PATH": str(empty_bin),
                                  "DOTNET_ROOT": str(empty_bin)}):

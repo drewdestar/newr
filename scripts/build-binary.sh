@@ -53,4 +53,9 @@ esac
   newr
 
 echo "built: $DISTPATH/newr-binary"
-ls -l "$DISTPATH/newr-binary"
+# On Windows the binary is newr-binary.exe, not newr-binary.
+if [ -f "$DISTPATH/newr-binary.exe" ]; then
+  ls -l "$DISTPATH/newr-binary.exe"
+else
+  ls -l "$DISTPATH/newr-binary"
+fi

@@ -226,7 +226,9 @@ def package_dart(*, app_name: str, emitted_dir: Path,
             f"{main_file!r} is not listed in the emitted files, so "
             f"the dart binary cannot be staged")
     has_pubspec = "pubspec.yaml" in emitted_files
-    _require_dart()
+    # Input validation (main file, emitted files on disk) runs
+    # before the dart requirement, so a missing file is reported
+    # by name even on a machine without dart (CI).
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(
         prefix=f"{app_name}-dart-", dir=str(SCRATCH_ROOT)))
@@ -252,6 +254,7 @@ def package_dart(*, app_name: str, emitted_dir: Path,
                     f"{COMPILE_COMMAND} failed: cannot stage "
                     f"{source}: {exc}; staging kept at {staging} "
                     f"for diagnosis") from exc
+        _require_dart()
         if has_pubspec:
             artifact = _build_db_bundle(
                 app_name=app_name, staging=staging,

@@ -240,10 +240,9 @@ def package_rs(*, app_name: str, emitted_dir: Path,
             f"{main_file!r} is not listed in the emitted files, so "
             f"the rs binary cannot be staged")
     has_cargo_toml = "Cargo.toml" in emitted_files
-    if has_cargo_toml:
-        _require_cargo()
-    else:
-        _require_rustc()
+    # Input validation (main file, emitted files on disk) runs
+    # before the toolchain requirement, so a missing file is
+    # reported by name even on a machine without rustc (CI).
     SCRATCH_ROOT.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(
         prefix=f"{app_name}-rs-", dir=str(SCRATCH_ROOT)))
@@ -269,6 +268,10 @@ def package_rs(*, app_name: str, emitted_dir: Path,
                     f"{RUSTC_COMMAND} failed: cannot stage "
                     f"{source}: {exc}; staging kept at {staging} "
                     f"for diagnosis") from exc
+        if has_cargo_toml:
+            _require_cargo()
+        else:
+            _require_rustc()
         if has_cargo_toml:
             artifact = _build_with_cargo(
                 app_name=app_name, staging=staging)
