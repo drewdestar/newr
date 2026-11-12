@@ -29,9 +29,11 @@ Environment notes, all learned the painful way in M8c:
 - rs needs CARGO_TARGET_DIR pointed at a persistent dir, or the
   first eframe build takes about 20 minutes. The rs proof target
   dir is reused by default.
-- libXtst6/libXi6/libXrender1/libXt6 must be installed for Swing;
-  they do not survive a VM replacement, so the harness checks for
-  them and fails loudly when they are missing.
+- libXtst6/libXi6/libXrender1/libXt6 must be installed for Swing,
+  plus libxkbcommon-x11-0 and mesa-vulkan-drivers (lavapipe) for
+  the rs egui window; they do not survive a VM replacement,
+  so the harness checks for them and reinstalls them with apt
+  when they are missing (M9 L10 guard).
 - The screenshot tool is ImageMagick `import` when present. When
   it is missing (it is not preinstalled, and apt installs do not
   survive a VM replacement either), the harness falls back to a
@@ -148,22 +150,86 @@ def _check_x11_libs() -> str | None:
     """The four X11 client libraries Swing needs, checked by the
     .so they provide (the package name for libXt is libxt6t64 on
     Ubuntu 24.04, not libxt6). Missing ones mean a VM replacement
-    wiped the apt install: fail loudly with the reinstall command
-    instead of a confusing window failure."""
+    wiped the apt install: try to reinstall them (M9 L10 guard),
+    instead of failing with a confusing window failure. The
+    install itself does NOT survive a VM replacement — that is
+    the durable limitation — so this guard runs again on the
+    next replacement. Returns an error string, or None."""
+    missing = _missing_x11_libs()
+    if not missing:
+        return None
+    print(f"missing X11 libs: {', '.join(missing)}; reinstalling "
+          f"with apt (sudo is passwordless on this VM)...",
+          file=sys.stderr)
+    # Try the install first: when the package lists are fresh it
+    # is fast. When they are stale (the usual state after a VM
+    # replacement) apt reports "Unable to locate package", and
+    # only then pay for a full `apt-get update` (slow on this VM,
+    # about 12 minutes) and retry.
+    if not _apt_install(missing):
+        print("apt install failed; refreshing package lists and "
+              "retrying...", file=sys.stderr)
+        try:
+            subprocess.run(["sudo", "apt-get", "update"],
+                           capture_output=True, text=True, timeout=900)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if not _apt_install(missing):
+            return ("missing X11 libs: " + ", ".join(missing)
+                    + "; reinstall with: sudo apt-get install -y "
+                    "libxtst6 libxi6 libxrender1 libxt6 "
+                    "libxkbcommon-x11-0 mesa-vulkan-drivers")
+    still = _missing_x11_libs()
+    if still:
+        return ("missing X11 libs after reinstall: "
+                + ", ".join(still)
+                + "; reinstall with: sudo apt-get install -y "
+                "libxtst6 libxi6 libxrender1 libxt6 "
+                "libxkbcommon-x11-0 mesa-vulkan-drivers")
+    print("X11 libs reinstalled.", file=sys.stderr)
+    return None
+
+
+def _missing_x11_libs() -> list[str]:
+    """Package names whose .so is absent from the ldconfig cache
+    (plus the lavapipe Vulkan ICD, which is a file, not a cached
+    .so — see below)."""
     r = subprocess.run(["ldconfig", "-p"], capture_output=True, text=True)
     libs = r.stdout
     missing = []
     for soname, pkg in (("libXtst.so.6", "libxtst6"),
                         ("libXi.so.6", "libxi6"),
                         ("libXrender.so.1", "libxrender1"),
-                        ("libXt.so.6", "libxt6")):
+                        ("libXt.so.6", "libxt6"),
+                        # The rs egui window loads this at runtime
+                        # through dlopen (xkbcommon-dl), so `ldd`
+                        # never shows it missing — the binary builds
+                        # fine and panics on startup instead. A VM
+                        # replacement wiped it on 12 Nov 2026.
+                        ("libxkbcommon-x11.so.0",
+                         "libxkbcommon-x11-0")):
         if soname not in libs:
             missing.append(pkg)
-    if missing:
-        return ("missing X11 libs: " + ", ".join(missing)
-                + "; reinstall with: sudo apt-get install -y "
-                "libxtst6 libxi6 libxrender1 libxt6")
-    return None
+    # The rs egui window renders through wgpu (Vulkan), and under
+    # Xvfb the only device is Mesa's software lavapipe ICD
+    # (`mesa-vulkan-drivers`, /usr/share/vulkan/icd.d/lvp_icd.json).
+    # Without it the loader finds no device and wgpu fails with
+    # "Failed to create surface for any enabled backend" — again a
+    # runtime panic, not a build failure. Also wiped by a VM
+    # replacement (12 Nov 2026).
+    if not Path("/usr/share/vulkan/icd.d/lvp_icd.json").exists():
+        missing.append("mesa-vulkan-drivers")
+    return missing
+
+
+def _apt_install(pkgs: list[str]) -> bool:
+    """`sudo apt-get install -y <pkgs>`; True when it exits 0."""
+    try:
+        r = subprocess.run(["sudo", "apt-get", "install", "-y"] + pkgs,
+                           capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return r.returncode == 0
 
 
 def _build(target: str, program: Path, work: Path) -> str | None:

@@ -313,6 +313,32 @@ class Checker:
 
     def _validate_type(self, t: Type, span: Span) -> None:
         ctx = self._ctx
+        if t.module is not None:
+            # A qualified type `m.T` (M9 L7): the module must be
+            # an imported file module (keyed by its bound alias),
+            # and T must be a struct or enum declared there. The
+            # bare name still resolves first-match afterwards
+            # (the emitters' existing behaviour); this branch only
+            # proves the qualification itself is real.
+            target = ctx.imports.get(t.module) if ctx is not None \
+                else None
+            if not isinstance(target, _ModuleCtx):
+                self._error(span, "E3001",
+                            f"unknown module `{t.module}`",
+                            help=f"import the module first, e.g. "
+                                 f"`import \"{t.module}.newr\" as "
+                                 f"{t.module}`")
+                return
+            if t.name in target.structs or t.name in target.enums:
+                if t.params:
+                    self._error(span, "E2001",
+                                f"type `{t}` takes no type arguments")
+                return
+            self._error(span, "E3001",
+                        f"module `{t.module}` has no type `{t.name}`",
+                        help=f"declare a struct or enum named "
+                             f"`{t.name}` in that module")
+            return
         if t.name in A.BUILTIN_TYPE_NAMES:
             arity = A.GENERIC_ARITY.get(t.name)
             if arity is not None and len(t.params) != arity:

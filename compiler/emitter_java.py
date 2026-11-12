@@ -3564,6 +3564,20 @@ class _JavaEmitter:
         if real == "math" and node.name in ("pi", "e"):
             return ("Math.PI" if node.name == "pi" else "Math.E",
                     _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # `public static` field. A non-pub const never reaches
+            # here (the checker rejects it with E3005), but the
+            # `pub` check keeps the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.java)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    return (f"{ref}.{self._mangle(node.name)}",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls

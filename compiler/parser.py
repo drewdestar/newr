@@ -530,7 +530,17 @@ class _Parser:
         elif self.at("IDENT") or self.at_kw("none") or self.at_kw("embed"):
             # `embed` is a keyword but also a type name (§7.1); `none`
             # is a keyword and the type of the `none` literal.
+            is_ident = self.at("IDENT")
             name = self.advance().value
+            module = None
+            if is_ident and self.at("DOT"):
+                # A qualified type `m.T` (M9 L7): the module alias,
+                # then the type name. Only a plain IDENT qualifies;
+                # `none` / `embed` are builtins and never qualified.
+                self.advance()
+                mod_tok = self.expect_ident("a type name after `.`")
+                module = name
+                name = mod_tok.value
             params = []
             if self.at("LBRACK"):
                 self.advance()
@@ -541,17 +551,19 @@ class _Parser:
                         continue
                     break
                 self.expect("RBRACK", None, "`]`")
-            base = Type(name, tuple(params))
+            base = Type(name, tuple(params), module=module)
         else:
             self.err(self.cur,
                      f"expected a type, found {_describe(self.cur)}")
         end = self.tokens[self.pos - 1]
         base = Type(base.name, base.params,
-                    span=self.span(start, end), nullable=base.nullable)
+                    span=self.span(start, end), nullable=base.nullable,
+                    module=base.module)
         if self.at("QMARK"):
             q = self.advance()
             base = Type(base.name, base.params,
-                        span=self.span(start, q), nullable=True)
+                        span=self.span(start, q), nullable=True,
+                        module=base.module)
         return base
 
     def _parse_params(self) -> list[Param]:

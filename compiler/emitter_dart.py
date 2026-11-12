@@ -726,20 +726,24 @@ class _DartEmitter:
         self.uses_sqlite = True
 
     def _need_http(self):
-        # dart:io for the server/client plus dart:convert for
-        # utf8 (bodies are UTF-8 text) and dart:async for the
-        # fetch timeout (TimeoutException, Future.timeout). The
-        # helpers use NewrError and NewrRt.floatStr from
-        # newr_rt.dart, so the runtime file must be copied (the
-        # "floatStr" marker). The http helpers also build response
-        # structs through NewrJson (buildFromShape/readField), so
-        # using http implies using json: the NewrJson class must be
-        # emitted too.
+        # dart:convert for utf8 (bodies are UTF-8 text) and
+        # dart:async for the fetch timeout (TimeoutException,
+        # Future.timeout). The helpers use NewrError and
+        # NewrRt.floatStr from newr_rt.dart, so the runtime file
+        # must be copied (the "floatStr" marker). The http helpers
+        # also build response structs through NewrJson
+        # (buildFromShape/readField), so using http implies using
+        # json: the NewrJson class must be emitted too. NOTE: no
+        # unprefixed `dart:io` import (M9 L4): every dart:io name
+        # the http code uses carries the `io.` prefix, and a user
+        # HttpRequest/HttpResponse struct shadows the unprefixed
+        # import — emitting it makes `dart analyze` flag it as
+        # unused. The bot main file and the deploy file keep
+        # their own `dart:io` imports (Platform.environment).
         self.uses_http = True
         self._file_uses_http = True
         self.uses_json = True
         self._file_uses_json = True
-        self.uses_io = True
         self.uses_convert = True
         self.uses_async = True
         self._need_rt("floatStr")
@@ -3803,7 +3807,7 @@ class _DartEmitter:
             "  static int exec(int handle, String sql, List<Object?> args) {",
             "    final db = _conn(handle);",
             "    db.execute(sql, args);",
-            "    return db.getUpdatedRows();",
+            "    return db.updatedRows;",
             "  }",
             "",
             "  static List<List<Object?>> query(int handle, String sql,",
@@ -3852,7 +3856,7 @@ class _DartEmitter:
             "    if (db == null) {",
             "      throw NewrError('db: unknown or closed handle $handle');",
             "    }",
-            "    db.dispose();",
+            "    db.close();",
             "  }",
             "}",
         ]
@@ -4717,6 +4721,22 @@ class _DartEmitter:
             self._need_math()
             return ("math.pi" if node.name == "pi" else "math.e",
                     _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # top-level `late final` through the import prefix
+            # (`_file_module_class` records the import). A non-pub
+            # const never reaches here (the checker rejects it
+            # with E3005), but the `pub` check keeps the emitter
+            # honest if it ever does.
+            sub = self.program.modules.get(binding.dart)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    return (f"{ref}.{self._mangle(node.name)}",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls

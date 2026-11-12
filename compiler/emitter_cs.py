@@ -395,6 +395,18 @@ class _CSEmitter:
         # Whether the file being emitted is the entry file (set by
         # _emit_file_set before _emit_one).
         self._is_main_file = True
+        # The entry file's class name, for a file module (None on
+        # the entry file itself). A file module reads the shared
+        # `NewrUi` helper as `<root>.NewrUi` (M9 L2 twin of the rs
+        # E0308 fix): the helper lives once, in the entry file.
+        # Set by _emit_file_set when it creates sub-emitters.
+        self._root_stem: str | None = None
+        # Whether any file in the transitive import closure uses
+        # `ui.*` (M9 L2): the entry file emits `NewrUi` once when
+        # any file uses it, so a module's `<root>.NewrUi`
+        # reference resolves. Filled by _emit_file_set BEFORE the
+        # entry file is emitted.
+        self._closure_uses_ui: bool = False
 
     # ------------------------------------------------------------ errors
 
@@ -443,6 +455,30 @@ class _CSEmitter:
             return name + "_"
         return name
 
+    def _member_name(self, name: str, class_name: str) -> str:
+        """A member name inside class `class_name` (M9 L2): C#
+        forbids a member with the same name as its enclosing type
+        (CS0542), so a colliding name gets a trailing underscore
+        after keyword/reserved mangling. The definition site
+        (`_bind_module_level`, class `self.output_stem`) and every
+        cross-file use site (class = the imported file's stem)
+        compute the name from this one rule, so they agree."""
+        java = self._mangle(name)
+        if java == class_name:
+            java += "_"
+        return java
+
+    def _ui_ref(self) -> str:
+        """The `NewrUi` helper reference for this file (M9 L2):
+        bare on the entry file, `<root>.NewrUi` on a file module,
+        where `<root>` is the entry file's class. Every `NewrUi`
+        use (the Widget type, the constructors, `Render`, `Show`,
+        `Run`) goes through here, so all files share the one
+        Widget type emitted in the entry file."""
+        if self._root_stem is None:
+            return "NewrUi"
+        return f"{self._root_stem}.NewrUi"
+
     def _bind(self, name: str, type: Type | None = None,
               kind: str = "local", interp: str | None = None) -> _Binding:
         """Bind `name` in the current scope.
@@ -485,8 +521,14 @@ class _CSEmitter:
         fn `add` mangled to `add_` colliding with a user fn `add_`),
         a numeric suffix is appended. The checker forbids duplicate
         newr names, so a collision here only ever comes from
-        mangling."""
-        java = self._mangle(name)
+        mangling. A member named the same as its enclosing class
+        is also mangled (M9 L2, CS0542) — except an import binding,
+        which is not a member of the class (its java name is the
+        lookup key for `imported_modules`)."""
+        if kind in ("module", "file-module"):
+            java = self._mangle(name)
+        else:
+            java = self._member_name(name, self.output_stem)
         if java in self._module_used:
             n = 1
             while f"{java}_{n}" in self._module_used:
@@ -666,8 +708,9 @@ class _CSEmitter:
         if t.name == "Widget":
             # The ui module's opaque value type (SPEC.md section
             # 12.8): the Widget model class inside the inline
-            # NewrUi helper, emitted only when a program uses ui.
-            return "NewrUi.Widget"
+            # NewrUi helper, emitted once in the entry file (M9
+            # L2) — a file module reads it as `<root>.NewrUi`.
+            return f"{self._ui_ref()}.Widget"
         # A struct or enum: the (possibly module-qualified) class.
         return self._struct_cs_name(t.name)
 
@@ -733,7 +776,7 @@ class _CSEmitter:
             for decl in list(sub.structs) + list(sub.enums):
                 if decl.name == name:
                     stem = self.imported_modules.get(bound, bound)
-                    return f"{stem}.{self._mangle(name)}"
+                    return f"{stem}.{self._member_name(name, stem)}"
         return self._mangle(name)
 
     # ------------------------------------------------------------ expressions
@@ -1451,7 +1494,8 @@ class _CSEmitter:
         declaration comes from the imported module and the class
         lives under the module reference; the local form takes both
         from this file."""
-        prefix = (f"{ref}." if ref else "") + self._mangle(enum_name)
+        prefix = (f"{ref}." if ref else "") + self._member_name(
+            enum_name, ref if ref else self.output_stem)
         decl = decl if decl is not None else self.enums.get(enum_name)
         if decl is not None:
             fields = []
@@ -1572,7 +1616,7 @@ class _CSEmitter:
         imported = self._imported_enum(node)
         if imported is not None:
             ref, enum_name, variant, _decl = imported
-            return (f"{ref}.{self._mangle(enum_name)}."
+            return (f"{ref}.{self._member_name(enum_name, ref)}."
                     f"{self._mangle(variant)}", _PREC["primary"])
         obj_type = self._type_of(obj)
         t = self._type_of(node)
@@ -3239,11 +3283,11 @@ class _CSEmitter:
                         for kname, value, _span in node.kwargs:
                             values[kname] = self.emit_expr(value, 0)
                         parts = [values[f] for f in order if f in values]
-                        return (f"new {ref}.{self._mangle(name)}"
+                        return (f"new {ref}.{self._member_name(name, ref)}"
                                 f"({', '.join(parts)})", _PREC["primary"])
             args = [self.emit_expr(a, 0) for a in node.args]
             kwargs = self._emit_module_kwargs(node, sub)
-            return (f"{ref}.{self._mangle(name)}"
+            return (f"{ref}.{self._member_name(name, ref)}"
                     f"({', '.join(args + kwargs)})", _PREC["primary"])
         real = binding.module or binding.java
         if real == "file":
@@ -3627,7 +3671,7 @@ class _CSEmitter:
                   "image": "Image", "row": "Row",
                   "column": "Column", "render": "Render",
                   "show": "Show", "run": "Run"}[name]
-        return (f"NewrUi.{method}({', '.join(args)})",
+        return (f"{self._ui_ref()}.{method}({', '.join(args)})",
                 _PREC["primary"])
 
     def _emit_ui_class(self) -> list[str]:
@@ -5183,7 +5227,7 @@ class _CSEmitter:
                 # method, cast to its fn type.
                 cast_text = self._cs_fn_type(t)
                 return (f"(({cast_text}) {ref}."
-                        f"{self._mangle(node.name)})",
+                        f"{self._member_name(node.name, ref)})",
                         _PREC["primary"])
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
@@ -5206,6 +5250,22 @@ class _CSEmitter:
         if real == "math" and node.name in ("pi", "e"):
             return ("Math.PI" if node.name == "pi" else "Math.E",
                     _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # `public static` field, through `_member_name` (a
+            # const named the same as its class is CS0542 too,
+            # M9 L2). A non-pub const never reaches here (the
+            # checker rejects it with E3005), but the `pub` check
+            # keeps the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.java)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    return (f"{ref}.{self._member_name(node.name, ref)}",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls
@@ -5793,7 +5853,11 @@ class _CSEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_json_class())
-        if self._file_uses_ui:
+        if is_main and (self._file_uses_ui or self._closure_uses_ui):
+            # The `NewrUi` helper lives once, in the entry file
+            # (M9 L2): a file module reads it as
+            # `<root>.NewrUi` and never emits its own copy, so
+            # every file shares the one Widget type.
             if body:
                 body.append("")
             body.extend(self._emit_ui_class())
@@ -5803,7 +5867,7 @@ class _CSEmitter:
             if body:
                 body.append("")
             if is_main:
-                if self._file_uses_ui:
+                if self._file_uses_ui or self._closure_uses_ui:
                     # Avalonia windows want an STA entry point
                     # (the proof's Program.cs carries it too).
                     body.append("  [STAThread]")
@@ -5835,8 +5899,15 @@ class _CSEmitter:
         statements); a file module gets a static constructor."""
         files: dict[str, str] = {}
         self._is_main_file = is_main
-        text, uses_rt = self._emit_one(program, main_path, is_main=is_main)
-        files[self.output_stem + ".cs"] = text
+        # Walk the imports FIRST (M9 L2, same as the rs emitter):
+        # the entry file is emitted after the whole closure is
+        # known, so it can emit `NewrUi` once when any file uses
+        # ui. Each sub-emitter learns the entry file's class name
+        # (`_root_stem`), so its `NewrUi` references qualify
+        # through it instead of inlining its own Widget type
+        # (CS1503, the C# twin of rs E0308).
+        root_stem = self._root_stem or self.output_stem
+        uses_rt = False
         for imp in program.imports:
             if imp.path is None:
                 continue
@@ -5856,10 +5927,14 @@ class _CSEmitter:
                                   sources=self.sources,
                                   line_comments=self.line_comments,
                                   output_stem=Path(sub_path).stem)
+            sub_em._root_stem = root_stem
             sub_files, sub_rt = sub_em._emit_file_set(sub, sub_path,
                                                       is_main=False)
             files.update(sub_files)
             uses_rt = uses_rt or sub_rt
+            self._closure_uses_ui = (
+                self._closure_uses_ui or sub_em._file_uses_ui
+                or sub_em._closure_uses_ui)
             # A `db.*` call in a file module needs the Sqlite
             # package in the csproj too (the gate reads only the
             # main emitter — see emit_program_cs).
@@ -5867,6 +5942,9 @@ class _CSEmitter:
             # Same for a `ui.*` call in a file module: the Avalonia
             # packages in the csproj come from the main emitter.
             self.uses_ui = self.uses_ui or sub_em.uses_ui
+        text, main_rt = self._emit_one(program, main_path, is_main=is_main)
+        files[self.output_stem + ".cs"] = text
+        uses_rt = uses_rt or main_rt
         return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,

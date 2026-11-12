@@ -443,6 +443,20 @@ class _RsEmitter:
         # Whether the file being emitted is the entry file (set by
         # _emit_file_set before _emit_one).
         self._is_main_file = True
+        # The transitive import closure of the file set being
+        # emitted (M9 L1): every module stem in it, and whether
+        # any file in it uses the ui render module / window
+        # module. Filled by _emit_file_set BEFORE the main file
+        # is emitted, so the main file can declare `mod` for
+        # every stem (not just its direct imports) and emit
+        # `newr_ui` once, while file modules read everything
+        # through `crate::` instead of re-declaring modules
+        # (which resolved to the wrong path, E0583) or inlining
+        # their own `newr_ui` (which duplicated the Widget type,
+        # E0308).
+        self._closure_stems: set[str] = set()
+        self._closure_uses_ui: bool = False
+        self._closure_uses_ui_window: bool = False
 
     # ------------------------------------------------------------ errors
 
@@ -1424,8 +1438,13 @@ class _RsEmitter:
             statements); a file module gets a `static { }` block."""
             files: dict[str, str] = {}
             self._is_main_file = is_main
-            text, uses_rt = self._emit_one(program, main_path, is_main=is_main)
-            files[self.output_stem + ".rs"] = text
+            # Walk the imports FIRST (M9 L1): the main file is
+            # emitted after the whole closure is known, so it can
+            # declare `mod` for every transitive stem and emit
+            # `newr_ui` / `newr_ui_window` when any file in the
+            # closure uses them. Each sub-emitter walks its own
+            # imports the same way, so the closure is transitive.
+            uses_rt = False
             for imp in program.imports:
                 if imp.path is None:
                     continue
@@ -1449,6 +1468,15 @@ class _RsEmitter:
                                                           is_main=False)
                 files.update(sub_files)
                 uses_rt = uses_rt or sub_rt
+                self._closure_stems.add(sub_em.output_stem)
+                self._closure_stems |= sub_em._closure_stems
+                self._closure_uses_ui = (
+                    self._closure_uses_ui or sub_em._file_uses_ui
+                    or sub_em._closure_uses_ui)
+                self._closure_uses_ui_window = (
+                    self._closure_uses_ui_window
+                    or sub_em._file_uses_ui_window
+                    or sub_em._closure_uses_ui_window)
                 # A `db.*` call in a file module needs rusqlite in
                 # the Cargo.toml too (the gate reads only the main
                 # emitter — see emit_program_rs).
@@ -1461,6 +1489,9 @@ class _RsEmitter:
                 # Cargo.toml too.
                 self.uses_ui_window = (self.uses_ui_window
                                        or sub_em.uses_ui_window)
+            text, main_rt = self._emit_one(program, main_path, is_main=is_main)
+            files[self.output_stem + ".rs"] = text
+            uses_rt = uses_rt or main_rt
             return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -3124,13 +3155,29 @@ class _RsEmitter:
         fn_type = self._type_of(node)
         cast = fn_target if _is_fn(fn_target) else fn_type
         cast_text = self._rs_fn_type(cast)
+        # The closure's return type, annotated explicitly (M9 L5):
+        # the `as Arc<dyn Fn() -> i64>` cast does NOT propagate
+        # the expected return type into the closure body, so an
+        # int literal inside defaults to i32 and rustc fails with
+        # E0271 ("expected closure to return i64, but it returns
+        # i32"). `move |..| -> i64 { 42 }` makes the literal i64.
+        # A `-> ret` annotation needs braces around the body.
+        ret_text = (self._rs_type(cast.params[-1])
+                    if _is_fn(cast) else None)
+        arrow_head = (f"move |{params_text}| -> {ret_text}"
+                      if ret_text is not None
+                      else f"move |{params_text}|")
         if node.expr_body is not None:
             body, hoists = self._emit_expr_with_hoists(node.expr_body)
             self._fn_used = saved_used
             self._pop_scope()
             if not hoists:
-                arrow = (f"std::sync::Arc::new(move |{params_text}| "
-                         f"{body}) as {cast_text}")
+                if ret_text is not None:
+                    arrow = (f"std::sync::Arc::new({arrow_head} "
+                             f"{{ {body} }}) as {cast_text}")
+                else:
+                    arrow = (f"std::sync::Arc::new(move |{params_text}| "
+                             f"{body}) as {cast_text}")
                 return arrow, _PREC["primary"]
             # The body needed hoists (a nested block-body lambda):
             # the hoisted const's initializer IS the closure, so the
@@ -3138,7 +3185,7 @@ class _RsEmitter:
             # call time.
             name = self._new_lambda_name()
             lines = [f"let {name}: {cast_text} = std::sync::Arc::new("
-                     f"move |{params_text}| {{"]
+                     f"{arrow_head} {{"]
             for h in hoists:
                 lines.append("  " + h)
             lines.append(f"  {body}")
@@ -3154,7 +3201,7 @@ class _RsEmitter:
         self._fn_used = saved_used
         self._pop_scope()
         lines = [f"let {name}: {cast_text} = std::sync::Arc::new("
-                 f"move |{params_text}| {{"]
+                 f"{arrow_head} {{"]
         lines.extend(body_lines if body_lines else ["  ()"])
         lines.append("});")
         self._hoists_add(lines)
@@ -5448,6 +5495,23 @@ class _RsEmitter:
         if real == "math" and node.name in ("pi", "e"):
             return ("std::f64::consts::PI" if node.name == "pi"
                     else "std::f64::consts::E", _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # static, through `gget` like a same-file global-let.
+            # A non-pub const never reaches here (the checker
+            # rejects it with E3005), but the `pub` check keeps
+            # the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.rs)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    self._need_rt("gget")
+                    return (f"newr_rt::gget(&{ref}::"
+                            f"{self._mangle(node.name)})",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls
@@ -7876,10 +7940,25 @@ class _RsEmitter:
         if self.rt_helpers:
             lines.append("mod newr_rt;" if is_main
                          else "use crate::newr_rt;")
-        for imp in program.imports:
-            if imp.path is not None:
-                lines.append(
-                    f"mod {self.imported_modules[imp.bound_name]};")
+        # The entry file declares every module in the transitive
+        # closure (M9 L1, same as the general file): a `mod` here
+        # makes the file a module of this crate, so file modules
+        # can read it as `crate::<stem>`. A module file reads its
+        # imports through the crate root instead (a bare `mod`
+        # would look under its own directory, E0583).
+        if is_main:
+            stems = set(self._closure_stems)
+            for imp in program.imports:
+                if imp.path is not None:
+                    stems.add(self.imported_modules[imp.bound_name])
+            for stem in sorted(stems):
+                lines.append(f"mod {stem};")
+        else:
+            for imp in program.imports:
+                if imp.path is not None:
+                    lines.append(
+                        "use crate::"
+                        f"{self.imported_modules[imp.bound_name]};")
         if self._used_mention or self._used_channel_text:
             lines.append(
                 "use serenity::model::mention::Mentionable;")
@@ -8269,7 +8348,12 @@ class _RsEmitter:
                 b = self._lookup(st.name)
                 t = st.type_ann or self._type_or_none(st.value) or \
                     Type("error")
-                body.append(f"static {b.rs if b is not None else self._mangle(st.name)}: "
+                # A `pub` top-level let/const is readable from
+                # another file (`mod::X` through `gget`, M9 L6),
+                # so its static is `pub`; a private one stays
+                # private.
+                vis = "pub " if st.pub else ""
+                body.append(f"{vis}static {b.rs if b is not None else self._mangle(st.name)}: "
                             f"std::sync::Mutex<Option<{self._rs_type(t)}>> = "
                             f"std::sync::Mutex::new(None);")
         for decl in program.structs:
@@ -8302,11 +8386,19 @@ class _RsEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_json_mod())
-        if self._file_uses_ui:
+        # The ui helper modules live once, in the entry file (M9
+        # L1): a file module reads them as `crate::newr_ui` /
+        # `crate::newr_ui_window` (header `use`, below), so every
+        # file shares one Widget type instead of inlining its own
+        # (E0308). A window user needs the render module too
+        # (`newr_ui_window` reads `super::newr_ui::Widget`).
+        if is_main and (self._file_uses_ui or self._closure_uses_ui
+                        or self._closure_uses_ui_window):
             if body:
                 body.append("")
             body.extend(self._emit_ui_mod())
-        if self._file_uses_ui_window:
+        if is_main and (self._file_uses_ui_window
+                        or self._closure_uses_ui_window):
             if body:
                 body.append("")
             body.extend(self._emit_ui_window_mod())
@@ -8333,9 +8425,31 @@ class _RsEmitter:
             # module uses the runtime).
             lines.append("mod newr_rt;" if is_main
                          else "use crate::newr_rt;")
-        for imp in program.imports:
-            if imp.path is not None:
-                lines.append(f"mod {self.imported_modules[imp.bound_name]};")
+        if is_main:
+            # The entry file declares every module in the
+            # transitive closure (M9 L1): a `mod` here makes the
+            # file a module of this crate, so file modules can
+            # read it as `crate::<stem>`.
+            stems = set(self._closure_stems)
+            for imp in program.imports:
+                if imp.path is not None:
+                    stems.add(self.imported_modules[imp.bound_name])
+            for stem in sorted(stems):
+                lines.append(f"mod {stem};")
+        else:
+            # A module file reads its imports through the crate
+            # root (M9 L1): a bare `mod <stem>;` here would look
+            # for `<stem>.rs` under this module's own directory
+            # (E0583), not at the crate root.
+            for imp in program.imports:
+                if imp.path is not None:
+                    lines.append(
+                        "use crate::"
+                        f"{self.imported_modules[imp.bound_name]};")
+            if self._file_uses_ui:
+                lines.append("use crate::newr_ui;")
+            if self._file_uses_ui_window:
+                lines.append("use crate::newr_ui_window;")
         lines.append("")
         lines.extend(body)
         return "\n".join(lines) + "\n", bool(self.rt_helpers)

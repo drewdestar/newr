@@ -488,6 +488,9 @@ class Resolver:
                                 f"duplicate field `{f.name}` in struct "
                                 f"`{st.name}`")
                 seen.add(f.name)
+                # A qualified type in a struct field uses its
+                # import (M9 L7).
+                self._walk_type(f.type)
         for en in program.enums:
             self._declare(scope, "enum", en.name, en.span, en, pub=en.pub)
             seen = set()
@@ -497,6 +500,10 @@ class Resolver:
                                 f"duplicate variant `{v.name}` in enum "
                                 f"`{en.name}`")
                 seen.add(v.name)
+                # A qualified type in a variant field uses its
+                # import (M9 L7).
+                for f in v.fields:
+                    self._walk_type(f.type)
         # Top-level let/const are pre-declared so fn bodies (walked
         # before the statements) and other declarations may
         # forward-reference them. Top-level STATEMENTS may not: the
@@ -596,6 +603,11 @@ class Resolver:
             # not earn W1001 (SPEC.md §5.3).
             if fn.pub and binding is not None:
                 binding.used = True
+        # Type annotations count as uses (M9 L7): a qualified type
+        # in a parameter or the return type uses its import.
+        for p in fn.params:
+            self._walk_type(p.type)
+        self._walk_type(fn.return_type)
         # M2 fix #3: record the top-level lets this fn reads/writes
         # and the module fns it calls (for the transitive E2005
         # analysis). Reads/writes inside a nested lambda are NOT
@@ -883,6 +895,9 @@ class Resolver:
 
     def _walk_let_const(self, st: A.Let | A.Const, scope: _Scope,
                         kind: str) -> None:
+        # A type annotation counts as a use (M9 L7): a qualified
+        # type in `let x: m.T` uses the import `m`.
+        self._walk_type(st.type_ann)
         existing = scope.lookup_local(st.name)
         if existing is not None and existing.node is st:
             # Pre-declared by _collect_top_level (top-level let/const).
@@ -1012,6 +1027,9 @@ class Resolver:
             fn_scope = _Scope("function", parent=scope)
             for p in expr.params:
                 self._declare(fn_scope, "param", p.name, p.span, p)
+                # A qualified type in a lambda parameter uses its
+                # import (M9 L7).
+                self._walk_type(p.type)
             # M2 fix #3: a lambda body may escape and run later, so
             # its reads/writes are not the enclosing fn's.
             self._lambda_depth += 1
@@ -1148,6 +1166,18 @@ class Resolver:
             for rec in self._current_info.imports:
                 if rec.bound_name == bound_name:
                     rec.used = True
+
+    def _walk_type(self, t: A.Type | None) -> None:
+        """A type annotation (M9 L7): a qualified type `m.T`
+        counts as a use of the import `m`, so a type-only import
+        does not earn a spurious W1002. Recurses into generic
+        arguments (`list[m.T]`) and fn types."""
+        if t is None:
+            return
+        if t.module is not None:
+            self._mark_import_used(t.module)
+        for p in t.params:
+            self._walk_type(p)
 
     def _resolve_qualified(self, node: A.Member, binding: _Binding,
                            scope: _Scope) -> None:

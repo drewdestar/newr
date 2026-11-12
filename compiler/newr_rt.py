@@ -20,6 +20,7 @@ import json
 import math
 import os
 import sqlite3
+import threading
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -492,32 +493,73 @@ def file_exists(path: str) -> bool:
 # ------------------------------------------------------------ db module
 # SQLite via the stdlib `sqlite3`, synchronous (SPEC.md section 12.5).
 # Handles are ints, fd-style: ids from 1, a registry maps each id to
-# its connection. `isolation_level=None` is autocommit, so explicit
-# BEGIN IMMEDIATE / COMMIT / ROLLBACK do the transaction work and a
+# its path plus one connection PER THREAD (M9 L8). A sqlite3
+# connection belongs to the thread that opened it
+# (`check_same_thread` is on by default), and `http.serve` runs
+# handlers on worker threads (ThreadingHTTPServer), so a single
+# connection opened on the main thread raises
+# `ProgrammingError` the moment a handler uses it. One connection
+# per (handle, thread) fixes that: the top-level handle a program
+# opens for its seed is usable inside handlers too, on every
+# thread, each thread with its own connection to the same file.
+# `:memory:` databases stay per-connection by definition — a
+# `:memory:` handle used from two threads sees two different
+# empty databases, which is SQLite's own rule, not a bug here.
+# `isolation_level=None` is autocommit, so explicit BEGIN
+# IMMEDIATE / COMMIT / ROLLBACK do the transaction work and a
 # bare `db.exec` commits at once. `?` binding is mandatory: values
 # are never interpolated into the SQL text.
 
-_DB_CONNECTIONS: dict[int, sqlite3.Connection] = {}
+_DB_CONNECTIONS: dict[int, dict] = {}
 _DB_NEXT_ID = 1
+_DB_LOCK = threading.Lock()
+
+
+def _db_new_conn(path: str) -> sqlite3.Connection:
+    """One fresh connection to `path`, with the standard pragmas.
+
+    `check_same_thread=False`: each connection is still used by
+    exactly one thread (its entry in the per-thread map), but
+    `db_close` closes every thread's connection from the closing
+    thread — with the check on, that close raises
+    `ProgrammingError` ("objects created in a thread can only be
+    used in that same thread"). The per-thread map, not the
+    check, is what keeps one connection to one thread here."""
+    conn = sqlite3.connect(path, isolation_level=None,
+                           check_same_thread=False)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 5000")
+    return conn
 
 
 def db_open(path: str) -> int:
-    """newr `db.open(path)`: open (create if needed) and return a handle."""
+    """newr `db.open(path)`: open (create if needed) and return a handle.
+
+    No connection is opened yet: the first use on each thread opens
+    that thread's own connection lazily (`_db_conn`), so opening a
+    handle on the main thread and using it from a handler thread
+    works."""
     global _DB_NEXT_ID
-    conn = sqlite3.connect(path, isolation_level=None)
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 5000")
-    handle = _DB_NEXT_ID
-    _DB_NEXT_ID += 1
-    _DB_CONNECTIONS[handle] = conn
+    with _DB_LOCK:
+        handle = _DB_NEXT_ID
+        _DB_NEXT_ID += 1
+        _DB_CONNECTIONS[handle] = {"path": path, "conns": {}}
     return handle
 
 
 def _db_conn(handle: int) -> sqlite3.Connection:
-    conn = _DB_CONNECTIONS.get(handle)
-    if conn is None:
-        raise NewrError(f"db: unknown or closed handle {handle}")
-    return conn
+    """This thread's connection for `handle`, opening it on first
+    use. A use after close (or of an unknown handle) raises."""
+    with _DB_LOCK:
+        entry = _DB_CONNECTIONS.get(handle)
+        if entry is None:
+            raise NewrError(f"db: unknown or closed handle {handle}")
+        ident = threading.get_ident()
+        conn = entry["conns"].get(ident)
+        if conn is None:
+            conn = _db_new_conn(entry["path"])
+            entry["conns"][ident] = conn
+        return conn
 
 
 def _db_value(value, type_str: str):
@@ -638,12 +680,16 @@ def db_last_id(handle: int) -> int:
 
 
 def db_close(handle: int) -> None:
-    """newr `db.close(handle)`: close and drop the handle. A second
-    close (or any use after close) raises NewrError."""
-    conn = _DB_CONNECTIONS.pop(handle, None)
-    if conn is None:
-        raise NewrError(f"db: unknown or closed handle {handle}")
-    conn.close()
+    """newr `db.close(handle)`: close every per-thread connection
+    for the handle and drop it. A second close (or any use after
+    close) raises NewrError."""
+    with _DB_LOCK:
+        entry = _DB_CONNECTIONS.pop(handle, None)
+        if entry is None:
+            raise NewrError(f"db: unknown or closed handle {handle}")
+        conns = list(entry["conns"].values())
+    for conn in conns:
+        conn.close()
 
 
 # ------------------------------------------------------------ json module

@@ -177,7 +177,7 @@ class NewrDb {
   static int exec(int handle, String sql, List<Object?> args) {
     final db = _conn(handle);
     db.execute(sql, args);
-    return db.getUpdatedRows();
+    return db.updatedRows;
   }
 
   static List<List<Object?>> query(int handle, String sql,
@@ -226,7 +226,7 @@ class NewrDb {
     if (db == null) {
       throw NewrError('db: unknown or closed handle $handle');
     }
-    db.dispose();
+    db.close();
   }
 }
 

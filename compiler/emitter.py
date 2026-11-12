@@ -933,6 +933,24 @@ class _Emitter:
         if real == "math" and node.name in ("pi", "e"):
             self._need_import("math", alias=ref)
             return f"{ref}.{node.name}"
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # global (`import <real> as <alias>` is registered by
+            # `_need_file_module`, like the fn-call branch). A
+            # non-pub const never reaches here (the checker
+            # rejects it with E3005), but the `pub` check keeps
+            # the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.py)
+            if sub is None and isinstance(node.obj, A.Name):
+                sub = self.program.modules.get(node.obj.name)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    self._need_file_module(binding.py)
+                    return f"{binding.py}.{self._mangle(node.name)}"
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     def _need_file_module(self, bound: str):

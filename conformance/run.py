@@ -568,18 +568,21 @@ def _run(cmd, **kwargs):
                                            "timed out after 60s")
 
 
-def run_conformance(target: str = "py") -> int:
+def run_conformance(target: str = "py", only: str | None = None) -> int:
     """Build + run every ok program; each must exit 0 and print
     `PASS` as its last line (the program self-verifies — the
     honest equivalent of Gleam's model, since v1 has no in-language
     test framework). A program may print other lines before its
-    verdict."""
+    verdict. With `only`, run just that one program (M9: for
+    re-checking a single failure without re-running the corpus)."""
     ok_dir = ROOT / "conformance" / "ok"
     failures = 0
     suffix = _SUFFIX[target]
     rt_src = _RT_SRC[target]
     rt_copy = _RT_COPY[target]
     for path in sorted(ok_dir.glob("*.newr")):
+        if only is not None and path.stem != only:
+            continue
         if path.stem == _PAIR_SERVER:
             # Runs only as half of the pair test (it blocks
             # forever); skip it in the single-process loop.
@@ -641,12 +644,28 @@ def run_conformance(target: str = "py") -> int:
                 if "Cargo.toml" in files:
                     # A bot program (or a store program): the crate
                     # needs cargo (serenity/poise, rusqlite).
+                    # Build FIRST and run the binary directly (M9):
+                    # `cargo run` would compile inside the 60s run
+                    # timeout, and a cold dep compile (rusqlite
+                    # bundled, serde_json, ring) takes minutes on a
+                    # loaded VM, so the program never got to run.
+                    # Same pattern as the http pair path below, which
+                    # already builds first for exactly this reason.
                     if CARGO is None:
                         print("SKIP rs: no cargo found "
                               "(CARGO_HOME / ~/.cargo/bin / PATH)")
                         return 0
+                    c = subprocess.run(
+                        [CARGO, "build", "--quiet"],
+                        capture_output=True, text=True, cwd=d)
+                    if c.returncode != 0:
+                        print(f"FAIL {path.name}: cargo build exit "
+                              f"{c.returncode}\n{c.stderr}")
+                        failures += 1
+                        continue
                     r = _run(
-                        [CARGO, "run", "--quiet"],
+                        [str(Path(d) / "target" / "debug"
+                             / path.stem)],
                         capture_output=True, text=True, cwd=d)
                 else:
                     # Plain program: rustc compiles the bin
@@ -756,11 +775,12 @@ def main(argv: list[str] | None = None) -> int:
                                  "dart"),
                         help="target to build/run (default py)")
     parser.add_argument("--only", metavar="NAME",
-                        help="with --bless, regenerate one golden")
+                        help="with --bless, regenerate one golden; "
+                             "without it, run just that one program")
     args = parser.parse_args(argv)
     if args.bless:
         return bless(args.only, target=args.target)
-    return run_conformance(target=args.target)
+    return run_conformance(target=args.target, only=args.only)
 
 
 if __name__ == "__main__":

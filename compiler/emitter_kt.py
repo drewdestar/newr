@@ -2275,6 +2275,13 @@ class _KtEmitter:
         ret_type = fn_type.params[-1] if _is_fn(fn_type) else None
         ret_text = self._kt_type(ret_type) \
             if ret_type is not None else "Unit"
+        # A `none`-returning lambda has Kotlin type `Unit?` (the
+        # `_kt_type` twin of Java's `Void`): a block-bodied `fun`
+        # declared `: Unit?` needs an explicit `return null;` at
+        # the end (M9 L3 — the shop frontend's `buy`/`checkout`
+        # lambdas failed kotlinc with "missing return" exactly
+        # here). A `Unit` fun needs none.
+        returns_none = ret_type is not None and _is_none(ret_type)
         if node.expr_body is not None:
             body, hoists = self._emit_expr_with_hoists(node.expr_body)
             self._fn_used = saved_used
@@ -2296,11 +2303,20 @@ class _KtEmitter:
         # Block body: hoist a const anonymous fun.
         name = self._new_lambda_name()
         self._fn_ctx.append({"return_type": node.return_type,
-                             "ensures": [], "in_handler": False})
+                             "ensures": [], "in_handler": False,
+                             "in_lambda": True})
         body_lines = self._emit_block(node.body or [], 1)
         self._fn_ctx.pop()
         self._fn_used = saved_used
         self._pop_scope()
+        if returns_none:
+            # A none lambda's block must end in `return null;`
+            # (see above) — unless the body already ends in a
+            # return.
+            last = next((ln for ln in reversed(body_lines)
+                         if ln.strip()), "")
+            if not last.strip().startswith("return"):
+                body_lines.append("  return null;")
         lines = [f"val {name} = fun({params_text}): {ret_text} {{"]
         lines.extend(body_lines)
         lines.append("}")
@@ -2786,6 +2802,12 @@ class _KtEmitter:
         is_void = ret_type is None or _is_none(ret_type)
         if stmt.value is None:
             if not ensures:
+                if ctx.get("in_lambda") and is_void:
+                    # A bare `return;` in a none lambda: the
+                    # lambda's Kotlin type is `Unit?`, and a bare
+                    # return is "missing return value" there (see
+                    # _emit_lambda, M9 L3).
+                    return [f"{p}return null;"]
                 return [f"{p}return;"]
             if is_void:
                 lines = [f"{p}_newrResult = null;"]
@@ -2798,8 +2820,12 @@ class _KtEmitter:
                         "emitter (no default value for the result)")
                 lines = [f"{p}_newrResult = {default};"]
             lines.extend(self._ensures_check_lines(ensures, indent))
-            lines.append(f"{p}return;" if is_void
-                         else f"{p}return _newrResult;")
+            if ctx.get("in_lambda") and is_void:
+                lines.append(f"{p}return null;")
+            elif is_void:
+                lines.append(f"{p}return;")
+            else:
+                lines.append(f"{p}return _newrResult;")
             return lines
         if isinstance(stmt.value, A.Propagate):
             # A propagated error returns early; the `ensures` apply
@@ -3544,6 +3570,21 @@ class _KtEmitter:
         if real == "math" and node.name in ("pi", "e"):
             return ("Math.PI" if node.name == "pi" else "Math.E",
                     _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module
+            # object's property (`lateinit var` / `var`, public
+            # by default). A non-pub const never reaches here
+            # (the checker rejects it with E3005), but the `pub`
+            # check keeps the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.java)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    return (f"{ref}.{self._mangle(node.name)}",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls

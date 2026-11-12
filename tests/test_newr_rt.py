@@ -10,6 +10,7 @@ conversion/rendering helpers.
 import math
 import os
 import tempfile
+import threading
 import unittest
 
 from compiler.newr_rt import (
@@ -560,6 +561,61 @@ class TestDb(unittest.TestCase):
             h = db_open(path)
             rows = db_query(h, "SELECT v FROM t", [], ["v"], ["int"])
             self.assertEqual(rows, [[42]])
+            db_close(h)
+
+    def test_handle_usable_from_another_thread(self):
+        # M9 L8: a handle opened on the main thread must work from
+        # a worker thread (the http server runs handlers on worker
+        # threads). A file database: the worker sees the main
+        # thread's rows through its own per-thread connection.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.db")
+            h = db_open(path)
+            db_exec(h, "CREATE TABLE t (v INTEGER)", [])
+            db_exec(h, "INSERT INTO t (v) VALUES (?)", [42])
+            seen: list = []
+            errors: list = []
+
+            def worker():
+                try:
+                    seen.append(db_query(h, "SELECT v FROM t", [],
+                                         ["v"], ["int"]))
+                except Exception as exc:  # noqa: BLE001 - re-raised
+                    errors.append(exc)
+
+            t = threading.Thread(target=worker)
+            t.start()
+            t.join()
+            self.assertEqual(errors, [])
+            self.assertEqual(seen, [[[42]]])
+            db_close(h)
+
+    def test_concurrent_writes_from_many_threads(self):
+        # M9 L8: many threads writing through one handle at once
+        # serialize through SQLite's locking (busy_timeout 5000);
+        # every insert lands.
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "t.db")
+            h = db_open(path)
+            db_exec(h, "CREATE TABLE t (v INTEGER)", [])
+            errors: list = []
+
+            def worker(i: int):
+                try:
+                    db_exec(h, "INSERT INTO t (v) VALUES (?)", [i])
+                except Exception as exc:  # noqa: BLE001 - re-raised
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(i,))
+                       for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+            self.assertEqual(errors, [])
+            rows = db_query(h, "SELECT COUNT(*) AS n FROM t", [],
+                            ["n"], ["int"])
+            self.assertEqual(rows, [[8]])
             db_close(h)
 
 

@@ -27,23 +27,32 @@ class Type:
     — exactly one absent value; there is no ``option[T]``). A function
     type has name ``"fn"`` and params ``(T1, ..., R)`` (return type last).
     ``span`` is where the type was written (not part of equality — two
-    ``int`` types are equal wherever they were written).
+    ``int`` types are equal wherever they were written). ``module``
+    is the qualifying module of a qualified type (``m.T``, M9 L7):
+    the alias as written. It is not part of equality or hashing
+    either — ``shop_shared.Product`` and a bare ``Product`` that
+    resolves to the same struct compare equal, so existing
+    type-equality logic is untouched; the module is validation
+    metadata (the checker proves the module exists and declares
+    the type), and the emitters resolve the bare name as before.
     """
 
     name: str
     params: tuple["Type", ...] = ()
     span: Span | None = field(default=None, compare=False)
     nullable: bool = False
+    module: str | None = field(default=None, compare=False, hash=False)
 
     def __str__(self) -> str:
+        qual = f"{self.module}." if self.module else ""
         if self.name == "fn" and self.params:
             inner = ", ".join(str(p) for p in self.params[:-1])
             base = f"fn({inner}) -> {self.params[-1]}"
         elif not self.params:
-            base = self.name
+            base = f"{qual}{self.name}"
         else:
             inner = ", ".join(str(p) for p in self.params)
-            base = f"{self.name}[{inner}]"
+            base = f"{qual}{self.name}[{inner}]"
         return base + "?" if self.nullable else base
 
 
