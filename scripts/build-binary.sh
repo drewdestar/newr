@@ -31,8 +31,13 @@ WORKPATH="${NEWR_BINARY_WORKPATH:-build/binary}"
 # (WORKPATH here), not the current directory.
 # The --add-data separator is ":" on Linux/macOS and ";" on
 # Windows (Git Bash reports MINGW64/MSYS/CYGWIN in uname).
+# On Windows the absolute paths must also be Windows paths:
+# Git Bash builds MSYS paths (/d/a/newr/newr/...) that the
+# Windows PyInstaller executable cannot resolve, so it fails
+# at startup validating the --add-data sources. cygpath -w
+# converts REPO_ROOT to a drive-letter path (D:\a\newr\newr).
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*) SEP=";" ;;
+  MINGW*|MSYS*|CYGWIN*) SEP=";"; REPO_ROOT="$(cygpath -w "$REPO_ROOT")" ;;
   *) SEP=":" ;;
 esac
 "$PYINSTALLER" \

@@ -13,13 +13,16 @@ extension:
   program uses `db.*`, `http.*`, `json.*`, `ui.show`/`ui.run`, or a
   bot) builds with `cargo build --release --offline` and the binary
   is taken from `target/release/<stem>` under the persistent
-  `CARGO_TARGET_DIR`. `--offline` enforces the rule that the
-  packager never downloads a crate: every crate must already be in
-  the cargo registry cache (the M8b pins are, the conformance
-  runner and the emitter tests build them this way). The binary
-  name is the first `[[bin]]` name in the staged `Cargo.toml`
-  (the emitter always writes one), falling back to the `[package]`
-  name; the packager never guesses it from the file stem.
+  `CARGO_TARGET_DIR`. `--offline` is tried first, so a build never
+  downloads a crate when the registry cache already has it; when
+  the cache lacks a crate the offline build fails with "no
+  matching package" and the packager retries once online, so a
+  fresh machine (or a CI runner with a cold cargo cache) still
+  builds, and the downloaded crate stays cached for later offline
+  builds. The binary name is the first `[[bin]]` name in the
+  staged `Cargo.toml` (the emitter always writes one), falling
+  back to the `[package]` name; the packager never guesses it
+  from the file stem.
 
 `CARGO_TARGET_DIR` is `~/workspace/.cargo-target` (SPEC section
 22.2: a persistent dir under `~/workspace`, never `/tmp`). It is
@@ -326,10 +329,26 @@ def _build_with_rustc(*, app_name: str, staging: Path,
     return built
 
 
+def _needs_online_retry(proc) -> bool:
+    """True when a failed offline cargo build should be retried
+    online: the registry cache lacks a crate cargo needs.
+    Cargo reports that as "no matching package named `X` found"
+    plus a note naming `--offline`. Any other failure (a compile
+    error, a bad manifest) is retried never: the online build
+    would fail the same way, only slower."""
+    out = (proc.stdout or "") + (proc.stderr or "")
+    return "no matching package" in out or "offline" in out
+
+
 def _build_with_cargo(*, app_name: str, staging: Path) -> Path:
     """Build a Cargo.toml program with `cargo build --release
-    --offline` in the staging dir. Returns the built binary path
-    (under the persistent `CARGO_TARGET_DIR`)."""
+    --offline` in the staging dir, retrying once online when the
+    registry cache lacks a crate the program needs (a fresh
+    machine, or a CI runner with a cold cargo cache: the offline
+    build fails with "no matching package", the online build
+    downloads it once and later builds stay offline). Returns
+    the built binary path (under the persistent
+    `CARGO_TARGET_DIR`)."""
     cargo = _require_cargo()
     CARGO_TARGET_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -357,15 +376,28 @@ def _build_with_cargo(*, app_name: str, staging: Path) -> Path:
             f"{CARGO_COMMAND} failed: cannot run cargo ({cargo}): "
             f"{exc}; staging kept at {staging} for diagnosis"
             ) from exc
+    command = CARGO_COMMAND
+    if proc.returncode != 0 and _needs_online_retry(proc):
+        command = "cargo build --release"
+        try:
+            proc = subprocess.run(
+                [cargo, "build", "--release", "--quiet"],
+                capture_output=True, text=True, cwd=staging,
+                env=_build_env(staging))
+        except OSError as exc:
+            raise AppPackError(
+                f"{command} failed: cannot run cargo ({cargo}): "
+                f"{exc}; staging kept at {staging} for diagnosis"
+                ) from exc
     if proc.returncode != 0:
         raise AppPackError(
-            f"{CARGO_COMMAND} failed (cargo exit "
+            f"{command} failed (cargo exit "
             f"{proc.returncode}): {_stderr_tail(proc) or proc.stdout.strip()}; "
             f"staging kept at {staging} for diagnosis")
     built = CARGO_TARGET_DIR / "release" / bin_name
     if not built.is_file():
         raise AppPackError(
-            f"{CARGO_COMMAND} failed: cargo exited 0 but no binary "
+            f"{command} failed: cargo exited 0 but no binary "
             f"appeared at {built} (expected the [[bin]] "
             f"{bin_name!r} from the staged Cargo.toml); staging "
             f"kept at {staging} for diagnosis")

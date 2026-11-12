@@ -350,7 +350,11 @@ def cargo_build_result(result, timeout=900):
     """Write an EmitResult (+ newr_rt.rs when used) to a temp dir
     and `cargo build --offline` it. Returns (proc, temp dir path)
     - the caller must keep the dir alive while running the binary.
-    The temp dir is NOT deleted here (the caller removes it)."""
+    The temp dir is NOT deleted here (the caller removes it).
+    When the registry cache lacks a crate (a fresh machine, or a
+    CI runner with a cold cargo cache), the offline build fails
+    with "no matching package" and this retries once online,
+    mirroring the dart helper's `_pub_get`."""
     d = tempfile.mkdtemp(prefix="newr-rs-bot-")
     for name, text in result.files.items():
         (Path(d) / name).write_text(text, encoding="utf-8")
@@ -360,6 +364,12 @@ def cargo_build_result(result, timeout=900):
     proc = subprocess.run(
         [CARGO, "build", "--offline"], capture_output=True, text=True,
         cwd=d, env=_cargo_env(), timeout=timeout)
+    if proc.returncode != 0:
+        out = (proc.stdout or "") + (proc.stderr or "")
+        if "no matching package" in out or "offline" in out:
+            proc = subprocess.run(
+                [CARGO, "build"], capture_output=True, text=True,
+                cwd=d, env=_cargo_env(), timeout=timeout)
     return proc, d
 
 
