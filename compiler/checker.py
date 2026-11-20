@@ -6,7 +6,8 @@ no-implicit-numeric-coercion rule (G7), nullability (``T?`` / ``?.`` /
 contracts, value-type rules, and the W1003/W1005/W1008 warnings.
 
 This module is the CORE language: it must never import anything
-Discord (``discord_check`` / ``discord_limits``). Discord entity and
+Discord (``discord_check`` / ``discord_limits``) or anything db
+(``db_check`` / ``db_limits``). Discord entity and
 store member types arrive through the ``providers`` parameter of
 ``check_program`` -- a dict of type-provider tables, normally built
 by ``discord_check.discord_providers(program)``:
@@ -253,6 +254,27 @@ class Checker:
                 self._validate_type(p.type, p.span)
             if fn.return_type is not None:
                 self._validate_type(fn.return_type, fn.span)
+        # Test names must be unique within a file: the runner
+        # reports tests by name, so two tests with one name (two
+        # blocks, or a block and a `test_` function) would be
+        # indistinguishable in the report. A block name that
+        # matches a non-test function is fine: only `test_` names
+        # are tests.
+        seen_tests: dict[str, str] = {}
+        for fn in ctx.program.functions:
+            if fn.name.startswith("test_"):
+                seen_tests[fn.name] = "test function"
+        for tb in ctx.program.test_blocks:
+            if tb.name in seen_tests:
+                self._error(
+                    tb.span, "E3003",
+                    f"duplicate test name `{tb.name}`",
+                    help=f"a {seen_tests[tb.name]} is already named "
+                         f"`{tb.name}` in this file; test names must "
+                         f"be unique within a file so the runner can "
+                         f"tell them apart, so rename one of them")
+            else:
+                seen_tests[tb.name] = "test block"
         for store in ctx.program.stores:
             for table in store.tables:
                 for col in table.columns:
@@ -291,6 +313,32 @@ class Checker:
 
     def _validate_type(self, t: Type, span: Span) -> None:
         ctx = self._ctx
+        if t.module is not None:
+            # A qualified type `m.T` (M9 L7): the module must be
+            # an imported file module (keyed by its bound alias),
+            # and T must be a struct or enum declared there. The
+            # bare name still resolves first-match afterwards
+            # (the emitters' existing behaviour); this branch only
+            # proves the qualification itself is real.
+            target = ctx.imports.get(t.module) if ctx is not None \
+                else None
+            if not isinstance(target, _ModuleCtx):
+                self._error(span, "E3001",
+                            f"unknown module `{t.module}`",
+                            help=f"import the module first, e.g. "
+                                 f"`import \"{t.module}.newr\" as "
+                                 f"{t.module}`")
+                return
+            if t.name in target.structs or t.name in target.enums:
+                if t.params:
+                    self._error(span, "E2001",
+                                f"type `{t}` takes no type arguments")
+                return
+            self._error(span, "E3001",
+                        f"module `{t.module}` has no type `{t.name}`",
+                        help=f"declare a struct or enum named "
+                             f"`{t.name}` in that module")
+            return
         if t.name in A.BUILTIN_TYPE_NAMES:
             arity = A.GENERIC_ARITY.get(t.name)
             if arity is not None and len(t.params) != arity:
@@ -501,13 +549,25 @@ class Checker:
             return binding.type
         if expr.name in BUILTINS:
             spec = BUILTINS[expr.name]
-            return self._builtin_fn_type(expr.name, spec)
+            return self._builtin_fn_type(expr.name, spec, expected)
         if expr.name == "log":
             return fn_of([STR], NONE_TYPE)
         # Undefined names are the resolver's E3001; stay silent here.
         return UNKNOWN
 
-    def _builtin_fn_type(self, name: str, spec: dict) -> Type:
+    def _builtin_fn_type(self, name: str, spec: dict,
+                         expected: Type | None = None) -> Type:
+        # R2 (a): use-site inference. When the expected type is a
+        # non-nullable fn type, build the builtin's fn type from it,
+        # after validating arity and that the expected param types
+        # are ones the builtin accepts. Anything else keeps the old
+        # behavior (fn with __unknown__ params), so the unannotated
+        # form and invalid annotations still fail closed.
+        if expected is not None and expected.name == "fn" \
+                and expected.params and not expected.nullable:
+            inferred = self._infer_builtin_fn_type(name, expected)
+            if inferred is not None:
+                return inferred
         params: list[Type] = []
         for p in spec.get("params", []):
             if isinstance(p, Type):
@@ -526,6 +586,55 @@ class Checker:
         else:
             ret_t = UNKNOWN
         return fn_of(params, ret_t)
+
+    def _infer_builtin_fn_type(self, name: str,
+                               expected: Type) -> Type | None:
+        """Build a bare builtin's fn type from an expected fn type.
+
+        Returns None when the builtin does not accept the expected
+        shape (wrong arity, or a param type the builtin cannot
+        take); the caller then falls back to the __unknown__ form,
+        which fails closed in _check. The return types mirror the
+        call path exactly (len -> int, min/max -> T, abs -> the
+        arg type, round -> int with 1 arg and float with 2,
+        range -> list[int]). Only the six builtins whose spec
+        params are generic get inference; the rest keep today's
+        behavior exactly.
+        """
+        params = list(expected.params[:-1])
+        if any(p.nullable for p in params):
+            return None
+        if name == "len":
+            if len(params) != 1:
+                return None
+            if params[0].name not in ("str", "list", "dict", "set"):
+                return None
+            return fn_of(params, INT)
+        if name in ("min", "max"):
+            if len(params) != 2 or params[0] != params[1]:
+                return None
+            return fn_of(params, params[0])
+        if name == "abs":
+            if len(params) != 1:
+                return None
+            if params[0].name not in ("int", "float"):
+                return None
+            return fn_of(params, params[0])
+        if name == "round":
+            if len(params) not in (1, 2):
+                return None
+            if params[0].name not in ("int", "float"):
+                return None
+            if len(params) == 2 and params[1].name != "int":
+                return None
+            return fn_of(params, INT if len(params) == 1 else FLOAT)
+        if name == "range":
+            if len(params) not in (1, 2, 3):
+                return None
+            if any(p.name != "int" for p in params):
+                return None
+            return fn_of(params, list_of(INT))
+        return None
 
     # -- operators
 
@@ -732,7 +841,18 @@ class Checker:
         return fn_of([p.type for p in expr.params], ret)
 
     def _synth_TryExpr(self, expr: A.TryExpr, expected) -> Type:
-        t = self.synth(expr.expr)
+        # A `try` used where a `Result[T, E]` is expected passes T
+        # down to its operand: calls that need an expected type
+        # (http.get, json.decode, db.query) only get one this way,
+        # and without it the operand stays UNKNOWN, the `try` stays
+        # untyped (synth clears expr_type for UNKNOWN), and the
+        # emitters refuse it with E4001. A plain `try 6 / 0` is
+        # unaffected (no expected type to pass).
+        inner_expected = None
+        if expected is not None and expected.name == "Result" \
+                and expected.params:
+            inner_expected = expected.params[0]
+        t = self.synth(expr.expr, inner_expected)
         if _is_unknown(t):
             return UNKNOWN
         return result_of(t, ERROR_TYPE)
@@ -965,9 +1085,21 @@ class Checker:
                              "`T?` values; a non-nullable value is never "
                              "`none`")
             return UNKNOWN
-        # Struct fields.
+        # Struct fields. An imported struct's fields resolve the
+        # same way: the type name is unqualified, so look through
+        # the imported module contexts for a struct of that name
+        # (first match wins; two imports defining the same struct
+        # name is already ambiguous at the type).
+        decl = None
         if self._ctx is not None and obj_type.name in self._ctx.structs:
             decl = self._ctx.structs[obj_type.name]
+        elif self._ctx is not None:
+            for target in self._ctx.imports.values():
+                if isinstance(target, _ModuleCtx) and \
+                        obj_type.name in target.structs:
+                    decl = target.structs[obj_type.name]
+                    break
+        if decl is not None:
             for f in decl.fields:
                 if f.name == name:
                     return f.type
@@ -1082,9 +1214,14 @@ class Checker:
             if binding is not None and binding.kind == "module":
                 return self._module_member_type(obj.name, expr.name,
                                                 expr.span, as_value=True)
-            if binding is None and obj.name in MODULES:
+            if binding is None and (obj.name in MODULES
+                                or obj.name == "db"
+                                or obj.name in ("http", "json", "ui")):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
+                # `db` is a domain module like `discord`: it is not
+                # in MODULES, but the same no-import fallback applies
+                # (SPEC.md section 12.5). Mirrors the emitter.
                 return self._module_member_type(obj.name, expr.name,
                                                 expr.span, as_value=True)
             if binding is not None and binding.kind == "store":
@@ -1149,13 +1286,24 @@ class Checker:
         mod = None
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
-        elif target is None and bound in MODULES:
+        elif target is None and (bound in MODULES or bound == "db"
+                                 or bound == "http" or bound == "json" or bound == "ui"):
             # N-09/N-10: named modules are usable by name without an
-            # import (SPEC.md SS12.2); the import is optional.
+            # import (SPEC.md SS12.2). `db` is a domain module: not
+            # in MODULES, but the same fallback applies (SPEC.md
+            # section 12.5). Mirrors the emitter.
             mod = bound
         if mod is not None:
             if mod == "discord":
                 return UNKNOWN  # discord module surface: not core's job
+            if mod == "db":
+                return UNKNOWN  # db module surface: not core's job
+            if mod == "http":
+                return UNKNOWN  # http module surface: not core's job
+            if mod == "json":
+                return UNKNOWN  # json module surface: not core's job
+            if mod == "ui":
+                return UNKNOWN  # ui module surface: not core's job
             members = MODULES.get(mod, {})
             if name in members:
                 sig = members[name]
@@ -1426,8 +1574,12 @@ class Checker:
                          "function")
         return ft.params[-1]
 
-    def _call_struct(self, name: str, expr: A.Call) -> Type:
-        decl = self._ctx.structs[name]
+    def _call_struct(self, name: str, expr: A.Call, decl=None) -> Type:
+        # The enum-variant call takes its declaration from the
+        # imported module the same way (`_call_enum_variant`
+        # `decl=`), so an imported struct builds with its own
+        # fields, not this file's.
+        decl = decl if decl is not None else self._ctx.structs[name]
         fields = [(f.name, f.type) for f in decl.fields]
         if expr.args:
             self._error(expr.args[0].span, "E3002",
@@ -1445,11 +1597,18 @@ class Checker:
         if isinstance(obj, A.Name):
             binding = self._lookup(obj.name)
             if binding is not None and binding.kind == "module":
-                return self._call_module_member(obj.name, func.name, expr)
-            if binding is None and obj.name in MODULES:
+                return self._call_module_member(obj.name, func.name, expr,
+                                                expected)
+            if binding is None and (obj.name in MODULES
+                                or obj.name == "db"
+                                or obj.name in ("http", "json", "ui")):
                 # N-09/N-10: named modules are usable by name without
                 # an import (SPEC.md SS12.2); the import is optional.
-                return self._call_module_member(obj.name, func.name, expr)
+                # `db` is a domain module: not in MODULES, but the
+                # same no-import fallback applies (SPEC.md section
+                # 12.5). Mirrors the emitter.
+                return self._call_module_member(obj.name, func.name, expr,
+                                                expected)
             if binding is not None and binding.kind == "store":
                 return self._call_store(obj.name, func.name, expr)
             if obj.name == "log" and func.name in ("info", "warn", "error"):
@@ -1582,20 +1741,130 @@ class Checker:
         return UNKNOWN
 
     def _call_module_member(self, bound: str, name: str,
-                            expr: A.Call) -> Type:
+                            expr: A.Call, expected=None) -> Type:
         ctx = self._ctx
         target = ctx.imports.get(bound) if ctx else None
         mod = None
         if isinstance(target, str) and target.startswith("named:"):
             mod = target[len("named:"):]
-        elif target is None and bound in MODULES:
+        elif target is None and (bound in MODULES or bound == "db"
+                                 or bound == "http" or bound == "json" or bound == "ui"):
             # N-09/N-10: named modules are usable by name without an
-            # import (SPEC.md SS12.2); the import is optional.
+            # import (SPEC.md SS12.2); the import is optional. `db`
+            # is a domain module: not in MODULES, but the same
+            # no-import fallback applies (SPEC.md section 12.5).
+            # Mirrors the emitter.
             mod = bound
         if mod is not None:
             if mod == "discord":
                 for arg in expr.args:
                     self.synth(arg)
+                return UNKNOWN
+            if mod == "db":
+                # M8a: the fixed db return types live here, in the
+                # core checker, so a `let` bound from a db call gets
+                # a real type and the emitters can use the value
+                # (print it, convert it, pass it on). Returning
+                # UNKNOWN here left every db-bound name untyped, so
+                # `print(n)` after `let n = db.exec(...)` died in
+                # the emitter with E4001 even though check passed.
+                # `query` takes its row type from the expected type
+                # at the call site (the let annotation, the return
+                # type); without one db_check reports E2011.
+                for arg in expr.args:
+                    self.synth(arg)
+                if name in ("open", "exec", "last_id"):
+                    return INT
+                if name in ("begin", "commit", "rollback", "close"):
+                    return NONE_TYPE
+                if name == "query":
+                    exp = expected
+                    if exp is not None and exp.name == "Result" \
+                            and exp.params:
+                        exp = exp.params[0]
+                    if exp is not None and exp.name == "list" \
+                            and len(exp.params) == 1:
+                        return exp
+                return UNKNOWN
+            if mod == "http":
+                # M8b: the fixed http return types live here, in the
+                # core checker, for the same reason as the db ones
+                # above (M8a). `route` and `serve` return none; a
+                # fetch returns the expected response struct when
+                # the call site carries one (a struct name, not a
+                # builtin and not generic); without one http_check
+                # reports E2012. The struct shape itself (exactly
+                # the HttpResponse fields) is validated by
+                # http_check, not here. The headers argument (get:
+                # 3rd, post: 4th, request: 5th) is synthed with the
+                # expected `dict[str, str]` type, so an empty `{}`
+                # there types instead of E2002; the type is only
+                # threaded, never enforced here — http_check reports
+                # a wrong headers type as E2012.
+                headers_idx = {"get": 2, "post": 3,
+                               "request": 4}.get(name)
+                for i, arg in enumerate(expr.args):
+                    if headers_idx is not None and i == headers_idx \
+                            and len(expr.args) == headers_idx + 1:
+                        self.synth(arg, Type("dict", (STR, STR)))
+                    else:
+                        self.synth(arg)
+                if name in ("route", "serve"):
+                    return NONE_TYPE
+                if name in ("get", "post", "request"):
+                    exp = expected
+                    if exp is not None and exp.name == "Result" \
+                            and exp.params:
+                        exp = exp.params[0]
+                    if exp is not None and exp.name not in \
+                            A.BUILTIN_TYPE_NAMES and not exp.params:
+                        return exp
+                return UNKNOWN
+            if mod == "json":
+                # M8b: the fixed json return types live here, in the
+                # core checker, for the same reason as the db ones
+                # above. `encode` returns str; `decode` returns the
+                # expected type at the call site (a struct, list,
+                # dict, scalar, or nullable of those); without one
+                # json_check reports E2013.
+                for arg in expr.args:
+                    self.synth(arg)
+                if name == "encode":
+                    return STR
+                if name == "decode":
+                    exp = expected
+                    if exp is not None and exp.name == "Result" \
+                            and exp.params:
+                        exp = exp.params[0]
+                    if exp is not None:
+                        return exp
+                return UNKNOWN
+            if mod == "ui":
+                # M8c: the fixed ui return types live here, in the
+                # core checker, for the same reason as the db/http/
+                # json ones above. Constructors return Widget,
+                # `render` returns str, `show`/`run` return none.
+                # The rules themselves (arity, handler signatures,
+                # the one-window rule) live in ui_check, not here.
+                # The children argument (list/row/column: arg 0) is
+                # synthed with the expected `list[Widget]` type, so
+                # an empty `[]` there types instead of E2002; the
+                # type is only threaded, never enforced here --
+                # ui_check reports a non-Widget child as E2014.
+                children_idx = {"list": 0, "row": 0,
+                                "column": 0}.get(name)
+                for i, arg in enumerate(expr.args):
+                    if children_idx is not None and i == children_idx:
+                        self.synth(arg, Type("list", (Type("Widget"),)))
+                    else:
+                        self.synth(arg)
+                if name in ("text", "button", "input", "list", "image",
+                            "row", "column"):
+                    return Type("Widget")
+                if name == "render":
+                    return STR
+                if name in ("show", "run"):
+                    return NONE_TYPE
                 return UNKNOWN
             members = MODULES.get(mod, {})
             if name not in members:
@@ -1628,6 +1897,15 @@ class Checker:
                 for arg in expr.args:
                     self.synth(arg)
                 return UNKNOWN
+            # §20 twin: an imported struct builds through the module
+            # name, `shared.Product(...)`, the declaration comes
+            # from the imported module's context, like the
+            # fielded-variant branch in `_call_member`. The resolver
+            # already enforces `pub` (E3005), so no export rule is
+            # needed here.
+            if name in target.structs:
+                return self._call_struct(name, expr,
+                                         decl=target.structs[name])
             exported = list(target.functions) + list(target.top_lets) + \
                 list(target.structs) + list(target.enums)
             help = self._similar_help(name, exported)

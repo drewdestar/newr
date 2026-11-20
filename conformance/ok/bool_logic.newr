@@ -10,10 +10,10 @@ if not true != false:
   passed = false
 if not false != true:
   passed = false
-let x = false and (1 / 0 == 0)
+let x = false and 1 / 0 == 0
 if x != false:
   passed = false
-let y = true or (1 / 0 == 0)
+let y = true or 1 / 0 == 0
 if y != true:
   passed = false
 if passed:

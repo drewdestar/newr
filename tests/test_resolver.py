@@ -349,12 +349,19 @@ class TestFileImports(unittest.TestCase):
             r = resolve_file(main)
             self.assertIn("E3008", codes(r))
 
-    def test_json_import_points_at_v1_1(self):
+    def test_json_import_is_a_named_module_in_v1(self):
+        # M8b: `json` landed in v1, so `import json` is now a plain
+        # named-module import, exactly like `import math`: no E3008,
+        # only the usual W1002 when the import is unused.
         with tempfile.TemporaryDirectory() as d:
             main = self._write(d, "main.newr", 'import json\n')
             r = resolve_file(main)
-            self.assertIn("E3008", codes(r))
-            self.assertIn("v1.1", r.diagnostics[0].message)
+            self.assertNotIn("E3008", codes(r))
+            self.assertEqual(codes(r), ["W1002"])
+            used = self._write(
+                d, "used.newr",
+                'import json\nfn main():\n  print(json.encode(42))\n')
+            self.assertEqual(resolve_file(used).diagnostics, [])
 
     def test_pub_access_ok_and_private_access_is_E3005(self):
         with tempfile.TemporaryDirectory() as d:

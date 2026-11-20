@@ -1,0 +1,41 @@
+# test_syntax.newr: the test syntax itself (M6 Phase 2c, SPEC.md
+# section 24.2 idea 13). A test is a `fn test_*()` function or a
+# `test "display name":` block; `newr test` discovers both, in
+# source order across the two forms, and runs them. Run normally,
+# this program only prints PASS: the tests are definitions until
+# `newr test` calls them.
+
+fn add(a: int, b: int) -> int:
+  return a + b
+
+fn test_add():
+  if add(1, 2) != 3:
+    throw "add(1, 2) should be 3"
+
+fn test_add_requires():
+  requires add(2, 2) == 4
+
+fn test_list_len():
+  let xs = [1, 2, 3]
+  xs.append(4)
+  if xs.len() != 4:
+    throw "list should have 4 items after append"
+
+fn test_math_sqrt():
+  if math.sqrt(4.0) != 2.0:
+    throw "sqrt(4) should be 2"
+
+test "adds in a block":
+  if add(10, 5) != 15:
+    throw "add(10, 5) should be 15"
+
+test "list grows in a block":
+  let ys = [1, 2]
+  ys.append(3)
+  if ys.len() != 3:
+    throw "list should have 3 items after append"
+
+test "sqrt in a block":
+  requires math.sqrt(9.0) == 3.0
+
+print "PASS"

@@ -481,6 +481,90 @@ check("randomShuffle", () => {
   assert.deepEqual([...xs].sort(), [1n, 2n, 3n, 4n, 5n]);
 });
 
+// ---------------------------------------------------------------- db module
+check("db open/exec/query/close", () => {
+  const h = rt.dbOpen(":memory:");
+  assert.equal(
+    rt.dbExec(
+      h,
+      "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)",
+      []
+    ),
+    0n
+  );
+  assert.equal(
+    rt.dbExec(h, "INSERT INTO t (title, done) VALUES (?, ?)", ["beli susu", false]),
+    1n
+  );
+  assert.equal(rt.dbLastId(h), 1n);
+  const rows = rt.dbQuery(
+    h,
+    "SELECT id, title, done FROM t",
+    [],
+    ["id", "title", "done"],
+    ["int", "str", "bool"]
+  );
+  assert.deepEqual(rows, [[1n, "beli susu", false]]);
+  rt.dbClose(h);
+});
+
+check("db transaction commit and rollback", () => {
+  const h = rt.dbOpen(":memory:");
+  rt.dbExec(h, "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)", []);
+  rt.dbExec(h, "INSERT INTO t (v) VALUES (?)", ["keep"]);
+  rt.dbBegin(h);
+  rt.dbExec(h, "INSERT INTO t (v) VALUES (?)", ["drop"]);
+  rt.dbRollback(h);
+  assert.deepEqual(rt.dbQuery(h, "SELECT v FROM t", [], ["v"], ["str"]), [["keep"]]);
+  rt.dbBegin(h);
+  rt.dbExec(h, "INSERT INTO t (v) VALUES (?)", ["kept"]);
+  rt.dbCommit(h);
+  assert.deepEqual(
+    rt.dbQuery(h, "SELECT v FROM t ORDER BY id", [], ["v"], ["str"]),
+    [["keep"], ["kept"]]
+  );
+  rt.dbClose(h);
+});
+
+check("db closed handle throws", () => {
+  const h = rt.dbOpen(":memory:");
+  rt.dbClose(h);
+  assert.throws(() => rt.dbExec(h, "SELECT 1", []), rt.NewrError);
+  assert.throws(() => rt.dbClose(h), rt.NewrError);
+});
+
+check("db missing column and null", () => {
+  const h = rt.dbOpen(":memory:");
+  rt.dbExec(h, "CREATE TABLE t (id INTEGER, note TEXT)", []);
+  rt.dbExec(h, "INSERT INTO t (id) VALUES (?)", [7n]);
+  assert.throws(
+    () => rt.dbQuery(h, "SELECT id FROM t", [], ["id", "nope"], ["int", "str"]),
+    rt.NewrError
+  );
+  assert.throws(
+    () => rt.dbQuery(h, "SELECT id, note FROM t", [], ["id", "note"], ["int", "str"]),
+    rt.NewrError
+  );
+  assert.deepEqual(
+    rt.dbQuery(h, "SELECT id, note FROM t", [], ["id", "note"], ["int", "str?"]),
+    [[7n, null]]
+  );
+  rt.dbClose(h);
+});
+
+check("db file database", () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "newr-rt-db-"));
+  const p = path.join(d, "t.db");
+  let h = rt.dbOpen(p);
+  rt.dbExec(h, "CREATE TABLE t (v INTEGER)", []);
+  rt.dbExec(h, "INSERT INTO t (v) VALUES (?)", [42n]);
+  rt.dbClose(h);
+  h = rt.dbOpen(p);
+  assert.deepEqual(rt.dbQuery(h, "SELECT v FROM t", [], ["v"], ["int"]), [[42n]]);
+  rt.dbClose(h);
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------------------- asError
 check("asError", () => {
   const n = new rt.NewrError("x", "E1");

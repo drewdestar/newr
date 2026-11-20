@@ -1,0 +1,23 @@
+/// shop_shared.newr, the shop contract (M8d). The data shapes and
+/// the route table both sides agree on. No statements, no db, no
+/// http, no ui. Imported by shop_backend.newr, shop_frontend_js.newr,
+/// shop_frontend_py.newr, and shop_view.newr.
+pub struct Product:
+  id: int
+  name: str
+  price: int
+  image_url: str
+
+pub struct CartLine:
+  product_id: int
+  qty: int
+  price: int
+
+pub struct CartRequest:
+  product_id: int
+  qty: int
+
+pub const PRODUCTS_PATH = "/products"
+pub const CART_PATH = "/cart"
+pub const ACTION_PATH = "/action"
+pub const CHECKOUT_PATH = "/checkout"

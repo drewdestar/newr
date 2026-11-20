@@ -1,0 +1,5 @@
+# expect: E2011
+# A `?` placeholder count mismatch is a db rule violation: one
+# placeholder in the SQL, two bound values.
+let h = db.open(":memory:")
+db.exec(h, "INSERT INTO t (v) VALUES (?)", 1, 2)

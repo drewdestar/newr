@@ -197,6 +197,27 @@ class TestCalls(unittest.TestCase):
         r = check('let n = len(1)\nprint n\n')
         self.assertIn("E2001", codes(r))
 
+    def test_input_no_arg_ok(self):
+        # SPEC.md §12.1: input() takes 0-1 args; the prompt is optional.
+        r = check('let s = input()\nprint s\n')
+        self.assertEqual(errs(r), [])
+
+    def test_input_prompt_ok(self):
+        r = check('let s = input("Name? ")\nprint s\n')
+        self.assertEqual(errs(r), [])
+
+    def test_input_two_args_is_E3002(self):
+        r = check('let s = input("a", "b")\nprint s\n')
+        self.assertIn("E3002", codes(r))
+
+    def test_input_returns_str(self):
+        r = check('let s: str = input()\nprint s\n')
+        self.assertEqual(errs(r), [])
+
+    def test_input_not_int(self):
+        r = check('let n: int = input()\nprint n\n')
+        self.assertIn("E2001", codes(r))
+
     def test_math_sqrt_needs_float(self):
         r = check('import math\nlet x = math.sqrt(4)\nprint x\n')
         self.assertIn("E2001", codes(r))

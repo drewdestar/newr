@@ -1,0 +1,20 @@
+# The ui module (SPEC.md section 12.8): button handlers may be
+# an inline lambda, a let-bound lambda, or a named function; the
+# render is the same either way (handlers are not invoked here).
+fn on_tap() -> none:
+  print "tapped"
+let h = fn() -> none: print("tapped")
+let passed = true
+if ui.render(ui.button("Inline", fn() -> none: print("tapped"))) != "<button data-action=\"0\">Inline</button>":
+  passed = false
+if ui.render(ui.button("Bound", h)) != "<button data-action=\"0\">Bound</button>":
+  passed = false
+if ui.render(ui.button("Named", on_tap)) != "<button data-action=\"0\">Named</button>":
+  passed = false
+let w: Widget = ui.button("Typed", on_tap)
+if ui.render(w) != "<button data-action=\"0\">Typed</button>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

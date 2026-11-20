@@ -1,0 +1,60 @@
+/// shop_frontend_py.newr, the py native frontend (M8d). A native
+/// window via ui.run: the Buy handlers post to the backend and the
+/// view re-reads the products and the cart from the backend on
+/// every invocation, so the tree always shows the live state.
+/// The search input is display-only on py: its handler is a
+/// no-op (see shop_view.newr) and the query is always "", so the
+/// view always shows the full product list. If the backend is
+/// down, the view falls back to an empty product list and a total
+/// of 0 instead of crashing. Run the backend first (port 8080).
+import "shop_shared.newr"
+import "shop_view.newr"
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+fn buy(id: int) -> none:
+  let req = shop_shared.CartRequest(product_id: id, qty: 1)
+  let resp: HttpResponse = http.post("http://127.0.0.1:8080/cart", json.encode(req))
+  if resp.status != 200:
+    print "buy failed: " + str(resp.status)
+
+fn checkout() -> none:
+  let resp: HttpResponse = http.post("http://127.0.0.1:8080/checkout", "")
+  if resp.status != 200:
+    print "checkout failed: " + str(resp.status)
+
+/// The view handlers, as let-bound lambdas. Let-bound (not inline)
+/// so the dart emitter can Future-wrap them: they call fns that
+/// fetch, and dart only allows a fetching lambda as a route handler
+/// argument or a let-bound lambda. Named fns passed directly would
+/// also work for the emit, but the java emitter passes them as bare
+/// method references, which do not compile against a Void-returning
+/// fn type; the let-bound lambda form compiles on java too.
+let buy_handler = fn(id: int) -> none:
+  buy(id)
+
+let checkout_handler = fn() -> none:
+  checkout()
+
+fn view() -> Widget:
+  let products: list[Product] = []
+  let cart: list[CartLine] = []
+  try:
+    let resp: HttpResponse = http.get("http://127.0.0.1:8080/products")
+    products = json.decode(resp.body)
+  catch err:
+    print "products fetch failed: " + err.message
+  try:
+    let resp2: HttpResponse = http.get("http://127.0.0.1:8080/cart")
+    cart = json.decode(resp2.body)
+  catch err:
+    print "cart fetch failed: " + err.message
+  let total = 0
+  for line in cart:
+    total = total + line.qty * line.price
+  return shop_view.shop_view(products, total, "", buy_handler, checkout_handler)
+
+ui.run(view)

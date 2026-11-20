@@ -1,0 +1,35 @@
+/// shop_view.newr, the shop view builder (M8d). Builds the shop
+/// widget tree from a product list and a cart total.
+/// Button order is PINNED: the Buy buttons come in product order
+/// (data-action 0, 1, 2) and Checkout is last (data-action 3); the
+/// search input is data-input 0. The js frontend dispatches on
+/// this order, so if the order changes here, the dispatch there
+/// must change with it. See tests/test_shop_view.py, which renders
+/// this tree and asserts the order.
+/// Rows are built EXPLICITLY, not in a loop. The step-1 probe
+/// showed a single-expression int-returning lambda stored in a
+/// variable fails to compile on rs (the emitter types the literal
+/// as i32 against an i64 closure, E0271), so the loop form is not
+/// used until that emitter bug is fixed. See examples/shop_README.md.
+/// NOTE on types: newr type annotations take bare names only, so
+/// the imported structs are named Product and CartLine here, never
+/// shop_shared.Product (that form is a parse error in type
+/// position). Construction stays qualified: shop_shared.Product(...).
+import "shop_shared.newr"
+
+/// The search input handler. A no-op: on js the bridge script
+/// handles input changes through /action, and on py the search box
+/// is display-only. It is pub so the unused parameter is the
+/// handler contract, not a bug signal (SPEC 5.1: pub function
+/// parameters do not warn).
+pub fn search_noop(s: str) -> none:
+  pass
+
+pub fn shop_view(products: list[Product], cart_total: int, query: str, buy: fn(int) -> none, checkout: fn() -> none) -> Widget:
+  let p0 = products.get(0, shop_shared.Product(id: 0, name: "", price: 0, image_url: "https://example.com/empty.png"))
+  let p1 = products.get(1, shop_shared.Product(id: 0, name: "", price: 0, image_url: "https://example.com/empty.png"))
+  let p2 = products.get(2, shop_shared.Product(id: 0, name: "", price: 0, image_url: "https://example.com/empty.png"))
+  let row0 = ui.row([ui.image(p0.image_url), ui.text(p0.name + " - " + str(p0.price)), ui.button("Buy", fn() -> none: buy(p0.id))])
+  let row1 = ui.row([ui.image(p1.image_url), ui.text(p1.name + " - " + str(p1.price)), ui.button("Buy", fn() -> none: buy(p1.id))])
+  let row2 = ui.row([ui.image(p2.image_url), ui.text(p2.name + " - " + str(p2.price)), ui.button("Buy", fn() -> none: buy(p2.id))])
+  return ui.column([ui.text("Shop"), ui.input("Search...", query, search_noop), ui.list([row0, row1, row2]), ui.text("Total: " + str(cart_total)), ui.button("Checkout", checkout)])

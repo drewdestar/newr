@@ -1,6 +1,6 @@
 ![newr, a general-purpose programming language. One readable source. Seven readable outputs.](docs/images/hero.svg)
 
-[![version 0.1.0](https://img.shields.io/badge/version-0.1.0-1a7f37)](SPEC.md)
+[![version 0.2.0](https://img.shields.io/badge/version-0.2.0-1a7f37)](SPEC.md)
 [![python 3.10+](https://img.shields.io/badge/python-3.10%2B-1f2328)](SPEC.md)
 [![license MIT](https://img.shields.io/badge/license-MIT-1f2328)](LICENSE)
 
@@ -39,7 +39,7 @@ The Python emitter produces readable code, not a blob. This is the whole emitted
 print("Hello, world!")
 ```
 
-The same file builds for JavaScript, Java, and C# today. Rust, Kotlin, and Dart follow in M5. `examples/showcase.newr` shows the other side of the language: a small Discord bot with four commands and two events, written in the same syntax.
+The same file builds for all seven targets today. `examples/showcase.newr` shows the other side of the language: a small Discord bot with four commands and two events, written in the same syntax.
 
 ## How it works
 
@@ -55,9 +55,9 @@ One front end serves every target. The lexer, parser, resolver, and checker run 
 | JavaScript | discord.js 14.28.1, Node 24 LTS | Done in M3 |
 | Java | JDA 6.7.0 | Done in M4 |
 | C# | Discord.Net 3.20.2 | Done in M4 |
-| Rust | serenity 0.12.5, poise 0.7.1 | In progress in M5 |
-| Kotlin | Kord 0.18.1 | In progress in M5 |
-| Dart | nyxx 6.9.1 | In progress in M5 |
+| Rust | serenity 0.12.5, poise 0.7.1 | Done in M5 |
+| Kotlin | Kord 0.18.1 | Done in M5 |
+| Dart | nyxx 6.9.1 | Done in M5 |
 
 ## The language, briefly
 
@@ -70,23 +70,38 @@ See [SPEC.md](SPEC.md) for the full specification.
 
 ## Verification
 
-Numbers from the M4 verification (suite, conformance, goldens, runtime checks):
+Numbers from the M6 verification (suite, conformance):
 
-- Full suite: 902 tests, passing in system Python and in a fresh virtual environment.
-- Conformance: 74/74 on each of Python, JavaScript, Java, and C#, with 0 failures.
-- Goldens: 6/6. Runtime checks: Java 71/71, C# 75/75, JavaScript 61.
+- Full suite: 1209 tests, passing in system Python and in a fresh virtual environment.
+- Conformance: 79/79 on each of the seven targets (py, js, java, cs, rs, kt, dart).
 
 ## Usage
 
 ```sh
-./newr check <file.newr>                          # parse, resolve, check; writes nothing
-./newr build --check <file.newr>                   # same checks; writes nothing
-./newr build --target py|js|java|cs <file.newr>    # emit readable code for the target
-./newr build --target py -o <out.py> <file.newr>   # emit to a file of your choice
-./newr explain <code>                             # explain a diagnostic code
+./newr check <file.newr>                                # parse, resolve, check; writes nothing
+./newr build --check <file.newr>                         # same checks; writes nothing
+./newr build --target py|js|java|cs|rs|kt|dart <file.newr> # emit readable code for the target
+./newr build --target py -o <out.py> <file.newr>         # emit to a file of your choice
+./newr fmt <file.newr>                                   # rewrite in canonical form (see `newr help fmt`)
+./newr fix <file.newr>                                   # apply safe fixes for errors that have one (see `newr help fix`)
+./newr test <file.newr>                                  # run the file's tests (see `newr help test`)
+./newr docs                                              # generate docs/api.md and docs/examples.md (see `newr help docs`)
+./newr explain <code>                                    # explain a diagnostic code
 ```
 
 Exit codes: 0 success, 1 usage, 2 environment, 4 build error. There is no exit code 3 in v1, the spec reserves 3 for network errors, which no current command can produce.
+
+## Documenting your code
+
+A `///` line at the start of a logical line documents the declaration directly below it:
+
+```newr
+/// Doubles a number.
+fn double(x: int) -> int:
+  return x * 2
+```
+
+A `///` block at the top of a file, followed by a blank line, is the file header. `newr docs` renders the comments into `docs/api.md` (the stdlib reference) and `docs/examples.md` (one section per example program). See [docs/guide.md](docs/guide.md).
 
 ## Install
 
@@ -105,15 +120,16 @@ Planned alongside the PyPI release: a pipx install, GitHub Releases, and a Power
 - M1: front end complete, lexer, parser, AST, resolver, checker, and the discord checker. `newr check` verifies programs; `newr build --check` runs the same checks.
 - M2: Python emitter complete.
 - M3: JavaScript emitter complete.
-- M4: Java and C# emitters complete.
-- M5: Rust, Kotlin, and Dart emitters in progress.
+- M4: Java and C# emitters complete - suite 902/902, conformance 74/74 on all four targets (py, js, java, cs), cold re-evaluation CLEAN.
+- M5: Rust, Kotlin, and Dart emitters complete, suite 963/963, conformance 74/74 on all seven targets (py, js, java, cs, rs, kt, dart), cold re-evaluation CLEAN.
+- M6: the toolchain, `newr fmt` (canonical formatting), `newr init` (project scaffold + `newr.json`), `newr test` (test functions and test blocks), `newr fix` (safe E3001 renames), `newr docs` (generated docs from `///` comments). Suite 1209/1209, conformance 79/79 on all seven targets. Version 0.2.0.
 
 Verification runs in CI on every pull request.
 
 ## Project layout
 
 ```
-SPEC.md            the language specification (v0.1.0, frozen at M0)
+SPEC.md            the language specification (v0.2.0)
 compiler/          the compiler front end and emitters
 tests/             front-end test suite (python3 -m unittest discover -s tests)
 examples/          .newr examples, plus the v0 golden outputs (hello.py, showcase.py)

@@ -1,0 +1,34 @@
+# The http module, server side (SPEC.md section 12.6): routes
+# serve a JSON list and echo a POST, plus a query echo. The
+# server binds an ephemeral port (serve 0) and prints
+# `listening on 127.0.0.1:PORT`; the pair harness starts it and
+# runs mod_http_client against that port. It never prints PASS
+# itself: serve blocks forever, and the harness kills it.
+struct Todo:
+  id: int
+  title: str
+  done: bool
+  score: float
+
+struct HttpRequest:
+  method: str
+  path: str
+  headers: dict[str, str]
+  body: str
+  query: dict[str, str]
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let todos = [Todo(id: 9007199254740993, title: "123", done: false, score: 1.0), Todo(id: 2, title: "tulis laporan", done: true, score: 1.5)]
+let list_todos = fn(req: HttpRequest) -> HttpResponse: req.method == "GET" ? HttpResponse(status: 200, headers: {}, body: json.encode(todos)) : HttpResponse(status: 404, headers: {}, body: "")
+let create_todo = fn(req: HttpRequest) -> HttpResponse:
+  let todo: Todo = json.decode(req.body)
+  return HttpResponse(status: 201, headers: {}, body: json.encode(todo))
+let echo_query = fn(req: HttpRequest) -> HttpResponse: HttpResponse(status: 200, headers: {}, body: json.encode(req.query))
+http.route("GET", "/todos", list_todos)
+http.route("POST", "/todos", create_todo)
+http.route("GET", "/echo", echo_query)
+http.serve(0)

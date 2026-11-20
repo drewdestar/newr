@@ -1,4 +1,0 @@
-# expect: E3008
-# The json module is not available in v1 (SPEC.md §12.2).
-import json
-print json

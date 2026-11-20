@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): empty lists, alone and
+# nested inside a column.
+let passed = true
+if ui.render(ui.list([])) != "<ul></ul>":
+  passed = false
+if ui.render(ui.column([ui.list([])])) != "<div data-layout=\"column\"><ul></ul></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

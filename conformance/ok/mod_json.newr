@@ -1,0 +1,62 @@
+# The json module (SPEC.md section 12.7): typed encode/decode
+# round-trips for structs, lists, dicts, scalars and nullables,
+# the float rule (integral floats render with ".0"), the big-int
+# round-trip, and decode errors caught with try.
+struct Todo:
+  id: int
+  title: str
+  done: bool
+  score: float
+
+struct Note:
+  id: int
+  body: str?
+
+let passed = true
+let todos = [Todo(id: 9007199254740993, title: "123", done: false, score: 1.0), Todo(id: 2, title: "tulis laporan", done: true, score: 1.5)]
+let text: str = json.encode(todos)
+if text != "[{{\"id\":9007199254740993,\"title\":\"123\",\"done\":false,\"score\":1.0}},{{\"id\":2,\"title\":\"tulis laporan\",\"done\":true,\"score\":1.5}}]":
+  passed = false
+let back: list[Todo] = json.decode(text)
+if back.len() != 2:
+  passed = false
+let first = back.get(0, Todo(id: 0, title: "", done: false, score: 0.0))
+if first.id != 9007199254740993 or first.title != "123" or first.done != false or first.score != 1.0:
+  passed = false
+let second = back.get(1, Todo(id: 0, title: "", done: false, score: 0.0))
+if second.id != 2 or second.title != "tulis laporan" or second.done != true or second.score != 1.5:
+  passed = false
+if json.encode(1.0) != "1.0":
+  passed = false
+if json.encode([1.0, 1.5, -2.25]) != "[1.0,1.5,-2.25]":
+  passed = false
+if json.encode(42) != "42":
+  passed = false
+if json.encode("hi") != "\"hi\"":
+  passed = false
+let d: dict[str, int] = {"a": 1, "b": 2}
+let d_back: dict[str, int] = json.decode(json.encode(d))
+if d_back.get("a", 0) != 1 or d_back.get("b", 0) != 2:
+  passed = false
+let note = Note(id: 1, body: none)
+if json.encode(note) != "{{\"id\":1,\"body\":null}}":
+  passed = false
+let note_back: Note = json.decode(json.encode(note))
+if note_back.id != 1 or note_back.body.is_none() != true:
+  passed = false
+let note2 = Note(id: 2, body: "x")
+let note2_back: Note = json.decode(json.encode(note2))
+if note2_back.body.is_some() != true:
+  passed = false
+if note2_back.body.unwrap() != "x":
+  passed = false
+let bad: Result[list[Todo], error] = try json.decode("xxx")
+if bad.is_err() != true:
+  passed = false
+let bad2: Result[int, error] = try json.decode("1.5")
+if bad2.is_err() != true:
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

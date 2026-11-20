@@ -7,7 +7,7 @@
 #   distinct files. This runs on LINUX ONLY: macOS (APFS) and Windows
 #   (NTFS) default filesystems are case-insensitive, so the second file
 #   would overwrite the first and the step would be red by design on
-#   those runners - not because the compiler is wrong, but because the
+#   those runners — not because the compiler is wrong, but because the
 #   filesystem cannot represent the case. The compiler rule itself
 #   (imports are case-sensitive, SPEC.md SS3.3) is tested in the suite.
 # - No Unix-exec-bit assumptions: nothing here relies on a file being
@@ -30,6 +30,33 @@ on:
   pull_request:
 
 jobs:
+  fmt-check:
+    name: fmt --check (ubuntu, Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The canonical form is pinned by tests/test_fmt.py; every file
+      # in examples/ and conformance/ok/ must already be formatted,
+      # except the two pipeline programs listed in that file (the
+      # parser desugars `|>` to a call, so fmt cannot keep the
+      # pipeline spelling). Those two are checked for idempotency
+      # and AST round-trip by the tests, not by this job.
+      - name: fmt --check over the corpus
+        run: |
+          for f in examples/*.newr conformance/ok/*.newr conformance/ok/lib/*.newr; do
+            case "$f" in
+              conformance/ok/pipeline.newr|conformance/ok/fn_pipeline_chain.newr)
+                continue ;;
+            esac
+            python newr fmt --check "$f" || exit 1
+          done
+
   front-end:
     name: front-end suite (${{ matrix.os }}, Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
@@ -49,18 +76,54 @@ jobs:
       - name: Front-end test suite
         run: python -m unittest discover -s tests
 
-      # Cross-platform: every text read_text()/open() must say
-      # encoding="utf-8" explicitly (binary-mode opens are exempt -
-      # none exist yet). `python` (not `python3`) is the command on
-      # all three OSes after setup-python; `python3` is not guaranteed
+      # Cross-platform: every real text read_text()/open() call
+      # must say encoding="utf-8" explicitly (binary-mode opens
+      # are exempt). A grep cannot tell a real call from a
+      # docstring, a comment, a method name like _check_open, a
+      # newr-level db_open/sqlite3.open string, or a multi-line
+      # call whose encoding= sits on the next line, so this step
+      # parses the AST instead and only flags real Call nodes.
+      # `python` (not `python3`) is the command on all three
+      # OSes after setup-python; `python3` is not guaranteed
       # on windows-latest.
       - name: Check encoding="utf-8" on every read_text()/open()
         shell: bash
         run: |
-          if grep -rn -E "(read_text|open)\(" compiler/ --include="*.py" | grep -v 'encoding='; then
-            echo "::error::read_text()/open() without encoding= found in compiler/ - use encoding=\"utf-8\""
-            exit 1
-          fi
+          python -c "
+          import ast, pathlib, sys
+          bad = []
+          for path in sorted(pathlib.Path('compiler').glob('*.py')):
+              tree = ast.parse(path.read_text(encoding='utf-8'))
+              for node in ast.walk(tree):
+                  if not isinstance(node, ast.Call):
+                      continue
+                  func = node.func
+                  name = None
+                  if isinstance(func, ast.Name):
+                      name = func.id
+                  elif isinstance(func, ast.Attribute):
+                      name = func.attr
+                  if name not in ('open', 'read_text'):
+                      continue
+                  if any(k.arg == 'encoding' for k in node.keywords):
+                      continue
+                  if name == 'open' and node.args:
+                      mode = node.args[1] if len(node.args) > 1 else None
+                      if isinstance(mode, ast.Constant) and isinstance(mode.value, str) and 'b' in mode.value:
+                          continue
+                      for k in node.keywords:
+                          if k.arg == 'mode' and isinstance(k.value, ast.Constant) and 'b' in str(k.value.value):
+                              break
+                      else:
+                          bad.append(f'{path}:{node.lineno}')
+                          continue
+                      continue
+                  bad.append(f'{path}:{node.lineno}')
+          if bad:
+              print('::error::read_text()/open() without encoding= found in compiler/, use encoding=\"utf-8\": ' + ', '.join(bad))
+              sys.exit(1)
+          print('encoding check ok')
+          "
 
       # Cross-platform: CRLF sources must check clean.
       - name: CRLF source handling
@@ -70,7 +133,7 @@ jobs:
           python newr check hello-crlf.newr
 
       # Cross-platform: two modules differing only by case must stay
-      # distinct. Linux only - see the header comment for why macOS
+      # distinct. Linux only — see the header comment for why macOS
       # and Windows cannot run this step.
       - name: Case-only module-collision test
         if: runner.os == 'Linux'
@@ -126,7 +189,7 @@ jobs:
       # launcher supplies the __main__.py entry point; the .pyz is
       # invoked the same way as the launcher, via `python newr.pyz ...`.
       # This artifact is what the zipapp-diff matrix job downloads on
-      # every OS - a .pyz built on Linux must run unchanged on
+      # every OS — a .pyz built on Linux must run unchanged on
       # Windows/macOS.
       - name: Build zipapp
         run: python -m zipapp . -o newr.pyz -p "/usr/bin/env python3"
@@ -155,7 +218,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # The SAME .pyz built on ubuntu (build-zipapp job), not a fresh
-      # local build - that is the whole point of the cross-OS check.
+      # local build — that is the whole point of the cross-OS check.
       - name: Download the ubuntu-built zipapp
         uses: actions/download-artifact@v4
         with:
@@ -170,6 +233,53 @@ jobs:
           python newr.pyz check examples/showcase.newr
           python newr.pyz check examples/hello.newr
           python newr.pyz check examples/shop.newr
+
+  build-binary:
+    name: standalone binary (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller==6.22.3
+
+      # One build per OS: a binary built on Linux does not run on
+      # macOS or Windows, so each runner builds its own with
+      # scripts/build-binary.sh.
+      - name: Build the binary
+        shell: bash
+        run: bash scripts/build-binary.sh
+
+      # Smoke test through the binary, not the launcher: version,
+      # check, and build all seven targets on the shop example.
+      # The runtime files are bundled with --add-data; without them
+      # build fails with FileNotFoundError: compiler/newr_rt.py.
+      - name: Smoke test the binary
+        shell: bash
+        run: |
+          BIN=dist/newr-binary
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN=dist/newr-binary.exe; fi
+          "$BIN" version
+          "$BIN" check examples/hello.newr
+          "$BIN" check examples/shop.newr
+          for t in py js java cs rs kt dart; do
+            "$BIN" build --target "$t" -o "$RUNNER_TEMP/binary-smoke/$t/shop" examples/shop.newr
+          done
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: newr-binary-${{ matrix.os }}
+          path: dist/newr-binary*
 
   golden-rebuild:
     name: golden rebuild check (${{ matrix.os }}, Python ${{ matrix.python-version }})
@@ -188,8 +298,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # The v0 golden files must exist and be byte-identical to the v0
-      # originals. The hashes below are the pinned originals' SHA-256
-      # (refreshed 2026-11-07 for the em-dash removal; program text unchanged).
+      # originals. The hashes below are the v0 originals' SHA-256.
       # Emitter golden comparison (regenerating goldens from the .newr
       # sources and diffing) lands in M2, when the emitters do.
       - name: v0 golden files exist and match the v0 originals
@@ -200,8 +309,8 @@ jobs:
           python -c "
           import hashlib, sys
           expected = {
-              'examples/hello.py': 'ac278c9874a121377ac19f19a4fedbea112bc6d4268c9e6d8e6776557d794359',
-              'examples/showcase.py': '45eab8e1daa5fafa4f33d441e1eaedf4dfa7a3b9e39175d89e6d357ada2d12c2',
+              'examples/hello.py': '1eb3265be38e2639a1fe1339d121c5feedfa1ace413749a20e67f7b997543f00',
+              'examples/showcase.py': 'a8222f1be0f901ac9994c3978ed92dfeb38b2695830baba098dbc9206bf504d7',
           }
           for path, want in expected.items():
               got = hashlib.sha256(open(path, 'rb').read()).hexdigest()
@@ -246,7 +355,7 @@ jobs:
 
       # Build every example and run the emitted Python. The bots
       # (hello_bot, showcase, shop) stop at the DISCORD_TOKEN guard
-      # when no token is set: exit 1 with the token message - that
+      # when no token is set: exit 1 with the token message — that
       # is the expected behaviour here, and it proves the emitted
       # bot got far enough to run its main().
       - name: Build + run the examples
@@ -285,7 +394,7 @@ jobs:
   # M3: the JavaScript emitter job. One job per target; a failure
   # here never blocks the other targets' jobs, and vice versa.
   # Node 24 is the floor (node:sqlite is built in from 24; J9/J10).
-  # Python is still needed - the compiler itself is Python, and
+  # Python is still needed — the compiler itself is Python, and
   # the full suite includes the Python emitter tests too.
   js-emitter:
     name: js emitter (${{ matrix.os }}, Node ${{ matrix.node-version }})
@@ -311,8 +420,8 @@ jobs:
       # discord.py + aiosqlite are needed for the Python bot
       # emitter round-trip tests (tests/test_emitter_bot.py) that
       # the full suite includes. The JS bot tests use the in-repo
-      # mock discord.js (tests/js/mocks) - no npm install needed
-      # for the suite - but the example runs below load the emitted
+      # mock discord.js (tests/js/mocks) — no npm install needed
+      # for the suite — but the example runs below load the emitted
       # bot against REAL discord.js, so it is installed here.
       - name: Install discord.py + aiosqlite
         run: python -m pip install "discord.py==2.7.1" aiosqlite
@@ -331,7 +440,7 @@ jobs:
 
       # Build every example and run the emitted JS. The bots
       # (hello_bot, showcase, shop) stop at the DISCORD_TOKEN guard
-      # when no token is set: exit 1 with the token message - that
+      # when no token is set: exit 1 with the token message — that
       # is the expected behaviour here, and it proves the emitted
       # bot got far enough to run its main(). NODE_PATH points at
       # the real discord.js installed above (the emitted bot
@@ -374,7 +483,7 @@ jobs:
   # M4: the Java emitter job. One job per target; a failure here
   # never blocks the other targets' jobs, and vice versa.
   # Java 21 is the floor (Temurin 21 LTS; the emitted code uses no
-  # feature newer than Java 17, K1). Python is still needed - the
+  # feature newer than Java 17, K1). Python is still needed — the
   # compiler itself is Python, and the full suite includes the
   # Python emitter tests too. JDA + sqlite-jdbc are downloaded from
   # Maven Central (the jars are NOT vendored in the repo).
@@ -410,7 +519,7 @@ jobs:
       # slf4j-api + trove4j are JDA runtime dependencies: the
       # emitted bot's COMMANDS initializer runs at class-load time
       # (before main's token check), and JDA's CommandDataImpl
-      # needs both to load - without them the run dies with
+      # needs both to load — without them the run dies with
       # NoClassDefFoundError instead of reaching the token guard.
       - name: Download JDA + sqlite-jdbc + JDA runtime deps
         shell: bash
@@ -433,7 +542,7 @@ jobs:
       # Build every example, compile the emitted Java, and run it.
       # The bots (hello_bot, showcase, shop) stop at the
       # DISCORD_TOKEN guard when no token is set: exit 1 with the
-      # token message - that is the expected behaviour here, and it
+      # token message — that is the expected behaviour here, and it
       # proves the emitted bot got far enough to run its main().
       - name: Build + run the examples (Java)
         shell: bash
@@ -475,7 +584,7 @@ jobs:
   # M4: the C# emitter job. One job per target; a failure here
   # never blocks the other targets' jobs, and vice versa.
   # .NET 8 is the floor (LTS; the emitted code uses no feature newer
-  # than C# 12). Python is still needed - the compiler itself is
+  # than C# 12). Python is still needed — the compiler itself is
   # Python, and the full suite includes the Python emitter tests
   # too. Discord.Net + Microsoft.Data.Sqlite come from NuGet at
   # restore time (the packages are NOT vendored in the repo).
@@ -520,7 +629,7 @@ jobs:
 
       # Build every example, build the emitted C#, and run it. The
       # bots (hello_bot, showcase, shop) stop at the DISCORD_TOKEN
-      # guard when no token is set: exit 1 with the token message -
+      # guard when no token is set: exit 1 with the token message —
       # that is the expected behaviour here, and it proves the
       # emitted bot got far enough to run its Main().
       - name: Build + run the examples (C#)
@@ -559,3 +668,291 @@ jobs:
       # now (compare-only; regeneration needs --bless, never by hand).
       - name: Golden comparison (C#)
         run: python -m unittest tests.test_goldens.TestGoldensCs -v
+
+  # M5: the Rust emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # Rust 1.99.1 is the pinned toolchain (the emitter was verified
+  # against it); serenity 0.12.5 + poise 0.7.1 + rusqlite 0.32.1
+  # come from crates.io at cargo build time. Python is still
+  # needed — the compiler itself is Python, and the full suite
+  # includes the Python emitter tests too. CARGO_TARGET_DIR is
+  # pinned under runner.temp: /tmp is a 512MB tmpfs on the dev VM
+  # and cargo target dirs do not fit there. It is set per step,
+  # not at job level: the `runner` context is not available in
+  # job-level `env` (the runner is assigned only after the job
+  # starts), and a job-level `runner.temp` makes the whole
+  # workflow file invalid (M9: 30 runs failed with 0 jobs).
+  rs-emitter:
+    name: rust emitter (${{ matrix.os }}, Rust 1.99.1)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust 1.99.1
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99.1"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. Rust emitter, goldens, conformance)
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target rs`, compiles the emitted Rust with rustc (plain
+      # programs) or `cargo run` (bot/store programs), runs it, and
+      # requires a PASS verdict from each.
+      - name: Conformance corpus (Rust)
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+        run: python conformance/run.py --target rs
+
+      # Build every example, compile the emitted Rust, and run it.
+      # The bots (hello_bot, showcase, shop) stop at the
+      # DISCORD_TOKEN guard when no token is set: exit 1 with the
+      # token message — that is the expected behaviour here, and it
+      # proves the emitted bot got far enough to run its main().
+      # The bot builds run in runner.temp so the repo stays clean.
+      - name: Build + run the examples (Rust)
+        shell: bash
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
+        run: |
+          python newr build --target rs examples/hello.newr -o hello_out.rs
+          rustc hello_out.rs -o hello_out
+          ./hello_out
+          mkdir -p "${{ runner.temp }}/rs-shop" "${{ runner.temp }}/rs-hello-bot" "${{ runner.temp }}/rs-showcase"
+          python newr build --target rs examples/shop.newr -o "${{ runner.temp }}/rs-shop/shop_out.rs"
+          if (cd "${{ runner.temp }}/rs-shop" && cargo run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target rs examples/hello_bot.newr -o "${{ runner.temp }}/rs-hello-bot/hello_bot_out.rs"
+          if (cd "${{ runner.temp }}/rs-hello-bot" && cargo run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target rs examples/showcase.newr -o "${{ runner.temp }}/rs-showcase/showcase_out.rs"
+          if (cd "${{ runner.temp }}/rs-showcase" && cargo run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M5 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (Rust)
+        run: python -m unittest tests.test_goldens.TestGoldensRs -v
+
+  # M5: the Kotlin emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # Kotlin 2.2.0 (kotlinc-jvm) is the pinned compiler and Java 21
+  # (Temurin) the runtime; Kord 0.18.1 + sqlite-jdbc 3.54.1.0 come
+  # from Maven Central at Gradle build time. Python is still
+  # needed — the compiler itself is Python, and the full suite
+  # includes the Python emitter tests too.
+  # NOTE (M5 known gap): the emitted Gradle path has NOT been
+  # proven live on the dev VM (Gradle 8.12 daemon handshake fails
+  # there); the proven path on the VM is kotlinc + resolved Kord
+  # jars on the classpath. This job exercises Gradle on the CI
+  # runners — if `gradle run` fails there, fall back to that
+  # kotlinc path instead of weakening the guard check.
+  kt-emitter:
+    name: kotlin emitter (${{ matrix.os }}, Kotlin 2.2.0)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # kotlinc is not on the runners by default: fetch the
+      # official 2.2.0 compiler zip from JetBrains.
+      - name: Install kotlinc 2.2.0
+        shell: bash
+        run: |
+          mkdir -p "${{ runner.temp }}/kotlin"
+          curl -sSL -o "${{ runner.temp }}/kotlin/kotlin-compiler.zip" https://github.com/JetBrains/kotlin/releases/download/v2.2.0/kotlin-compiler-2.2.0.zip
+          unzip -q "${{ runner.temp }}/kotlin/kotlin-compiler.zip" -d "${{ runner.temp }}/kotlin"
+          echo "${{ runner.temp }}/kotlin/kotlinc/bin" >> "$GITHUB_PATH"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.12"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. Kotlin emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target kt`, compiles the emitted Kotlin with kotlinc,
+      # runs it, and requires a PASS verdict from each.
+      - name: Conformance corpus (Kotlin)
+        run: python conformance/run.py --target kt
+
+      # Build every example, compile the emitted Kotlin, and run
+      # it. The bots (hello_bot, showcase, shop) stop at the
+      # DISCORD_TOKEN guard when no token is set: exit 1 with the
+      # token message — that is the expected behaviour here, and it
+      # proves the emitted bot got far enough to run its main().
+      # Plain hello goes through kotlinc directly; the bots go
+      # through the emitted Gradle project (`gradle run`). The bot
+      # builds run in runner.temp so the repo stays clean.
+      - name: Build + run the examples (Kotlin)
+        shell: bash
+        run: |
+          python newr build --target kt examples/hello.newr -o hello_out.kt
+          kotlinc hello_out.kt -include-runtime -d hello_out.jar
+          java -jar hello_out.jar
+          mkdir -p "${{ runner.temp }}/kt-shop" "${{ runner.temp }}/kt-hello-bot" "${{ runner.temp }}/kt-showcase"
+          python newr build --target kt examples/shop.newr -o "${{ runner.temp }}/kt-shop/shop_out.kt"
+          if (cd "${{ runner.temp }}/kt-shop" && gradle run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target kt examples/hello_bot.newr -o "${{ runner.temp }}/kt-hello-bot/hello_bot_out.kt"
+          if (cd "${{ runner.temp }}/kt-hello-bot" && gradle run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target kt examples/showcase.newr -o "${{ runner.temp }}/kt-showcase/showcase_out.kt"
+          if (cd "${{ runner.temp }}/kt-showcase" && gradle run --quiet 2>&1 | grep -q DISCORD_TOKEN); then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M5 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (Kotlin)
+        run: python -m unittest tests.test_goldens.TestGoldensKt -v
+
+  # M5: the Dart emitter job. One job per target; a failure here
+  # never blocks the other targets' jobs, and vice versa.
+  # Dart 3.13.7 is the pinned SDK (the emitter was verified against
+  # it); nyxx 6.9.1 + nyxx_commands 6.1.0 + sqlite3 3.9.0 come from
+  # pub.dev at `dart pub get` time. Python is still needed — the
+  # compiler itself is Python, and the full suite includes the
+  # Python emitter tests too.
+  dart-emitter:
+    name: dart emitter (${{ matrix.os }}, Dart 3.13.7)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Dart 3.13.7
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: "3.13.7"
+
+      # discord.py + aiosqlite are needed for the Python bot
+      # emitter round-trip tests (tests/test_emitter_bot.py) that
+      # the full suite includes.
+      - name: Install discord.py + aiosqlite
+        run: python -m pip install "discord.py==2.7.1" aiosqlite
+
+      - name: Full test suite (incl. Dart emitter, goldens, conformance)
+        run: python -m unittest discover -s tests
+
+      # The conformance harness builds every ok program with
+      # `--target dart`, runs the emitted Dart, and requires a PASS
+      # verdict from each.
+      - name: Conformance corpus (Dart)
+        run: python conformance/run.py --target dart
+
+      # Build every example and run it. The bots (hello_bot,
+      # showcase, shop) stop at the DISCORD_TOKEN guard when no
+      # token is set: exit 1 with the token message — that is the
+      # expected behaviour here, and it proves the emitted bot got
+      # far enough to run its main(). `dart analyze` is the compile
+      # proof for the bot files (Dart's javac equivalent); `dart
+      # pub get` resolves the nyxx/sqlite3 deps first. The guard
+      # stops before any sqlite3 load, so plain `dart` suffices
+      # here (no `dart run` native-asset build is needed).
+      - name: Build + run the examples (Dart)
+        shell: bash
+        run: |
+          python newr build --target dart examples/hello.newr -o hello_out.dart
+          dart hello_out.dart
+          python newr build --target dart examples/shop.newr -o shop_out.dart
+          dart pub get
+          dart analyze shop_out.dart shop_items.dart shop_out_deploy.dart
+          if dart shop_out.dart 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "shop: token guard reached (expected, no token set)"
+          else
+            echo "::error::shop did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target dart examples/hello_bot.newr -o hello_bot_out.dart
+          dart analyze hello_bot_out.dart hello_bot_out_deploy.dart
+          if dart hello_bot_out.dart 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "hello_bot: token guard reached (expected, no token set)"
+          else
+            echo "::error::hello_bot did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+          python newr build --target dart examples/showcase.newr -o showcase_out.dart
+          dart analyze showcase_out.dart showcase_out_deploy.dart
+          if dart showcase_out.dart 2>&1 | grep -q DISCORD_TOKEN; then
+            echo "showcase: token guard reached (expected, no token set)"
+          else
+            echo "::error::showcase did not reach the DISCORD_TOKEN guard"
+            exit 1
+          fi
+
+      # The M5 goldens must match what the emitter produces right
+      # now (compare-only; regeneration needs --bless, never by hand).
+      - name: Golden comparison (Dart)
+        run: python -m unittest tests.test_goldens.TestGoldensDart -v

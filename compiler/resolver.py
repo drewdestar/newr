@@ -28,7 +28,7 @@ Ownership decisions (see BUILD_REPORT.md):
   ``option`` bindings are assignable; assigning to a fn/struct/enum/
   module/store/const binding is E3001 ("cannot assign to ...").
 - Type names (``x: Nosuch``) are validated by the CHECKER, which owns
-  the type environment - not here.
+  the type environment — not here.
 - A single-match similar-name suggestion counts as a use of the
   suggested binding: ``let count = 1`` + ``print coun`` is one E3001,
   not E3001 plus a spurious W1001 for ``count``.
@@ -66,8 +66,8 @@ RESERVED_HANDLER_BINDINGS = {
 }
 
 #: Named (stdlib / domain) modules available in v1 (SPEC.md §11, §12).
-#: ``json`` is v1.1, not v1 - importing it is E3008 with a v1.1 pointer.
-NAMED_MODULES = {"math", "time", "random", "file", "env", "discord"}
+NAMED_MODULES = {"math", "time", "random", "file", "env", "discord", "db",
+                 "http", "json", "ui"}
 
 #: Handler bindings per context (SPEC.md §13.4–§13.5). Select handlers add
 #: ``values``; modal handlers add their field names.
@@ -154,7 +154,7 @@ class Resolver:
         # Top-level let/const whose declaration statement has NOT been
         # walked yet (round-2 BUG-2, SPEC.md SS8: top-level statements
         # execute in file order). Set around the top-level statement
-        # walk in _resolve_module, None everywhere else - fn/lambda/
+        # walk in _resolve_module, None everywhere else — fn/lambda/
         # handler bodies are deferred execution and never see it.
         self._top_level_pending: dict[str, A.Stmt] | None = None
         # Transitive top-level-let effect analysis (M2 fix #3): while
@@ -183,7 +183,7 @@ class Resolver:
         # Resolved paths that took part in a reported import cycle
         # (E3004): their imports are not also warned as unused (W1002)
         # and their imported-file restrictions are not re-reported
-        # (E3006) - both would be noise on top of the cycle error.
+        # (E3006) — both would be noise on top of the cycle error.
         self._cycle_paths: set[Path] = set()
 
     # ------------------------------------------------------------ diagnostics
@@ -210,7 +210,7 @@ class Resolver:
         ``candidates`` is a list of (name, kind-word) pairs. Exactly one
         close match -> help + a certain suggestion + a fix (a pure
         rename), and the matched binding counts as used (the user meant
-        it - the misspelling is the use). Several close matches -> help
+        it — the misspelling is the use). Several close matches -> help
         listing them, no fix.
         """
         names = [c[0] for c in candidates]
@@ -261,7 +261,7 @@ class Resolver:
         info = self._resolve_module(program, main_path, is_main=True)
         program.files = self.files
         # program.modules was filled by _resolve_module (for every module,
-        # not just the main file - nested imports included).
+        # not just the main file — nested imports included).
         return CompilerResult(program=program,
                               diagnostics=self.diagnostics)
 
@@ -332,7 +332,7 @@ class Resolver:
     def _build_modules(self, info: _ModuleInfo) -> None:
         """Fill ``program.modules`` for this module (bound name -> Program).
 
-        Every resolved module gets its own map - not just the main file -
+        Every resolved module gets its own map — not just the main file —
         so the checker can follow nested file imports (a -> b -> c)
         instead of seeing only the main file's imports.
         """
@@ -363,7 +363,7 @@ class Resolver:
                         "`task` must live in the main file")
         for st in program.stmts:
             # Top-level let/const are declarations (exportable via pub),
-            # not statements - only other statements are forbidden here.
+            # not statements — only other statements are forbidden here.
             if isinstance(st, (A.Let, A.Const)):
                 continue
             self._error(st.span, "E3006",
@@ -374,13 +374,7 @@ class Resolver:
     def _resolve_import(self, info: _ModuleInfo, imp: A.Import) -> None:
         bound = imp.bound_name
         if imp.module is not None:
-            if imp.module == "json":
-                self._error(imp.span, "E3008",
-                            "module `json` is not available in v1 "
-                            "(arrives in v1.1)",
-                            help="json needs a typed JSON value first "
-                                 "(SPEC.md §12.2)")
-            elif imp.module not in NAMED_MODULES:
+            if imp.module not in NAMED_MODULES:
                 known = ", ".join(sorted(NAMED_MODULES))
                 self._error(imp.span, "E3008",
                             f"unknown module `{imp.module}`",
@@ -399,7 +393,7 @@ class Resolver:
         target = (info.path.parent / imp.path).resolve()
         if not target.is_file():
             # N-05: if a file with the same name in a different case
-            # exists on disk, say so - imports are case-sensitive and
+            # exists on disk, say so — imports are case-sensitive and
             # the generic "cannot find" hides the real problem.
             help = f"looked for {target}"
             parent = target.parent
@@ -407,7 +401,7 @@ class Resolver:
                 for cand in parent.iterdir():
                     if cand.name.lower() == target.name.lower():
                         help = (f"there is a file named `{cand.name}` "
-                                f"in {parent} - imports are case-"
+                                f"in {parent} — imports are case-"
                                 "sensitive (SPEC.md §3.3)")
                         break
             self._error(imp.span, "E3008",
@@ -475,6 +469,14 @@ class Resolver:
                            program: A.Program) -> None:
         scope = info.scope
         for fn in program.functions:
+            # A test block's synthetic function (`_newr_test_<n>`,
+            # SPEC.md section 8.7) lives in the emitter's reserved
+            # `_newr_` namespace on purpose, so it is not declared
+            # here: `_declare` would reject the prefix (E3001).
+            # The name is only ever called by the test harness,
+            # which the checker resolves from its own function map.
+            if fn.name.startswith("_newr_test_"):
+                continue
             self._declare(scope, "fn", fn.name, fn.span, fn, pub=fn.pub)
         for st in program.structs:
             self._declare(scope, "struct", st.name, st.span, st,
@@ -486,6 +488,9 @@ class Resolver:
                                 f"duplicate field `{f.name}` in struct "
                                 f"`{st.name}`")
                 seen.add(f.name)
+                # A qualified type in a struct field uses its
+                # import (M9 L7).
+                self._walk_type(f.type)
         for en in program.enums:
             self._declare(scope, "enum", en.name, en.span, en, pub=en.pub)
             seen = set()
@@ -495,6 +500,10 @@ class Resolver:
                                 f"duplicate variant `{v.name}` in enum "
                                 f"`{en.name}`")
                 seen.add(v.name)
+                # A qualified type in a variant field uses its
+                # import (M9 L7).
+                for f in v.fields:
+                    self._walk_type(f.type)
         # Top-level let/const are pre-declared so fn bodies (walked
         # before the statements) and other declarations may
         # forward-reference them. Top-level STATEMENTS may not: the
@@ -537,7 +546,7 @@ class Resolver:
                 self._reserved_reported.add(key)
                 self._error(span, "E3001",
                             f"`{name}` uses the reserved `_newr_` prefix",
-                            help="rename it - `_newr_*` is the emitter's "
+                            help="rename it — `_newr_*` is the emitter's "
                                  "temporary namespace")
             return None
         if (kind in ("var", "param", "const", "option")
@@ -548,7 +557,7 @@ class Resolver:
                 self._reserved_reported.add(key)
                 self._error(span, "E3007",
                             f"`{name}` is a reserved handler binding",
-                            help="rename it - handler bindings (`user`, "
+                            help="rename it — handler bindings (`user`, "
                                  "`guild`, `channel`, `bot`, `interaction`, "
                                  "`message`, `values`) cannot be shadowed")
             return None
@@ -594,6 +603,11 @@ class Resolver:
             # not earn W1001 (SPEC.md §5.3).
             if fn.pub and binding is not None:
                 binding.used = True
+        # Type annotations count as uses (M9 L7): a qualified type
+        # in a parameter or the return type uses its import.
+        for p in fn.params:
+            self._walk_type(p.type)
+        self._walk_type(fn.return_type)
         # M2 fix #3: record the top-level lets this fn reads/writes
         # and the module fns it calls (for the transitive E2005
         # analysis). Reads/writes inside a nested lambda are NOT
@@ -737,7 +751,7 @@ class Resolver:
                     and not b.pub:
                 self._warning(b.span, "W1001",
                               f"unused {b.kind} `{b.name}`",
-                              help="remove it, or use it - an unused "
+                              help="remove it, or use it — an unused "
                                    "binding is almost always a bug")
         for rec in info.imports:
             if rec.used:
@@ -749,7 +763,7 @@ class Resolver:
                          or info.program.stores):
                 continue  # bot blocks implicitly import discord
             # N-05: an import that failed (E3004 cycle / E3008 missing
-            # file) or took part in a cycle is not also "unused" - the
+            # file) or took part in a cycle is not also "unused" — the
             # error already says what is wrong with it.
             if any(d.code in ("E3004", "E3008")
                    and d.span == rec.node.span for d in self.diagnostics):
@@ -785,7 +799,7 @@ class Resolver:
             if not self._depth_reported:
                 self._depth_reported = True
                 self._error(st.span, "E1001", "too deeply nested",
-                            help="split the block into smaller pieces - "
+                            help="split the block into smaller pieces — "
                                  "newr limits nesting to 200 levels so a "
                                  "bad input cannot exhaust the stack")
             return
@@ -850,7 +864,7 @@ class Resolver:
             self._walk_expr(st.cond, scope)
         elif isinstance(st, A.Ensure):
             # M-04 (SPEC.md SS9.7): `result` is bound inside an
-            # `ensures` condition, with the function's return type -
+            # `ensures` condition, with the function's return type —
             # the verbatim spec example `ensures result >= 0` must
             # resolve. `requires` does not bind it.
             ens_scope = _Scope("block", parent=scope)
@@ -881,6 +895,9 @@ class Resolver:
 
     def _walk_let_const(self, st: A.Let | A.Const, scope: _Scope,
                         kind: str) -> None:
+        # A type annotation counts as a use (M9 L7): a qualified
+        # type in `let x: m.T` uses the import `m`.
+        self._walk_type(st.type_ann)
         existing = scope.lookup_local(st.name)
         if existing is not None and existing.node is st:
             # Pre-declared by _collect_top_level (top-level let/const).
@@ -946,7 +963,7 @@ class Resolver:
                              "not a variable")
             return
         binding.used = True
-        # M2 fix #3: a write to a top-level let is a use of it -
+        # M2 fix #3: a write to a top-level let is a use of it —
         # record it for the transitive E2005 analysis.
         if (self._collecting_fn is not None and self._lambda_depth == 0
                 and self._is_module_let(st.name, binding)):
@@ -983,7 +1000,7 @@ class Resolver:
                 self._depth_reported = True
                 self._error(expr.span, "E1001", "too deeply nested",
                             help="split the expression into smaller pieces "
-                                 "- newr limits nesting to 200 levels so a "
+                                 "— newr limits nesting to 200 levels so a "
                                  "bad input cannot exhaust the stack")
             return
         try:
@@ -1010,6 +1027,9 @@ class Resolver:
             fn_scope = _Scope("function", parent=scope)
             for p in expr.params:
                 self._declare(fn_scope, "param", p.name, p.span, p)
+                # A qualified type in a lambda parameter uses its
+                # import (M9 L7).
+                self._walk_type(p.type)
             # M2 fix #3: a lambda body may escape and run later, so
             # its reads/writes are not the enclosing fn's.
             self._lambda_depth += 1
@@ -1146,6 +1166,18 @@ class Resolver:
             for rec in self._current_info.imports:
                 if rec.bound_name == bound_name:
                     rec.used = True
+
+    def _walk_type(self, t: A.Type | None) -> None:
+        """A type annotation (M9 L7): a qualified type `m.T`
+        counts as a use of the import `m`, so a type-only import
+        does not earn a spurious W1002. Recurses into generic
+        arguments (`list[m.T]`) and fn types."""
+        if t is None:
+            return
+        if t.module is not None:
+            self._mark_import_used(t.module)
+        for p in t.params:
+            self._walk_type(p)
 
     def _resolve_qualified(self, node: A.Member, binding: _Binding,
                            scope: _Scope) -> None:

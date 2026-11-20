@@ -1,7 +1,7 @@
 # newr - Language Specification v1
 
 **Status:** SPEC FROZEN (M0), 6 November 2026.
-**Version:** newr 0.1.0 (the language line; distinct from `discord-py-skills` 0.5.0).
+**Version:** newr 0.2.0 (the language line; distinct from `discord-py-skills` 0.5.0).
 **Authors:** chie (Muse) for drewdestar/newr (repo not yet created - LOCAL ONLY).
 
 This document is the contract M1–M6 build against. Changing it later needs a
@@ -428,14 +428,27 @@ The compiler reasons about the program. It does not guess.
   files. It only applies a fix when the diagnostic's `fix` field says the
   fix is **unambiguous** (exactly one candidate) and **safe** (a pure rename
   or a pure deletion of a provably-dead token - never a change to program
-  meaning). It prints every change it makes, and it refuses to run on a file
-  with any error that has no safe fix (it fixes what it can and reports the
-  rest - it never half-fixes silently).
-- **`newr fix` is NOT in M1.** M1 designs the diagnostic `fix` field;
-  in M1 only the resolver attaches one (the similar-name rename,
-  E3001) - the checker does not attach fixes yet. The `fix` command
-  itself lands in M4 (tooling), once the diagnostics are proven. M1's
-  CLI is `build` / `build --check` / `check` / `help` (§19).
+  meaning). It prints every change it makes, and it refuses to modify a file
+  with any error that has no safe fix: the file is left untouched, the
+  blocking errors are reported, and no fix is applied, not even for the
+  errors that do have fixes. It never half-fixes, silently or otherwise.
+  The fixed text is verified clean by re-running the front end before
+  anything is written. Warnings never block a fix. Diagnostics from
+  imported files belong to those files; `newr fix` on an imported file
+  fixes them there.
+- **Minimal in M6.** The command landed in M6 as a minimal command:
+  general in shape (it applies any diagnostic `fix`), but today only
+  the resolver attaches one, the similar-name rename (E3001, exactly
+  one close match). The checker attaches no fixes yet.
+- **Deferred to v1.1: checker-attached fixes.** Attaching a fix to a
+  checker diagnostic is new reasoning work, not plumbing: each checker
+  fix needs its own proof that the fix is unambiguous and safe (does
+  it change program meaning, does it hold for every use site, what
+  happens when two fixes overlap). That proof needs its own design
+  per diagnostic, so it is v1.1 work, not M6. When checker fixes
+  land, they flow through this same command with no change here: the
+  command trusts the diagnostic's `fix` field and never invents a fix
+  of its own.
 
 ### 5.3 What "thinking" is NOT - explicit boundary
 
@@ -513,12 +526,21 @@ information-theoretically ambiguous; the honest response is a precise
   (full list in §6.1). An identifier that starts with a digit is an error.
 - **Comments:** `#` to end of line. There is no block comment in v1
   (documented; add one only if demanded - a block comment is a lexer
-  feature, not a language feature). There is also **no doc-comment
-  syntax in v1** (no `///`, no `DocComment` token): a `#` comment
-  above a declaration is an ordinary comment, never carried into
-  emitted code as a docstring - the emitter's "doc comments →
-  docstrings" mapping is vacuous until the doc-comment syntax is
-  frozen (M6, §24 idea 14).
+  feature, not a language feature). **Doc comments are frozen in M6:**
+  a `///` line at the start of a logical line documents the
+  declaration or statement directly below it (the text after `///`,
+  one leading space stripped). Several `///` lines in a row join into
+  one doc. A blank line between the comment and the item breaks the
+  attachment. A `///` block at the very top of a file, followed by a
+  blank line, is the file header: it documents the file, not the
+  first item. `///` after code on the same line is not a doc comment
+  (it stays three division operators). A `#` comment above a
+  declaration is an ordinary comment, never a doc comment. Doc
+  comments are syntax only: they change no checking, resolution, or
+  emitted code, and `newr docs` renders them into Markdown (§19).
+  The stdlib's own members carry their doc text as `doc` strings in
+  `compiler/modules.py` (§12): the stdlib has no newr source
+  declarations to hang a `///` comment on.
 
 ### 6.1 Keywords (reserved)
 
@@ -526,7 +548,7 @@ information-theoretically ambiguous; the honest response is a precise
 `do` `elif` `else` `embed` `enum` `ensures` `event` `false` `finally`
 `fn` `for` `from` `if` `import` `in` `let` `log` `match` `modal` `none`
 `not` `only` `or` `pass` `pub` `reply` `requires` `return` `select`
-`send` `store` `strings` `struct` `task` `throw` `true` `try` `while`
+`send` `store` `strings` `struct` `task` `test` `throw` `true` `try` `while`
 
 Contextual words that are **not** reserved (usable as identifiers, but with
 their block meaning when they appear in the block position): `description`
@@ -727,6 +749,7 @@ require one - Java/C#/Rust - which is the emitter's job, not the language's.)
 |---|---|---|
 | Import | `import "path.newr"` / `import <module>` | §11 |
 | Function | `fn name(params) -> type:` + body | §9.5 |
+| Test block | `test "display name":` + body | §8.7, core (runs under `newr test`) |
 | Struct | `struct Name:` + field lines | §8.5 |
 | Bot block | `bot "Name":` + keys | §13.1 (discord sugar) |
 | Command | `command <name>:` + keys/options/`do:` | §13.2 |
@@ -738,7 +761,7 @@ require one - Java/C#/Rust - which is the emitter's job, not the language's.)
 | Statement | any statement (§9) | top-level executable code |
 
 `fn`, `struct`, `enum`, `import`, `bot`, `command`, `event`, `task`,
-`strings`, `store` are top-level only - using one inside a body is an
+`strings`, `store`, `test` are top-level only. Using one inside a body is an
 error. **Visibility:** declarations are **private by default**; `pub`
 exports them (`pub fn`, `pub struct`, `pub enum`, top-level `pub let` /
 `pub const`). Accessing a non-`pub` name from another module is an error
@@ -825,6 +848,45 @@ enum Shape:
   qualifies the variant. Enum values are value types (§7.8).
 - `match` (§9.6) on an enum is exhaustiveness-checked: every variant must
   be covered or a `_` arm must be present, else a build error.
+
+### 8.7 Test blocks (M6, both test forms decided, §24.2 #13)
+
+```
+test "adds two numbers":
+  requires add(2, 2) == 4
+
+test "list grows":
+  let xs = [1, 2]
+  xs.append(3)
+  if xs.len() != 3:
+    throw "list should have 3 items after append"
+```
+
+- A test block is a named test: `test "display name":` plus an indented
+  body of statements. It is the second test form alongside `fn test_*()`
+  functions (§19, `newr test`); a file may mix both, and the runner runs
+  them in source order across the two forms.
+- The name is a plain string (no interpolation), so it may contain
+  spaces; it must be non-empty and a single line (no newline in the
+  name), because the runner reports each test by name on one line.
+- A test block behaves like a function with no parameters and no return
+  value: it may read and call anything in scope, may `throw`, and a
+  bare `return` exits it early, but `return <value>` is an error.
+  It has no callable name in source, so it cannot recurse and cannot
+  be called from other code; only `newr test` runs it.
+- Test names must be unique within a file: two blocks with one name,
+  or a block and a `test_` function sharing one name, is a build error
+  (E3003). A block name matching a non-test function is fine.
+- Only the main file's tests are discovered: test blocks (like
+  `test_` functions) in an imported file still parse, check, and emit,
+  but `newr test` never runs them.
+- Implementation note (not a language promise): the compiler lowers a
+  block to a synthetic function named `_newr_test_<n>` (n is the
+  block's index in source order) with the same body, so the resolver,
+  checker, and all seven emitters handle it exactly like a `fn`.
+  User code can never use that name: the `_newr_` prefix is reserved
+  (E3001). In a plain `newr build` the block emits as that (never
+  called) function.
 
 ## 9. Statements and expressions
 
@@ -1118,15 +1180,15 @@ finally:
   install` for shared modules).
 - Imported files are compiled with the importing file (one program, one
   build). The cache (§4.1) tracks the import graph.
-- **Manifest (`newr.json`) - DRAFT schema, compiler support in M4:**
-  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str }` - `name` and
-  `version` are required; `target`, `default_locale`, and `db_path`
-  are optional. (Secrets NEVER go in it - the token stays in `.env`.)
-  The schema is a draft until M4 decides it (the M4/M6 decision in
-  §25 records the same deferral); v1 resolution needs no manifest -
-  relative paths only. `newr init` (M4) scaffolds it. (Recorded as "G9
-  partially applied; manifest deferred to M4 with reason" in
-  BUILD_REPORT.md.)
+- **Manifest (`newr.json`), compiler support in M6 (Phase 2b):**
+  `{ "name": str, "version": str, "target": "py" | "js" | ..., "default_locale": str, "db_path": str, "http_allowlist": list[str], "description": str, "icon": str, "id": str }`, `name` and
+  `version` are required; `target`, `default_locale`, `db_path`,
+  `http_allowlist`, `description`, `icon`, and `id` are optional.
+  (Secrets NEVER go in it, the token stays in `.env`.) M8d adds
+  `description`, `icon`, and `id`; see §22.1 for the validation rules.
+  The schema is the one `newr init` scaffolds and `newr build` reads
+  (M6 Phase 2b); v1 resolution needs no manifest,
+  relative paths only. `newr init` (M6) scaffolds it.
 
 ## 12. Standard library
 
@@ -1134,7 +1196,10 @@ The stdlib is **modules**, not builtins-in-the-language. Core modules are
 available on every target; domain modules are available where their domain
 exists. The rule for adding a builtin later: it must be needed by at least
 two of the repo's own example programs, and it must have identical semantics
-on all shipped targets.
+on all shipped targets. Every member below is documented in
+`compiler/modules.py` (a `doc` string beside its signature) and rendered
+by `newr docs` into `docs/api.md`; the generated reference lists every
+member here with no omissions.
 
 ### 12.1 Core builtins (available without import)
 
@@ -1161,6 +1226,9 @@ works with no `import` line. Writing `import math` is still allowed (and
 is the documented style when a file leans on a module heavily); it changes
 nothing about what is checked. The one exception is `discord`, which is
 imported implicitly by bot blocks (§13.1) and is not core-checked (§2.1).
+`db` is the same shape: a domain module, not core - its rules live in
+`db_check.py` / `db_limits.py` (§12.5), and the core checker returns
+UNKNOWN for db calls (§2.1).
 
 | Module | Members | Notes |
 |---|---|---|
@@ -1169,25 +1237,30 @@ imported implicitly by bot blocks (§13.1) and is not core-checked (§2.1).
 | `random` | `int(a: int, b: int) -> int`, `choice(list) -> T`, `shuffle(list)` | Seeded by the runtime, not user-seedable in v1. |
 | `file` | `read(path: str) -> str`, `write(path: str, content: str)`, `append(path: str, content: str)`, `exists(path: str) -> bool` | Text files, UTF-8 (§3.4). `read`/`write` throw on failure (§10). Paths use `/` (§3.2). |
 | `env` | `get(name: str) -> str?`, `get(name: str, default: str) -> str`, `args -> list[str]` | The only env access (§3.4). `env.args` is the command-line arguments **including the program name at index 0** (the Python/Go/Rust/Node convention). |
+| `db` | `open(path: str) -> int`, `exec(handle: int, sql: str, args...) -> int`, `query(handle: int, sql: str, args...) -> list[RowStruct]`, `begin(handle: int)`, `commit(handle: int)`, `rollback(handle: int)`, `last_id(handle: int) -> int`, `close(handle: int)` | SQLite, sync (§12.5). A domain module, not core: checked by `db_check.py`, not the core checker. |
+| `http` | `route(method: str, path: str, handler: fn) -> none`, `serve(port: int) -> none`, `serve(port: int, host: str) -> none`, `get(url: str) -> HttpResponse`, `post(url: str, body: str) -> HttpResponse`, `request(method: str, url: str, body: str) -> HttpResponse` (each fetch also takes an optional timeout in seconds, then optional headers) | HTTP server plus fetch client, sync (§12.6). A domain module, not core: checked by `http_check.py`, not the core checker. |
+| `json` | `encode(value) -> str`, `decode(text: str) -> T` | Typed JSON (§12.7). A domain module, not core: checked by `json_check.py`, not the core checker. |
+| `ui` | `text(s: str) -> Widget`, `button(label: str, on_tap: fn() -> none) -> Widget`, `input(placeholder: str, value: str, on_change: fn(str) -> none) -> Widget`, `list(items: list[Widget]) -> Widget`, `image(url: str) -> Widget`, `row(children: list[Widget]) -> Widget`, `column(children: list[Widget]) -> Widget`, `render(root: Widget) -> str`, `show(root: Widget) -> none`, `run(view: fn() -> Widget) -> none` | One small widget set (§12.8). A domain module, not core: checked by `ui_check.py`, not the core checker. `Widget` is an opaque builtin value type. |
 
-**`json` is v1.1, not v1.** `json.parse` cannot be typed honestly without
-an `any` type (the spec has none, §7.1), and typing it as
-`dict[str, str]` would be a lie. It arrives with a typed JSON value (or
-with `any`, if a later spec amendment adds one) - documented, not
-forgotten.
+**`json` landed in v1 with M8b** (it was v1.1 in an earlier draft of
+this section). The v1.1 objection was that `json.parse` cannot be
+typed honestly without an `any` type (the spec has none, §7.1), and
+typing it as `dict[str, str]` would be a lie. M8b settles it the
+same way M8a settled `db.query`: expected-type inference, not
+`any`. `json.decode` takes its type from the call site, and
+`json.encode` takes any encodable value (§12.7).
 
 ### 12.3 I/O scope for v1 (DECIDED)
 
 - **In v1:** `print`, `input`, `file.read/write/append/exists`, `env.get`,
   `env.args`.
-- **NOT in v1 - HTTP `fetch`.** Reasons: it needs timeouts, secret handling,
-  and an allowlist (a language that can phone home to arbitrary URLs is a
-  security review, not a builtin); and every target needs an HTTP client
-  dependency with different semantics. **Deferred to v1.1 with a dated
-  design sketch (G6):** a sandboxed `fetch` with a per-request timeout, an
-  allowlist of hosts declared in `newr.json`, secrets never in source
-  (env vars only), and a single response type (`str` body + status code).
-  Programs that need HTTP in v1 use the host language.
+- **In v1, since M8b - HTTP `fetch` and `serve`.** The earlier draft
+  deferred fetch to v1.1; it landed early in v1, per the app-track
+  decision (`docs/app-track.md` §7), the way `db` did in M8a: a
+  sandboxed fetch with a per-request timeout, an allowlist of hosts
+  declared in `newr.json`, secrets never in source (env vars only),
+  and a single typed response struct (§12.6). Programs that need
+  HTTP in v1 use `http`, not the host language.
 - **NOT in v1 - subprocess/shell, `eval`, crypto builtins, regex.**
   Subprocess: §3.4 (portability). `eval`: never (it defeats the compiler).
   Crypto: a program should never hand-roll hashing/signing - the host
@@ -1209,6 +1282,451 @@ forgotten.
 
 `set` construction: `set([1, 2])` (a builtin call on a list). There is no
 set-literal syntax in v1 (keeps `{...}` unambiguous for dict literals).
+
+### 12.5 The `db` module - SQLite, sync (M8a)
+
+`db` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/db_check.py` /
+`compiler/db_limits.py`, and the core checker returns UNKNOWN for db
+calls. It landed in v1 early, per the app-track decision
+(`docs/app-track.md` §7). The module is
+SQLite only, sync on all seven targets.
+
+```newr
+let h = db.open("todo.db")          # -> int, a connection handle
+db.exec(h, "CREATE TABLE IF NOT EXISTS todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")
+let n = db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "beli susu", false)  # -> int, rows affected
+let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")  # -> list[Todo]
+db.begin(h)
+db.commit(h)
+db.rollback(h)
+let id = db.last_id(h)              # -> int, last AUTOINCREMENT id on this handle
+db.close(h)
+```
+
+- **The handle is an `int`, fd style.** `db.open` returns a
+  connection id managed by a runtime registry in `newr_rt.*`, the
+  way Unix file descriptors are ints. Zero type-system change: an
+  opaque `db.Connection` type would need coordinated changes in the
+  checker plus all seven emitters' type mappings. A wrong handle
+  fails loudly at runtime (unknown id throws). A distinct handle
+  type is v1.1 material, not M8a.
+- **Arguments are variadic, after the SQL string.** Each bound
+  value must be `int`, `float`, `str`, or `bool`. A list, a dict, a
+  struct, `none`, or a nullable value is a checker error (E2011).
+  A NULL column value comes from omitting the column (DEFAULT
+  NULL) or from a literal NULL in the SQL text, not from a bound
+  argument.
+- **Parameter binding is mandatory, by construction.** The SQL
+  string and the bound values travel on separate paths in every
+  emitter, exactly like the store (§14). There is no API that
+  concatenates values into SQL. When the SQL is a string literal,
+  the checker counts its `?` placeholders (skipping `?` inside
+  quoted SQL text) and reports a mismatch with the bound values
+  (E2011). When the SQL is computed, the count check is skipped
+  and a mismatch throws at runtime.
+- **`db.query` returns a typed struct list.** The call site MUST
+  carry the expected type (a `let` annotation, a return type, or
+  a function argument type); without one the checker reports
+  E2011 naming the fix. Columns match struct fields BY NAME. A
+  missing column throws at runtime. An extra column in the SELECT
+  is ignored. A value that cannot convert to the field type
+  throws at runtime. A NULL in a non-nullable field throws;
+  nullable fields (`int?`, `str?`) map NULL to `none`. Row struct
+  fields must be `int`, `float`, `str`, or `bool` (or nullable);
+  any other field type is E2011. There is no `any` type (§7.1),
+  so a list of dicts would be the same lie the spec already
+  rejected for `json.parse` - the typed struct list is the only
+  honest shape in v1.
+- **Transactions are explicit.** `db.begin` runs BEGIN IMMEDIATE;
+  `db.commit` / `db.rollback` end it. A second `db.begin` without
+  commit or rollback is E2011. A failed `db.exec` inside a
+  transaction does NOT auto-rollback; the caller rolls back in
+  `catch`, or the next `db.begin` fails until rollback.
+- **Every db call throws on failure**, like `file.read` (§10).
+  Callers use the existing `try:` / `catch:` / `finally:`.
+- **`db.open` creates the file when missing**, and throws when the
+  parent directory does not exist. `db.open(":memory:")` is
+  supported and is what the conformance programs use, so
+  conformance stays hermetic.
+
+### 12.6 The `http` module - server plus fetch, sync (M8b)
+
+`http` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/http_check.py` /
+`compiler/http_limits.py`, and the core checker returns UNKNOWN for
+http calls. It landed in v1 early, per the app-track decision
+(`docs/app-track.md` §7). The module is sync on all seven targets;
+JSON is the only body format in M8b. No auth, no sessions, no
+cookies (M9 material); a token travels as a header the program reads
+from `env.get`, never in source, never in a URL.
+
+```newr
+struct HttpRequest:
+  method: str
+  path: str
+  headers: dict[str, str]
+  body: str
+  query: dict[str, str]
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let list_todos = fn(req: HttpRequest) -> HttpResponse:
+  return HttpResponse(status: 200, headers: {}, body: "[ ]")
+http.route("GET", "/todos", list_todos)
+http.serve(8080)
+
+let resp: HttpResponse = http.get("http://127.0.0.1:8080/todos")
+```
+
+A block-body lambda cannot be written inline as a call argument (the
+parser rejects it), so a multi-statement handler is bound with a
+`let` first and passed by name; a single-expression handler may be
+written inline (`fn(req: HttpRequest) -> HttpResponse: ...`).
+
+- **Request and response are user-declared structs, validated by
+  field shape.** `HttpRequest` needs exactly `method: str`,
+  `path: str`, `headers: dict[str, str]`, `body: str`,
+  `query: dict[str, str]`; `HttpResponse` needs exactly
+  `status: int`, `headers: dict[str, str]`, `body: str`. All fields
+  required, exactly these types, no extras (the runtime cannot fill
+  extra fields, so accepting them would be a lie). A struct with a
+  different name is fine: the checker validates by field shape, not
+  by name. An enum in either place is E2012.
+- **Routes are exact-match only.** A route for "/todos" does not
+  match "/todos/1" and does not match "/todos/". Path parameters
+  ("/todos/:id") are a later item; single items are addressed
+  through the query string ("/todo?id=1"). A request for a path with
+  no route returns 404 with an empty body. A route registered for a
+  method that does not match returns 404 too (not 405 in M8b; keep
+  one code). Two routes with the same method and path in one program
+  are E2012.
+- **The route method is one of GET, POST, PUT, PATCH, DELETE, HEAD,
+  OPTIONS, uppercase.** A lowercase or unknown method literal is
+  E2012. When the method is computed, the check is skipped and an
+  invalid method throws at runtime. The same rule covers
+  `http.request`. A literal path must start with "/"; a computed bad
+  path throws at runtime.
+- **The handler is a lambda, exactly one parameter, returning the
+  response struct.** A named function as a handler is not in M8b.
+  The server reads the whole request body before calling the handler
+  (no streaming). Bodies are text (UTF-8); a body that is not valid
+  UTF-8 throws when the handler reads `req.body`. The response
+  status must be 100 to 599; any other value throws at the point the
+  handler returns. The server always sets `Content-Length`; it does
+  not force a `Content-Type` on responses (the handler decides
+  through the response headers dict).
+- **`http.serve` blocks forever, until the process is killed.**
+  It binds 127.0.0.1 by default; `http.serve(port, host)` binds the
+  given host, and only an explicit host argument listens on all
+  interfaces ("0.0.0.0"). Port 0 means the OS picks an ephemeral
+  port, and the server prints `listening on <host>:<port>` with the
+  real port as its first line. Put `serve` last: it never returns,
+  so code after it never runs. M8b does not add a checker rule for
+  this (documented only); the core checker already warns about code
+  after a `return` (W1003), and teaching it that `serve` never
+  returns would touch core. The port must be 0 to 65535 (E2012).
+- **Fetch returns a typed `HttpResponse` via expected-type
+  inference.** The call site MUST carry the expected type (a `let`
+  annotation, a return type, or a function argument type); without
+  one the checker reports E2012 naming the fix. The expected type
+  must be a struct with exactly the `HttpResponse` fields. `get`
+  sends no body; `post` and `request` send the body as given.
+  `request` is the generic primitive (PUT, PATCH, DELETE, HEAD,
+  OPTIONS go through it); `get` and `post` are conveniences.
+- **Timeout is whole seconds, default 10 when omitted**, covering
+  the whole request (connect plus body), on every target. A timeout
+  of 0 or negative is E2012. A fetch that exceeds it throws.
+- **Headers are `dict[str, str]`.** A header value of any other type
+  is E2012. A fetch POST/request body gets `Content-Type:
+  application/json` unless the program sets one; GET sets none.
+  Header names are matched case-insensitively by the runtimes, per
+  HTTP.
+- **Allowlist (the §12.3 sketch, implemented in M8b, not
+  deferred).** `newr.json` gains an optional `http_allowlist:
+  list[str]` key, a list of bare hostnames (no scheme, no port,
+  exact match). When the manifest has no key, or when no manifest
+  exists, the default allowlist is `["localhost", "127.0.0.1"]`
+  (localhost only). When the fetch URL is a string literal, the
+  checker parses its host and reports E2012 when the host is not
+  allowed, naming the manifest key to add. When the URL is computed,
+  the runtime helper checks the host at call time and throws. The
+  allowlist is host-based and scheme-agnostic; it covers http and
+  https alike.
+- **URL literals need an `http://` or `https://` scheme and a
+  host.** A URL with userinfo (`user:pass@host`) is E2012: secrets
+  never go in a URL; read the token from env and pass it as a
+  header. When the URL is computed, the same checks run at runtime
+  and throw.
+- **Query strings parse into `dict[str, str]`;** a repeated key
+  keeps the LAST value. A `+` in a query value decodes as a space;
+  `%XX` decodes as the byte (UTF-8).
+- **Every http call throws on failure**, like `file.read` (§10). A
+  fetch to an unreachable host throws. A fetch that times out throws.
+  Callers use the existing `try:` / `catch:` / `finally:`.
+- **`http` inside a bot handler is not in M8b** (general programs
+  only). A fetch inside a bot handler would block the async event
+  loop on py (the fetch is sync), and the same limitation the M8a
+  build report records for bot+db applies. `json.encode` /
+  `json.decode` are pure functions and work anywhere, including bot
+  handlers; only the I/O calls are general-program-only.
+- **Per-target natives:** py stdlib `http.server`
+  (`ThreadingHTTPServer`) plus `urllib.request`; js builtin
+  `node:http` plus global `fetch`; java/kt JDK
+  `com.sun.net.httpserver.HttpServer` plus `java.net.http.HttpClient`;
+  cs `System.Net.HttpListener` plus `System.Net.Http.HttpClient`; rs
+  `tiny_http` 0.12.0 plus `ureq` 3.5.1 (rustls feature); dart
+  `dart:io` `HttpServer`/`HttpClient`. Only rs needs a manifest
+  change (Cargo.toml, gated on `uses_http`/`uses_json`).
+
+### 12.7 The `json` module - typed JSON (M8b)
+
+`json` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/json_check.py` /
+`compiler/json_limits.py`, and the core checker returns UNKNOWN for
+json calls. It landed in v1 early, per the app-track decision
+(`docs/app-track.md` §7), settling the §12.2 objection the same way
+M8a settled `db.query`: expected-type inference, not `any`.
+
+```newr
+let text: str = json.encode(todos)        # -> str
+let todos: list[Todo] = json.decode(text) # -> list[Todo]
+```
+
+- **`json.encode(value) -> str`.** The value may be a struct, a
+  `list[T]`, a `dict[str, T]`, a `str`, an `int`, a `float`, a
+  `bool`, or a nullable of any of those (`none` encodes as `null`),
+  nested recursively. A value of any other type is E2013. Structs
+  encode as JSON objects, field names as keys, in declaration
+  order. Nullable fields that are none encode as `null` (they are
+  NOT omitted). Dicts encode as objects. Lists encode as arrays.
+  Enums are NOT encodable in M8b (E2013: encode an enum field by
+  hand, or wait for enum encoding). Encoding a variant name would
+  be a guess at a format; the honest choice is to refuse until the
+  format is decided.
+- **`json.decode(text) -> T`.** The expected type comes from the call
+  site, exactly like `db.query`. Without an expected type the checker
+  reports E2013 naming the fix. The expected type may be a struct, a
+  `list[T]`, a `dict[str, T]`, a `str`, an `int`, a `float`, a
+  `bool`, or a nullable of any of those. A JSON `null` decodes to
+  `none` only for a nullable expected type; into a non-nullable type
+  it throws.
+- **Struct fields match BY NAME, like db rows.** A missing field
+  throws at runtime. An extra field in the JSON is ignored (APIs add
+  fields; db.query ignores extra columns the same way). A value that
+  cannot convert to the field type throws at runtime. A JSON number
+  with a fraction into an `int` field throws; a JSON integer into a
+  `float` field is fine. A JSON string into a `bool` field throws.
+  A JSON number that is an integer but outside int64 throws when the
+  expected field type is `int` (it never silently wraps).
+- **Trailing data after the JSON value throws. An empty string
+  throws. Duplicate keys: last wins** (the common parser behavior,
+  documented, not silent).
+- **Float encoding, pinned:** a float encodes as its shortest
+  round-trip decimal, with ".0" appended when the value is integral.
+  So 1.0 encodes as "1.0", 1.5 as "1.5", -2.25 as "-2.25", 0.0 as
+  "0.0". Int encoding is exact decimal on all seven targets,
+  including int64. Byte-identical ENCODED output across targets is
+  guaranteed only inside [0.001, 1e15]; outside it the
+  representations diverge (exponent forms) while decoding stays
+  identical.
+- **Per-target natives:** py stdlib `json`; js global `JSON` plus
+  custom int64 handling (a number-preserving pre-pass on decode,
+  manual int formatting on encode); java/kt hand-written strict RFC
+  8259 parser/serializer in the runtime (the JDK has no JSON
+  library); cs `System.Text.Json` (the helper formats integral
+  floats with ".0" itself); rs `serde_json` 1.0.154; dart
+  `dart:convert`.
+- **`db.exec` runs exactly one statement.** Multi-statement SQL
+  is a runtime error. Migrations are successive `db.exec` calls
+  inside one transaction.
+- **Pragmas on every connection:** `PRAGMA foreign_keys = ON`
+  and `PRAGMA busy_timeout = 5000`, matching the store (§14).
+  Journal mode stays at the SQLite default; WAL is a later
+  optimization.
+- **`db.close` closes the handle.** Using a closed handle throws;
+  the checker also flags a use after `db.close` in the same body
+  (E2011). A program that exits without closing is fine (the OS
+  reclaims the file), but the example closes explicitly.
+- **Type mapping, inherited from the store (§14):** `int` is
+  stored as TEXT and read back through the target int64 parse
+  (BigInt on JS); `float` is REAL; `str` is TEXT; `bool` is
+  INTEGER 0/1.
+- **Not in M8a:** Postgres, MySQL, or any second driver; a
+  migrations framework, an ORM, a query builder; connection
+  pooling (one connection per handle); BLOB columns (v1 has no
+  bytes type); encryption, backup API, FTS, savepoints, nested
+  transactions (a `db.begin` inside an open transaction is a
+  runtime error); the browser target for js; Android sqlite
+  for kt.
+
+### 12.8 The `ui` module - one small widget set (M8c)
+
+`ui` is **domain-module surface, not core language** (the discord
+shape, §2.1): its rules live in `compiler/ui_check.py` /
+`compiler/ui_limits.py`, and the core checker returns UNKNOWN for
+ui calls. It landed in v1 with M8c, per the app-track decision
+(`docs/app-track.md` §7). Shape (a) from the app-track: one small
+widget set, one common abstraction, each target renders it with its
+own native toolkit where one exists, and the language never exposes
+toolkit specifics. The user writes one program; the emitter picks
+the toolkit. There is no per-target widget code in user programs, no
+conditional compilation, and no toolkit imports in newr source.
+
+`Widget` is an opaque builtin value type, like the discord module's
+entity types. Only `ui.*` constructors produce a Widget. There is no
+Widget literal syntax and no field access on a Widget. Structs are
+value types and struct field assignment is an error (§7.8), so a
+widget tree is naturally immutable once built.
+
+```newr
+let hello = ui.column([
+  ui.text("Hello, newr"),
+  ui.button("Tap me", fn() -> none: print("tapped")),
+])
+print(ui.render(hello))
+ui.show(hello)
+```
+
+- **Surface.** `ui.text(s: str) -> Widget`,
+  `ui.button(label: str, on_tap: fn() -> none) -> Widget`,
+  `ui.input(placeholder: str, value: str, on_change: fn(str) -> none)
+  -> Widget`, `ui.list(items: list[Widget]) -> Widget`,
+  `ui.image(url: str) -> Widget`,
+  `ui.row(children: list[Widget]) -> Widget`,
+  `ui.column(children: list[Widget]) -> Widget`,
+  `ui.render(root: Widget) -> str`,
+  `ui.show(root: Widget) -> none`,
+  `ui.run(view: fn() -> Widget) -> none`. A handler is a let-bound
+  lambda or an inline single-expression lambda; a block-body lambda
+  passed directly as a call argument does NOT parse (E1001, the same
+  constraint as M8b http handlers).
+- **Render byte format, pinned.** `ui.render` returns an HTML string
+  for the tree, pure and deterministic: the same tree renders to the
+  same bytes on every target and every run. The format:
+  `ui.text(s)` renders `<p>ESC(s)</p>`;
+  `ui.button(label, handler)` renders
+  `<button data-action="N">ESC(label)</button>` where N is the
+  button's 0-based index in pre-order traversal of the whole tree;
+  `ui.input(placeholder, value, handler)` renders
+  `<input placeholder="ESC(placeholder)" value="ESC(value)"
+  data-input="N">` where N is the input's 0-based index in
+  pre-order traversal, attributes in exactly that order;
+  `ui.list(items)` renders `<ul><li>CHILD</li>...</ul>` with each
+  child wrapped in an `<li>`; `ui.image(url)` renders
+  `<img src="ESC(url)" alt="">`; `ui.row(children)` renders
+  `<div data-layout="row">CHILDREN</div>`; `ui.column(children)`
+  renders `<div data-layout="column">CHILDREN</div>`. ESC escapes
+  `&` to `&amp;`, `<` to `&lt;`, `>` to `&gt;`, `"` to `&quot;`,
+  in that order, in text content and attribute values alike. There
+  is no insignificant whitespace anywhere; children concatenate
+  directly. Output is UTF-8. Empty cases render with empty content:
+  an empty column is `<div data-layout="column"></div>`, an empty
+  list is `<ul></ul>`, empty text is `<p></p>`. The `data-action`
+  and `data-input` indices use separate counters, each in
+  pre-order (depth-first, left to right). `img` and `input` are void
+  elements: no closing tag, no self-closing slash.
+- **State and the event model.** Closures capture by value (§7.2,
+  §9.5), so a tap handler that assigns to a captured variable
+  mutates only its own snapshot: the assignment is a silent no-op
+  at runtime (proven by probe in the M8c eval: a let-bound lambda
+  assigning to an outer `let` passes `check` but prints `0`, not
+  `1`, on py and js). The draft app-track sentence "a tap handler
+  mutates state and the tree re-renders" is therefore wrong and is
+  corrected here. The model is a view function plus external state
+  (the Elm architecture, and it fits newr's value semantics
+  exactly): `ui.run(view)` where `view: fn() -> Widget`; the runtime
+  calls the view, renders the tree, waits for one event, calls the
+  event's handler, then calls the view again and re-renders. State
+  lives in the `db` module (§12.5) or an `http` backend (§12.6); a
+  tap handler performs effects (db calls, http posts, print) and
+  never assigns to a captured variable. After the handler returns,
+  the runtime re-invokes the view, which re-reads the state and
+  builds a fresh tree. The static form, `ui.show(root)`, needs no
+  state at all. A handler that assigns to a name from an enclosing
+  scope is valid newr and stays accepted, but it is a documented
+  pitfall, not an error; a checker warning for it is a follow-up,
+  only if a warning mechanism exists.
+- **Checker rules (E2014, one code for the module, the E2012
+  pattern).** U1: a `ui.*` call with the wrong number of arguments
+  or an argument of the wrong type is E2014, including a non-Widget
+  where a Widget is required and a `list[str]` where a
+  `list[Widget]` is required (collections are invariant, §7.2). U2:
+  `ui.button`'s handler must be `fn() -> none` and `ui.input`'s
+  handler must be `fn(str) -> none`; any other signature is E2014.
+  U3: `ui.run`'s argument must be `fn() -> Widget`; passing a
+  Widget to `ui.run`, or a view function to `ui.show`, is E2014.
+  U4: at most one of `ui.show` and `ui.run` may be called in a
+  program; a program has one window, so calling both, or calling
+  either twice, is E2014. U5: `ui.render` takes a Widget, not a view
+  function. U6: `ui.image`'s URL must be a string literal starting
+  with `http://` or `https://`; a non-literal or a non-HTTP URL is
+  E2014, and a runtime load failure is not an error (a native window
+  shows an empty placeholder, `ui.render` still emits the `<img>`
+  tag). U7: a handler must be a let-bound lambda variable or an
+  inline single-expression lambda; a block-body lambda as a call
+  argument is the existing parser error E1001, not E2014. A named
+  function with the right signature is also accepted as a handler
+  or as a view (the emitters can call it by name, which is easier
+  than a lambda); a named function with the wrong signature is
+  E2014, like a wrong lambda. U8: a
+  `ui.show` or `ui.run` call inside a `test` block is E2014, because
+  a test must terminate.
+- **`ui.show` blocks until the window closes on native targets**
+  (py, java, kt, cs, rs). On js and dart it writes the rendered
+  HTML to `<stem>.html` next to the program (or to the current
+  directory) and prints the path, then returns; it never opens a
+  browser itself. `ui.run` never returns a value; the loop ends when
+  the window closes. On js and dart `ui.run` renders once and
+  returns; the interactive loop is a documented no-op on those
+  targets (on js, an interactive frontend is a server program that
+  serves the rendered page, see §22.3; it does not loop locally).
+- **Per-target natives:** py tkinter 8.6 stdlib; js none (HTML sink,
+  pure render); java/kt Swing (`javax.swing`) stdlib, needs the X11
+  client libraries libXtst6, libXi6, libXrender1, libXt6 on the
+  machine; cs Avalonia 12.1.6 plus Avalonia.Desktop 12.1.6 (NuGet,
+  net8.0); rs egui 0.37.0 plus eframe (crates.io); dart none in M8c
+  (render only, HTML sink). WinUI is Windows only and MAUI has no
+  official Linux desktop target, so neither is the C# target.
+  JavaFX is not in the JDK and needs an OpenJFX download, so Swing
+  is the java and kt target. Jetpack Compose needs Gradle and the
+  Compose plugin, not plain kotlinc, so it is deferred. Flutter is
+  NOT installed on the build VM and needs a 1.5 to 4 GB install plus
+  apt packages plus a conformance runner change, so Dart in M8c is
+  render-only and Flutter moves to a later phase.
+- **Conformance.** The conformance harness runs each ok program as a
+  subprocess and requires exit 0 plus `PASS` as the last line, with
+  no timeout on the single-process loop. A program that opens a GUI
+  event loop blocks forever, so `ui.show` and `ui.run` programs
+  cannot be conformance ok programs. The ok corpus is render-only
+  (`ui.render` plus exact-string comparison, about 20 programs) and
+  runs on all seven targets with the existing harness. Native windows
+  are verified by a separate harness, `conformance/ui_screenshots.py`,
+  which builds `hello_ui` per target, runs it under `xvfb-run -a`
+  with a 60 second timeout, and screenshots the window. The M8c
+  build also adds a 60 second timeout to the single-process loop
+  (a pre-existing gap: today a stray blocking program hangs the
+  suite with no timeout). HTML sink screenshots at 390, 768, and
+  1280 go through the parent agent's browser task; raw headless
+  Chromium is blocked on the build VM by Hatch policy and is not
+  retried.
+- **Not in M8c:** styling (colors, fonts, sizes, padding, spacing,
+  alignment); scroll containers, navigation, dialogs, menus,
+  checkboxes, radio buttons, sliders, tabs, tables, canvas or custom
+  drawing, animation, accessibility labels beyond what the native
+  toolkit provides by default; local image files (`ui.image` takes
+  URLs only); image loading in native windows (the py window shows
+  the URL as text in v1, no Pillow dependency); Flutter and Dart
+  native windows; JavaFX; Jetpack Compose; WinUI; MAUI; slint
+  (needs `.slint` files, a second UI language); tauri and dioxus
+  (both on alpha lines in M8c). Each is a named deferral, not an
+  oversight. The M8d shop needs nothing beyond the section 12.8
+  surface: a column holding a title text, a search input, a list of
+  product rows, and a cart total text, with each product row a row
+  holding an image, a text, and a button.
 
 ## 13. The `discord` module - one domain module
 
@@ -1425,8 +1943,10 @@ button "Buy again" (style: primary, id: "buy-again", timeout: 60s):
 
 `store` is **discord-module surface** (G1), not a core-language feature:
 it is durable state for bots (balances, ledgers, idempotency keys). A
-general program's durable state in v1 is **file I/O** (§12); a general
-`db` / `sqlite` module is v1.1. The economy builtins are store operations
+general program's durable state in v1 is **file I/O** (§12) and the
+`db` module (§12.5), which landed early in v1 (M8a) although an
+earlier draft of this section said a general `db` / `sqlite` module
+was v1.1. The economy builtins are store operations
 of the discord module.
 
 ```
@@ -1535,7 +2055,7 @@ this section said "panic-mode + statement-boundary synchronisation";
 that was wrong - the M1 parser aborts on the first syntax error, and
 the code agrees.)
 
-The full code scheme is 38 codes: 29 numbered (`E1xxx` syntax,
+The full code scheme is 39 codes: 30 numbered (`E1xxx` syntax,
 `E2xxx` types, `E3xxx` resolver, `W1xxx` warnings) + 9 lexer codes in
 the descriptive `E_*` family. The complete table lives in
 `docs/error-index.md`; `newr --explain <CODE>` prints the long form of
@@ -1548,7 +2068,7 @@ any of them. The numbered codes:
   condition; `E2005` use before definition; `E2006` non-exhaustive
   match; `E2007` `break`/`continue`/`return` in the wrong place;
   `E2008` Discord rule violation; `E2009` i18n violation;
-  `E2010` not all paths answer.
+  `E2010` not all paths answer; `E2011` db module rule violation.
 - Resolver: `E3001` undefined name; `E3002` wrong number of
   arguments; `E3003` duplicate definition; `E3004` import cycle;
   `E3005` name not exported; `E3006` bot/command/event/task in an
@@ -1598,7 +2118,7 @@ source text (.newr)
 ### 17.2 AST (node list - the v1 set)
 
 `Program` · `BotDecl` · `Import` · `StringsDecl` · `StoreDecl` ·
-`FnDecl` · `StructDecl` · `EnumDecl` (with `EnumVariant`) ·
+`FnDecl` · `TestBlock` · `StructDecl` · `EnumDecl` (with `EnumVariant`) ·
 `CommandDecl` · `OptionDecl` · `EventDecl` · `TaskDecl` ·
 `ButtonDecl` / `SelectDecl` / `ModalDecl` · statements: `Let`, `Const`,
 `Assign`, `If`, `For`, `While`, `Try`, `Throw`, `Return`, `Break`,
@@ -1698,14 +2218,16 @@ a Node script in TS, a `main()` in Java/C#/Rust/Kotlin/Dart).
 |---|---|---|
 | `newr build` | `build [--target py\|js] [--check] [--fast] <file.newr> [-o <out>]` | `--target` selects the emitter (default `py`); without `--check` it emits (M2+). In M1 (no emitter yet) `build` without `--check` is an error telling the user to use `--check` - emitters land in M2. `--fast` emits with only parse + minimal checking (syntax + name resolution), with a warning that the output is not fully verified (§4.1). |
 | `newr build --check` | Parse + resolve + check (+ emit + verify from M2) | Writes nothing. Exit 0 on success, 4 on build error. |
+| `newr build --app` | M8d (Phase 1) | Emits then packages for one explicit target (see §22.2). `--app` without a target, or with `--check`/`--fast`, is a usage error. Output `dist/<name>-<target>/` plus `BUILD-RECEIPT.json`. No signing, no store submission. |
 | `newr check` | Parse + resolve + check, print errors + warnings | The "thinking" command (§5.1). Exit 0 if no errors (warnings allowed), 4 on error. |
-| `newr fix` | **NOT in M1** - M4 | Applies safe, unambiguous diagnostic fixes (§5.2). |
+| `newr fix` | Yes (M6, minimal) | Applies safe, unambiguous diagnostic fixes (§5.2). |
 | `newr --explain <code>` | Yes (M1) | Prints the long form of a diagnostic code (§16). |
 | `newr --error-format=json` | Yes (M1) | One JSON object per diagnostic, same fields (§16). |
-| `newr fmt` | **NOT in v1** - M4/M6 | Canonical formatting, idempotent, `fmt --check` for CI. |
-| `newr init` | **NOT in v1** - M4/M6 | Scaffolds a newr project (`main.newr` + `newr.json` + `locales/` + `.env.example` + `.gitignore`). |
-| `newr.json` | Schema defined in §11; **compiler support M4** | Project config `{name, version, target, default_locale, db_path}`. Secrets NEVER go in it - the token stays in `.env`. |
-| `newr test` | **NOT in v1** - M6 / v1.1 | Built-in testing in the same language; needs the emitter interface stable first (§24.2 #13). |
+| `newr fmt` | Yes (M6) | Canonical formatting, idempotent, `fmt --check` for CI. |
+| `newr init` | Yes (M6) | Scaffolds a newr project (`main.newr` + `newr.json` + `locales/` + `.env.example` + `.gitignore`). |
+| `newr.json` | Schema defined in §11; **compiler support M6** | Project config `{name, version, target, default_locale, db_path}`. Secrets NEVER go in it, the token stays in `.env`. |
+| `newr docs` | Yes (M6) | Generates the docs (§6, §12): the stdlib API reference from `compiler/modules.py` plus one section per program in `examples/` from its `///` doc comments. Writes `api.md` and `examples.md` into `docs/` by default. |
+| `newr test` | Yes (M6) | Built-in testing in the same language (§8.7, §24.2 #13): `fn test_*()` functions and `test "name":` blocks, run through one target's emitter in a temporary directory. Exit 0 when every test passes, 4 on a build error or any test failure, 2 on an unreadable file or missing toolchain, 1 on a usage error. |
 | `newr --help` / `newr help` | Yes | Usage for every command. |
 
 Error/exit-code contract (from v0, kept): 0 success, 1 usage, 2 environment,
@@ -1721,7 +2243,7 @@ configuration (deploy concern). Custom emoji / stickers. Threads /
 forums / scheduled events. Classes (structs cover the data case - §8.5).
 User-defined generics (v2 - §7.7; built-in generics are in v1). Full
 pattern exhaustiveness / usefulness (v2 - core `match` is in v1, §9.6).
-`json` module (§12.2, v1.1). `newr fix`/`fmt`/`init` (§19, M4/M6).
+`json` module (§12.2, v1.1). `newr fix`/`fmt`/`init`/`docs` (§19, M6).
 Subprocess/shell (§3.4). Regex (§12.3). Crypto builtins (§12.3). Threads
 / shared mutability (v1.1+ - §8.4). Reflection splicing / codegen
 (later - a narrow `reflect` API first). Full TCO (later - explicit
@@ -1896,6 +2418,263 @@ match mode:
 is exhaustiveness-checked (§9.6); the pipeline passes the list as the
 first argument (§9.2); the ternary picks the default word (§9.2).
 
+## 22. App packaging: manifest, `newr build --app`, and the js server frontend (M8d)
+
+M8d adds app packaging to newr: a small manifest extension, one build
+flag, and a full-stack shop example. There is no `app` module in the
+language and no new diagnostic code. The design is evaluated in
+`newr-research/m8d-app-eval/EVAL.md`; this section pins what the build
+phase must implement.
+
+Prerequisite, from the eval §5.3: shared types in `shop_shared.newr`
+must be constructible from the backend and the frontend
+(`shared.Product(id: 1, name: "Tea", price: 5000)`). Today that fails
+with `error[E3001]: module 'shared' has no member 'Product'`, because
+the checker call path handles functions and top-level lets only, not
+structs. The fix mirrors the enum-variant precedent and lands in
+Phase 0, proven by the eval probe on py and js first. No shop code is
+written until the probe passes on both.
+
+### 22.1 The manifest: three optional keys
+
+`newr.json` is the app declaration (§11). M8d adds three optional
+top-level keys, all validated by `load_manifest` with `ManifestError`,
+the existing mechanism. A bad manifest is a usage error, exit 1,
+naming the file (verified live: a `target` of `bogus` fails with
+`newr: .../newr.json: 'target' must be one of py, js, java, cs, rs, kt,
+dart (got 'bogus')`, exit 1). No new diagnostic code is needed for the
+manifest: manifest problems are not checker diagnostics, and `newr
+check` ignores the manifest by contract (a broken manifest must not
+fail the check).
+
+- `description`: string, optional. One line describing the app.
+  Carried into the build receipt (§22.2) and printed by `newr build
+  --app`. No other consumer in M8d.
+- `icon`: string, optional, a path relative to the manifest directory.
+  Validated to exist at load time when present. Carried into the
+  receipt. No artifact consumes it in M8d: no OS installer in M8d
+  takes an icon. It is declared now so M9 installers can use it, and
+  the validation catches a wrong path early. Open question (§22.5):
+  if the build phase finds even this too thin, cut `icon` to M9
+  rather than shipping a field nothing reads.
+- `id`: string, optional, a reverse-domain identifier
+  (`com.example.shop`). Validated against
+  `^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`. Carried into the receipt.
+  Needed later for apk, msi, and dmg metadata. No consumer in M8d.
+
+Deliberately NOT added in M8d:
+
+- `programs`: a list of entry points for a multi-program app. The shop
+  has two programs (backend, frontend), but each is built by its own
+  `newr build --app` invocation against the same project manifest, and
+  each produces its own artifact dir. One manifest per project, one
+  program per app build. A `programs` list would need init support, a
+  launcher story, and a multi-artifact receipt, all for a convenience
+  the shop does not need.
+- `permissions`: per-OS permission declarations need a per-OS model
+  that does not exist. Deferred to M9 with the installers.
+- `db_path` stays schema-only. The shop backend passes its sqlite path
+  in code (`db.open("shop.db")`). Do not expand manifest scope in M8d.
+- `app.manifest(...)` as a language call: rejected. `newr.json` already
+  declares name and version (M6 Phase 2b), and the build already reads
+  it. A language call would create two sources of truth for the same
+  facts, and the checker would need a rule to reconcile them. The
+  manifest file IS the declaration. The `app` name stays unreserved in
+  the language.
+
+### 22.2 `newr build --app`: one flag, emit then package
+
+`newr build <file> --target <t> --app` does the normal build first,
+then packages the emitted program for that target. The flag is
+meaningless without a target: `--app` with no `--target` and no manifest
+target is a usage error naming the missing target, because the packager
+is per-target and there is no default packaging target. `--app` with
+`--check` or `--fast` is a usage error: packaging needs a full emit.
+
+- The emit step is unchanged: the same files land in the same place as
+  a plain `newr build` (or under `-o` when given). Packaging reads
+  those files; it never re-emits.
+- The package step runs the per-target packager in a scratch dir under
+  `~/workspace` (never `/tmp`: it is a 512 MB tmpfs, and a cargo or
+  dotnet build can exceed it). The scratch dir is removed after a
+  successful package, kept on failure for diagnosis. Disk is tight on
+  the build VM (the eval measured a 7.5 GB `/home` overlay), so the
+  build phase cleans per-target scratch dirs as it goes.
+- Output layout: `dist/<name>-<target>/`, where `<name>` is the manifest
+  `name` (sanitized to `[a-z0-9_-]`, lowercased) or the program stem
+  when there is no manifest. Inside: the artifact (table below), plus
+  `BUILD-RECEIPT.json`. The receipt records name, version, target,
+  artifact relative path, artifact bytes, sha256, the source files with
+  their sha256, the toolchain versions that ran, and the build
+  timestamp. The receipt is the machine-readable proof that the
+  artifact came from this source; the build phase asserts it in tests.
+- `newr build --app` prints the artifact path and its size on success,
+  and exits non-zero with the packager's stderr on failure. A packager
+  failure is an exit-4 build error with a diagnostic naming the failing
+  command, never a traceback.
+- The packager never downloads a toolchain. If the toolchain is missing
+  (no PyInstaller venv, no dotnet, no cargo), the build fails with a
+  plain message naming what to install. Downloading toolchains is out
+  of M8d.
+- No signing, no store submission, no auto-upload. The artifact is an
+  unsigned local build.
+
+Per-target artifacts (the contract, verified live on this VM with the
+`hello.newr` program; probe detail in the eval §4):
+
+| Target | Artifact | Notes |
+| ------ | -------- | ----- |
+| py | `<name>.pyz` zipapp (stdlib `zipapp`) | Default py artifact. Needs python3 on the machine that runs it. PyInstaller onefile is a later opt-in, not the default: system Python has no PyInstaller, it lives only in the `m7-build/venv` venv. |
+| js | Directory: `<stem>.js` plus `newr_rt.js` plus `run.sh` | Copy only, no bundler. `run.sh` runs `node` on the emitted file. |
+| java | Fat jar, `<name>.jar` | `javac`, then `jar --create --file <name>.jar --main-class <Stem>`. Only `.class` files go in the jar. A db program must bundle sqlite-jdbc into the jar (fat jar, the recommendation) or ship it alongside with a `Class-Path` manifest entry. |
+| kt | Jar with runtime, `<name>.jar` | `kotlinc -include-runtime -d <name>.jar`. Same sqlite-jdbc bundling question as java, same fat-jar recommendation. |
+| cs | Self-contained publish dir, `<name>/` | `dotnet publish -c Release --self-contained -r linux-x64 -o <dir>`. Framework-dependent publish does NOT run on this VM: its apphost cannot find the runtime, because the runtime lives in `~/.dotnet`, which is not on PATH. Single-file `-p:PublishSingleFile=true` is the shape to prefer, to verify before claiming. RID is `linux-x64` only on this VM. |
+| rs | Binary, `<name>` | `rustc -O` when no Cargo.toml, else `cargo build --release` and take the binary from `target/release/<stem>`. The persistent `CARGO_TARGET_DIR` under `~/workspace` from M8b is required; never build in `/tmp`. |
+| dart | AOT binary, `<name>` | `dart compile exe <stem>.dart -o <name>`. No pubspec needed for a plain program; a db program needs `dart pub get` first. |
+
+### 22.3 The js frontend is a server (bridge contract)
+
+The js frontend is a Node server program, not a static page generator.
+A static page leaves the shop's Buy buttons inert in the browser:
+`ui.render` emits `<button data-action="N">`, and no generated code
+wires a click to anything. The js program runs under Node and does
+three things:
+
+1. On start it fetches the product list from the backend with
+   `http.get("http://127.0.0.1:8080/products")` and decodes it with
+   `json.decode` into `list[Product]`.
+2. It registers routes with `http.route` and serves with
+   `http.serve(8081)`. The `/` route builds the shop tree from the
+   fetched products (a column: title text, search input, a list of
+   product rows, cart total text), renders it with `ui.render`, wraps
+   it in a minimal HTML shell, and returns it. The `/action` route
+   takes a query `i`, the button index, dispatches it, and redirects
+   to `/`. The route disambiguates by the `v` query value: a request
+   carrying `v` is a search input change (redirect to `/?q=<v>`); a
+   request without `v` is a button tap. After a buy the search filter
+   resets: the redirect after a button tap goes to `/`, not to the
+   filtered page.
+3. The bridge script, a static string in the shell, wires clicks:
+   every element with `data-action` gets a click handler that fetches
+   `/action?i=N` and reloads the page. Every element with `data-input`
+   posts its value to `/action?i=N&v=...` on change. The script is
+   about 15 lines and has no knowledge of the shop; it only knows the
+   `data-action` and `data-input` attributes the render core already
+   emits (§12.8).
+
+**Button-index convention.** The view builds buttons in a stable order
+(product Buy buttons first, in product order, then Checkout), and the
+`/action` route dispatches on that order with an if/else chain. If the
+view changes the button order, the route must change with it. This is a
+documented convention, not a compiler guarantee: the build phase pins
+the button order in the frontend file's header comment, and adds a
+test that renders the page and asserts the button order matches the
+dispatch table. A checker rule that verifies the dispatch matches the
+view is M9 material, not M8d.
+
+Rejected alternatives, with reasons:
+
+- Static page (render once, write the file): the Buy buttons do
+  nothing in the browser. It is a screenshot, not a shop. Kept only
+  as the fallback if the bridge proves too big, and labelled as such.
+- `ui.run` server mode in the js runtime (the runtime owns dispatch):
+  more magical and less user code, but it needs new runtime semantics,
+  a port story, and a change to what `ui.run` means on js (M8c pinned
+  it as render-once-and-return). Deferred to M9. The server shape uses
+  only proven pieces: js `http.serve`, js `http.get`, `ui.render`, `db`
+  on the backend.
+- A form-based page (buttons as `<form>` posts): would need the render
+  core to emit forms, which changes the SPEC §12.8 byte format and
+  breaks M8c goldens. Rejected.
+
+**The py native frontend.** The same frontend file built for py uses
+`ui.run(view)`: the tkinter window, the re-invoke loop, and Buy
+handlers that call `http.post` to the backend and re-read the cart from
+the backend on every view invocation. This is the M8c counter pattern
+with a backend instead of a local db. The two frontends share the
+view-building code (the tree from a product list) but differ in entry:
+js serves, py shows a window. Decided in the build phase: the shop is
+five files, not one frontend file and not three files. The two
+frontends are separate files sharing one view-builder module
+(`shop_view.newr`): `shop_frontend_js.newr` serves,
+`shop_frontend_py.newr` shows a window. There is no conditional
+compilation: each file is one program with one entry.
+
+The shop files, named to avoid collision with the existing
+`shop.newr` (the Discord shop bot) and `shop_items.newr` (its price
+list): `examples/shop_shared.newr` (the contract: `pub struct Product`,
+`pub struct CartLine`, `pub struct CartRequest`, and the route table as
+constants), `examples/shop_view.newr` (the view builder both frontends
+import), `examples/shop_backend.newr` (`db` plus `http`, port 8080,
+serves `GET /products`, `POST /cart`, `GET /cart`, `POST /checkout`),
+`examples/shop_frontend_js.newr` (the Node server frontend, port 8081),
+and `examples/shop_frontend_py.newr` (the native window frontend).
+Search behavior: on js the search filters through `/?q=`, and a buy
+resets the filter (the redirect after a button tap goes to `/`); on py
+the search input is display-only. The
+backend port 8080 and the frontend port 8081 are conventions, not
+compiler facts; the shop README must state them, and the pair test must
+use them.
+
+### 22.4 The frontend/backend split: documented, not enforced
+
+The split is a project convention in M8d, not a compiler rule (eval
+§6, option (c)). The shop's README and this section say which file
+builds for which target, and the conformance suite builds each file for
+its intended targets only. A user who builds the backend for js gets a
+Node server that works (js serves fine), and a user who builds the
+frontend for py gets a window that works.
+
+The reason is the js fact: js is not a browser-only target in newr, it
+is a Node target that serves, fetches, and renders. A rule that
+forbids `http.serve` on js would forbid the working js frontend server
+in §22.3. The draft app-track split assumed a browser js target that
+does not exist. If a real browser target ever lands (the M7 playground
+story), the split question reopens with a real target to key on. Until
+then, enforcement would forbid working programs to satisfy a doc
+sentence.
+
+The rejected enforcement options, for the record:
+
+- (a) Add `--target` to `newr check` and thread the target into the
+  module checkers, then add the split rules. Cost: the check pipeline
+  gains a target parameter, and every `newr check` invocation without
+  a target keeps the current lenient behavior. The js target is not
+  purely a browser target, so the rule must be about the program's
+  role, not the target name, which makes the rule murkier than the
+  draft admits.
+- (b) Enforce at emit time: the emitter refuses `http.serve` on js
+  with E4001, or `db.*` on js with E4001. This is the cheapest
+  enforcement, but E4001 is an emitter limitation, not a user error,
+  and the message would mislead. Rejected.
+
+### 22.5 Open questions (M8d)
+
+- Whether `icon` earns its place in the manifest: it has no consumer
+  in M8d. The build phase may cut it to M9.
+- The exact `BUILD-RECEIPT.json` field list: §22.2 pins the fields,
+  but the build phase may add toolchain versions per target as it
+  learns them.
+- The bridge script text: §22.3 fixes the contract (data-action click,
+  data-input change, `/action?i=N`), but the exact script is written
+  in the build phase and tested by the pair test.
+- Whether `dotnet publish -p:PublishSingleFile=true` produces a
+  working single-file artifact for a newr program: the plain
+  self-contained publish is proven (71 MB, runs), the single-file form
+  is not yet run. The build phase must verify it before claiming it.
+- Whether the java/kt fat jar bundling of sqlite-jdbc works with the
+  emitted code: the plain jar is proven, the fat jar with an unpacked
+  dependency is not yet built. The packager must find sqlite-jdbc in
+  `~/jars` or fail plainly.
+- Whether `cargo build --release` for a db/http/ui program finishes in
+  reasonable time on this VM: debug builds are proven by the
+  conformance runner, release builds are not yet timed.
+- Signed installers (apk, dmg, msi, deb, AppImage, Play/App Store
+  submission): deferred, no toolchains or keys on this VM. The
+  per-target table in §22.2 is the whole packaging claim; anything
+  beyond it is a named deferral. Windows and macOS artifacts are not
+  claimed; the cs RID is linux-x64 only.
+
 ## 23. What newr takes from other languages - the design philosophy
 
 newr is not a copy of one language. It is a systematic collection of the
@@ -1907,7 +2686,7 @@ story) and §23.2 (the Haxe precedent, addressed head-on).
 
 | Feature in newr | Source language(s) | Why it was taken | Status |
 |---|---|---|---|
-| Helpful compiler errors: "this is what you meant, this is the fix, this is why" | Rust, Elm | Rust proved a compiler can teach; Elm proved an error can explain the *why*, not just the *where*. newr's diagnostics (§16) are modelled on both. | v1 (§5, §16); `newr fix` in M4 |
+| Helpful compiler errors: "this is what you meant, this is the fix, this is why" | Rust, Elm | Rust proved a compiler can teach; Elm proved an error can explain the *why*, not just the *where*. newr's diagnostics (§16) are modelled on both. | v1 (§5, §16); `newr fix` minimal in M6, checker fixes in v1.1 |
 | `T?` / null safety without ceremony | Rust, Swift, Kotlin | Rust's `Option` killed the null-pointer crash; Swift/Kotlin proved it can be ergonomic instead of bureaucratic. newr takes `T?` + `or` + `.unwrap()` (§7.2) - the safety, not the ceremony. | v1 |
 | Fast compile, one obvious way, readable code | Go, Python | Go proved a compiler can be fast and a language can be small; Python proved indentation + readability scale from beginners to experts. newr's shape is Python's, its compile-speed ambition is Go's. | v1 (§4, §6) |
 | Type inference: annotate where it adds clarity, not everywhere | TypeScript, Haskell | TypeScript proved inference + annotations can coexist; Haskell proved inference can be principled. newr infers from literals and signatures (§7.4) and demands an annotation only where inference is impossible. | v1 |
@@ -2022,7 +2801,7 @@ verifiable output) has a structural advantage GitHub itself now names.
 
 | # | Idea | Verdict | Reason |
 |---|---|---|---|
-| 1 | Errors that actually help (Rust/Elm style) + `newr fix` for safe fixes | **v1** (diagnostics); **M4** (`newr fix`) | Diagnostics with span + hint + machine `fix` field are in v1 (§5.1, §16). The `fix` command applies them in M4 (§5.2) - the command waits until the diagnostics are proven, the *data* does not. |
+| 1 | Errors that actually help (Rust/Elm style) + `newr fix` for safe fixes | **v1** (diagnostics); **M6 minimal** (`newr fix`), **v1.1** (checker-attached fixes) | Diagnostics with span + hint + machine `fix` field are in v1 (§5.1, §16). The `fix` command applies them in M6 (§5.2). The command waits until the diagnostics are proven, the *data* does not. Checker-attached fixes are v1.1, because each needs its own design (§5.2). |
 | 2 | One toolchain, all built-in: fmt, lint, test, package manager, docs - one binary, zero config | **v1** (build/check); **M4–M6** (fmt/fix/test/init/docs) | `build` + `check` (which is also the linter - §5.1 warnings) ship in v1 (§19). `fmt`, `fix`, `test`, `init`, docs generation land M4–M6, in that order - each needs the layer below it to be stable first. The package-manager half (v0's `install`/`update`/`agents`) lands with the newr repo as `newr_cli/`, M4+. |
 | 3 | No dependency hell: lockfile + reproducible build as default | **v1** (by absence); **lockfile with the module registry** (post-v1) | v1 has no external dependencies at all - no registry, no versions to resolve, nothing to go wrong (§11, §23). A lockfile is meaningless before a registry exists; it is specified *with* the registry, not bolted on after. |
 | 4 | Type inference | **v1** | §7.4. Annotate where it adds clarity; the checker infers the rest; ambiguity is an error, never a guess. |
@@ -2034,8 +2813,8 @@ verifiable output) has a structural advantage GitHub itself now names.
 | 10 | Human-readable generated code | **v1** | §1.1.6. Proven by golden files at M2+. |
 | 11 | Fast + incremental builds | **v1** (design); **M4** (cache) | §4.1. The cache design is frozen now; the simple form (rebuild everything - fast enough for small projects) ships in v1, the cache lands in M4. Benchmarks in M2. |
 | 12 | One language → many targets, same behavior (conformance corpus) | **v1** (architecture); **M2–M5** (emitters) | §18.1. The corpus is the definition of correct behavior; emitters land one at a time against it. |
-| 13 | Built-in testing (`newr test`, same language) | **Deferred to M6 / v1.1** | A test framework needs the emitter interface stable first (otherwise tests would be written against a moving target). It also needs a test syntax decision (test blocks? `test` functions?). Both arrive after M3. Not forgotten - it is the first M6 item. |
-| 14 | Docs generated from code comments | **Deferred to M6** | Needs a frozen doc-comment syntax (the `///` convention, from C#/Rust) and the docs site. v1 freezes the language; M6 builds the docs pipeline on top of it. |
+| 13 | Built-in testing (`newr test`, same language) | **Yes (M6)** | Decided in M6 Phase 2c: BOTH forms, `fn test_*()` functions and `test "name":` blocks (§8.7), one runner, in source order across both forms. |
+| 14 | Docs generated from code comments | **Yes (M6)** | Frozen in M6 Phase 3: the `///` convention (from C#/Rust) is the doc-comment syntax (§6), the parser attaches doc comments to the item below (or to the file, for a leading block followed by a blank line), and `newr docs` generates `docs/api.md` (stdlib, from `compiler/modules.py`) plus `docs/examples.md` (examples, from `///` comments). |
 | 15 | No silent behavior | **v1** | §1.1.4. A non-negotiable, enforced by the checker (unknown lines are errors; no silent coercion). |
 | 16 | Truly complete stdlib (HTTP, JSON, dates, files), versioned with the language | **v1** (files, time, math, random, env); **v1.1** (HTTP, JSON, dates) | §12. Files/time/math/random/env ship in v1. HTTP needs a sandboxed `fetch` + allowlist (security review, §12.3); JSON needs a typed JSON value (no `any` in v1, §12.2); dates beyond `time.format` need a date type. All three are v1.1 with their reasons written - not dropped. The stdlib *is* versioned with the language from day one (it ships with the compiler). |
 | 17 | Safe-by-default concurrency (structured, no data races) | **Deferred to v1.1+** | v1 is single-threaded by default: `task` (discord module) is scheduled work, not concurrency; there are no threads and no shared mutable state (§8.4). Structured concurrency (async/await? actors? channels?) is a whole design decision: it touches the type system, the emitters (each target's concurrency model is different), and the "every path answers" check. It needs its own design document before a version is attached. It is the biggest open design question in this spec, and it is written here so it is not forgotten. |
@@ -2076,8 +2855,9 @@ to look:
 |---|---|---|
 | Full pattern exhaustiveness / usefulness | **Deferred to v2** | Core `match` is in v1 (§9.6); full usefulness checking is Rust's `rustc_pattern_analysis` algorithm - do not reimplement in v1. |
 | Generics (user-defined) | **Deferred to v2** | `list[T]`/`dict[str, T]`/`set[T]`/`T?`/`Result[T, E]` are generic from day one (§7.1); *user-defined* generic functions/types wait - they need a generic checker, which is v2 work (§7.7). |
-| HTTP `fetch` | **Deferred to v1.1** | §12.3 - sandboxed `fetch` + allowlist, after a security review. |
-| `json` module | **Deferred to v1.1** | §12.2 - needs a typed JSON value. |
+| HTTP `fetch` | **In v1, landed in M8b** | §12.6 - sandboxed `fetch` + allowlist, the §12.3 sketch implemented. |
+| `json` module | **In v1, landed in M8b** | §12.7 - typed JSON via expected-type inference, no `any` needed. |
+| `ui` module | **In v1, landed in M8c** | §12.8 - one small widget set, render core plus native windows, Elm-style view plus external state. |
 | Regex | **Deferred (no version)** | §12.3 - injection/DoS vector in a bot language; revisit with a timeout. |
 | Subcommands | **Deferred to v1.1** | §13.2. |
 | Command-name localization | **Deferred to v1.1** | §15. |
@@ -2114,8 +2894,8 @@ to look:
    handlers) - proven per emitter, not assumed from the Python pattern.
 6. **Compile-time numbers** (§4.1) and **generated-code benchmark numbers**
    (§4.2) - no measurements exist yet; M2 records them honestly.
-7. **Zipapp-from-`npx` behavior** and the exact `newr.json` schema - decided
-   in M4/M6.
+7. **Zipapp-from-`npx` behavior**, still open. (The exact
+   `newr.json` schema was decided in M6 Phase 2b, by implementation.)
 8. **poise ↔ serenity pin for M5** - read poise's `Cargo.toml` before M5
    codegen starts (poise 0.7.1 is the live-checked version, §18).
 9. **npm distribution - RESOLVED, dropped (G13).** The `@drewdestar` npm

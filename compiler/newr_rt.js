@@ -24,6 +24,9 @@
 "use strict";
 
 const fs = require("node:fs");
+const http = require("node:http");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const { randomBytes } = require("node:crypto");
 
 // ---------------------------------------------------------------- int64
@@ -734,14 +737,90 @@ function listContains(lst, x) {
   return false;
 }
 
+function setAdd(s, x) {
+  // newr `set.add(x)`: a set holds no duplicates (SPEC 7.6/7.8).
+  // A native JS Set uses identity for objects, so adding two
+  // equal-but-distinct struct values would store both. Check
+  // structurally first and skip when an equal element is present.
+  for (const e of s) {
+    if (eq(e, x)) {
+      return;
+    }
+  }
+  s.add(x);
+}
+
+function setContains(s, x) {
+  // newr `x in s` / `s.contains(x)`: structural equality, like
+  // listContains. Native Set.has is identity for objects, so it
+  // would miss an equal-but-distinct struct value.
+  for (const e of s) {
+    if (eq(e, x)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function setRemove(s, x) {
   // newr `set.remove(x)`: removing a missing element is an error
   // (Python's `set.remove` raises KeyError; JS `Set.delete`
-  // silently returns false).
-  if (!s.has(x)) {
-    throw codedError("KeyError", toStr(x));
+  // silently returns false). The match is structural: find the
+  // stored element equal to x and delete THAT one, because native
+  // Set.has/delete are identity for objects.
+  for (const e of s) {
+    if (eq(e, x)) {
+      s.delete(e);
+      return;
+    }
   }
-  s.delete(x);
+  throw codedError("KeyError", toStr(x));
+}
+
+function toSet(xs) {
+  // newr `set(xs)`: build a set from a list, deduplicating by
+  // structural equality (SPEC 7.6/7.8). A bare `new Set(xs)` would
+  // keep two equal-but-distinct struct values as two elements.
+  const s = new Set();
+  for (const x of xs) {
+    setAdd(s, x);
+  }
+  return s;
+}
+
+function strCmp(a, b) {
+  // newr string ordering: lexicographic by Unicode code point
+  // (SPEC 7.6). JS `<` compares UTF-16 code units, which orders an
+  // astral character below BMP characters at U+E000 and above
+  // (high surrogate D83D < FFFD, while by code points
+  // U+1F600 > U+FFFD). Compare code point by code point; a strict
+  // prefix is smaller.
+  const ac = [...a];
+  const bc = [...b];
+  const n = Math.min(ac.length, bc.length);
+  for (let i = 0; i < n; i++) {
+    const d = ac[i].codePointAt(0) - bc[i].codePointAt(0);
+    if (d !== 0) {
+      return d;
+    }
+  }
+  return ac.length - bc.length;
+}
+
+function lenOf(x) {
+  // newr `len` as a first-class value: the same answer as the
+  // `len(x)` call. A str counts code points (SPEC 7.6), not UTF-16
+  // units; a list counts elements; a dict/set counts entries.
+  if (typeof x === "string") {
+    return BigInt([...x].length);
+  }
+  if (Array.isArray(x)) {
+    return BigInt(x.length);
+  }
+  if (x instanceof Map || x instanceof Set) {
+    return BigInt(x.size);
+  }
+  throw new NewrError("len() of unsupported value: " + toStr(x));
 }
 
 function unwrapOpt(v) {
@@ -933,6 +1012,1202 @@ function fileExists(path) {
   return fs.existsSync(path);
 }
 
+// ---------------------------------------------------------------- db module
+// SQLite via the `node:sqlite` builtin, synchronous (SPEC.md section
+// 12.5). Handles are ints, fd-style: ids from 1, a registry maps
+// each id to its DatabaseSync. `?` binding is mandatory: values are
+// never interpolated into the SQL text. Int columns read back
+// through BigInt plus checkInt (J9: node:sqlite returns JS numbers
+// and throws above 2^53); bool binds as 0/1 because node:sqlite
+// does not accept boolean bind parameters.
+
+const _dbConnections = new Map();
+let _dbNextId = 1;
+
+function dbOpen(path) {
+  // newr `db.open(path)`: open (create if needed) and return a handle.
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync(path);
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
+  const handle = _dbNextId;
+  _dbNextId += 1;
+  _dbConnections.set(handle, db);
+  return checkInt(BigInt(handle));
+}
+
+function _dbConn(handle) {
+  const db = _dbConnections.get(Number(handle));
+  if (db === undefined) {
+    throw new NewrError(`db: unknown or closed handle ${handle}`);
+  }
+  return db;
+}
+
+function _dbBindArg(value) {
+  // node:sqlite binds null, number, string, bigint, Uint8Array.
+  // A newr bool binds as 0/1; a newr int is already a BigInt.
+  if (typeof value === "boolean") {
+    return value ? 1 : 0;
+  }
+  return value;
+}
+
+function _dbValue(value, typeStr) {
+  // Convert one raw SQLite value to the newr value for a `db.query`
+  // field type (`int`, `float`, `str`, `bool`, each optionally `?`).
+  // Mirrors the Python `_db_value` (newr_rt.py): NULL lands only in
+  // a nullable field, and a value that cannot convert throws
+  // instead of silently producing a wrong value.
+  const nullable = typeStr.endsWith("?");
+  const base = nullable ? typeStr.slice(0, -1) : typeStr;
+  if (value === null || value === undefined) {
+    if (nullable) {
+      return null;
+    }
+    throw new NewrError(`db: NULL in non-nullable ${base} field`);
+  }
+  if (base === "int") {
+    if (typeof value === "boolean") {
+      throw new NewrError("db: cannot convert bool to int");
+    }
+    if (typeof value === "bigint") {
+      return checkInt(value);
+    }
+    if (typeof value === "number") {
+      if (!Number.isInteger(value)) {
+        throw new NewrError(`db: cannot convert ${value} to int`);
+      }
+      return checkInt(BigInt(value));
+    }
+    if (typeof value === "string") {
+      const s = value.trim();
+      if (!/^-?\d+$/.test(s)) {
+        throw new NewrError(`db: cannot convert ${value} to int`);
+      }
+      return checkInt(BigInt(s));
+    }
+    throw new NewrError(`db: cannot convert ${typeof value} to int`);
+  }
+  if (base === "float") {
+    if (typeof value === "boolean") {
+      throw new NewrError("db: cannot convert bool to float");
+    }
+    if (typeof value === "bigint") {
+      return Number(value);
+    }
+    if (typeof value === "number") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const s = value.trim();
+      if (s === "") {
+        throw new NewrError(`db: cannot convert ${value} to float`);
+      }
+      const n = Number(s);
+      if (Number.isNaN(n)) {
+        throw new NewrError(`db: cannot convert ${value} to float`);
+      }
+      return n;
+    }
+    throw new NewrError(`db: cannot convert ${typeof value} to float`);
+  }
+  if (base === "str") {
+    if (typeof value === "boolean") {
+      return value ? "true" : "false";
+    }
+    if (typeof value === "string") {
+      return value;
+    }
+    return toStr(value);
+  }
+  if (base === "bool") {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "bigint") {
+      if (value === 0n) return false;
+      if (value === 1n) return true;
+      throw new NewrError(`db: cannot convert ${value} to bool`);
+    }
+    if (typeof value === "number") {
+      if (value === 0) return false;
+      if (value === 1) return true;
+      throw new NewrError(`db: cannot convert ${value} to bool`);
+    }
+    if (typeof value === "string") {
+      if (value === "0") return false;
+      if (value === "1") return true;
+      throw new NewrError(`db: cannot convert ${value} to bool`);
+    }
+    throw new NewrError(`db: cannot convert ${typeof value} to bool`);
+  }
+  throw new NewrError(`db: unknown field type ${typeStr}`);
+}
+
+function dbExec(handle, sql, args) {
+  // newr `db.exec(handle, sql, args...)`: run one statement, return
+  // the rows affected (0 for DDL).
+  const info = _dbConn(handle).prepare(sql).run(...args.map(_dbBindArg));
+  return checkInt(BigInt(info.changes));
+}
+
+function dbQuery(handle, sql, args, fieldNames, fieldTypes) {
+  // newr `db.query(handle, sql, args...)`: run a SELECT and return
+  // one list per row, converted values in field order. A missing
+  // column throws; extra columns are ignored.
+  const rows = _dbConn(handle).prepare(sql).all(...args.map(_dbBindArg));
+  const out = [];
+  for (const raw of rows) {
+    const row = [];
+    for (let i = 0; i < fieldNames.length; i++) {
+      const name = fieldNames[i];
+      if (!(name in raw)) {
+        throw new NewrError(`db: column ${name} missing from query result`);
+      }
+      row.push(_dbValue(raw[name], fieldTypes[i]));
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function dbBegin(handle) {
+  // newr `db.begin(handle)`: BEGIN IMMEDIATE.
+  _dbConn(handle).exec("BEGIN IMMEDIATE");
+  return null;
+}
+
+function dbCommit(handle) {
+  // newr `db.commit(handle)`: COMMIT.
+  _dbConn(handle).exec("COMMIT");
+  return null;
+}
+
+function dbRollback(handle) {
+  // newr `db.rollback(handle)`: ROLLBACK.
+  _dbConn(handle).exec("ROLLBACK");
+  return null;
+}
+
+function dbLastId(handle) {
+  // newr `db.last_id(handle)`: the last INSERT rowid.
+  const row = _dbConn(handle).prepare("SELECT last_insert_rowid() AS id").get();
+  return checkInt(BigInt(row.id));
+}
+
+function dbClose(handle) {
+  // newr `db.close(handle)`: close and drop the handle. A second
+  // close (or any use after close) raises NewrError.
+  const db = _dbConnections.get(Number(handle));
+  if (db === undefined) {
+    throw new NewrError(`db: unknown or closed handle ${handle}`);
+  }
+  _dbConnections.delete(Number(handle));
+  db.close();
+  return null;
+}
+
+// ---------------------------------------------------------------- json module
+// Typed JSON (SPEC.md section 12.7). The emitter passes a recursive
+// shape descriptor built from the static type: a scalar is "int" /
+// "float" / "str" / "bool" / "none", a nullable is ["?", inner], a
+// list is ["list", elem], a dict is ["dict", value], a struct is
+// ["struct", <class>, [[field, shape], ...]] in declaration order,
+// where <class> is the emitted struct class itself (the runtime
+// builds structs positionally with `new`).
+//
+// Two JS traps shape this code. First, JSON.stringify throws on a
+// BigInt, so ints are formatted by hand and floats get ".0" when
+// integral (the pinned float rule). Second, JSON.parse returns a
+// double for every number, losing the low bits of a big int and
+// erasing the 1.0 versus 1 distinction, so decode runs a
+// number-preserving pre-pass over the text first: integer literals
+// outside the safe range and every float literal are quoted with a
+// marker before JSON.parse, then revived under the shape.
+
+const _BIGINT_MARKER = "\u0001newr-bigint:";
+const _FLOAT_MARKER = "\u0001newr-float:";
+const _SAFE_INT = 9007199254740991n; // 2^53 - 1
+
+function _structField(value, name) {
+  // One struct field, by its newr name. A field whose name is a JS
+  // keyword or an emitter-reserved name is stored with a trailing
+  // underscore (the emitter's _mangle), so fall back to that
+  // spelling when the plain name is missing.
+  if (Object.prototype.hasOwnProperty.call(value, name)) {
+    return value[name];
+  }
+  if (Object.prototype.hasOwnProperty.call(value, name + "_")) {
+    return value[name + "_"];
+  }
+  throw new NewrError(`json: missing field ${JSON.stringify(name)}`);
+}
+
+function _jsonFloatText(x) {
+  // The JSON rendering of a float: shortest round-trip decimal,
+  // with ".0" appended when the rendering is plain decimal and
+  // integral. Exponent-form renderings keep their own form (the
+  // pinned byte-identical range is [0.001, 1e15], where the
+  // rendering is plain decimal on every target).
+  if (typeof x !== "number" || !Number.isFinite(x)) {
+    throw new NewrError("json: cannot encode a non-finite float");
+  }
+  if (Object.is(x, -0)) {
+    return "-0.0";
+  }
+  const s = String(x);
+  if (/[eE]/.test(s)) {
+    return s;
+  }
+  if (s.indexOf(".") === -1) {
+    return s + ".0";
+  }
+  return s;
+}
+
+function _jsonEncodeText(value, shape) {
+  // The JSON text for `value` under `shape`, compact, in struct
+  // declaration order, with UTF-8 output (JSON.stringify leaves
+  // non-ASCII characters literal, never \u escapes).
+  if (typeof shape === "string") {
+    if (shape === "int") {
+      if (typeof value !== "bigint") {
+        throw new NewrError(
+          `json: expected int, got ${typeof value}`);
+      }
+      return checkInt(value).toString();
+    }
+    if (shape === "float") {
+      if (typeof value === "boolean") {
+        throw new NewrError("json: expected float, got bool");
+      }
+      if (typeof value === "bigint") {
+        return _jsonFloatText(Number(value));
+      }
+      if (typeof value === "number") {
+        return _jsonFloatText(value);
+      }
+      throw new NewrError(
+        `json: expected float, got ${typeof value}`);
+    }
+    if (shape === "str") {
+      if (typeof value !== "string") {
+        throw new NewrError(
+          `json: expected str, got ${typeof value}`);
+      }
+      return JSON.stringify(value);
+    }
+    if (shape === "bool") {
+      if (typeof value !== "boolean") {
+        throw new NewrError(
+          `json: expected bool, got ${typeof value}`);
+      }
+      return value ? "true" : "false";
+    }
+    if (shape === "none") {
+      if (value !== null) {
+        throw new NewrError("json: expected null");
+      }
+      return "null";
+    }
+    throw new NewrError(`json: unknown shape ${JSON.stringify(shape)}`);
+  }
+  const kind = shape[0];
+  if (kind === "?") {
+    if (value === null) {
+      return "null";
+    }
+    return _jsonEncodeText(value, shape[1]);
+  }
+  if (kind === "list") {
+    if (!Array.isArray(value)) {
+      throw new NewrError(
+        `json: expected list, got ${typeof value}`);
+    }
+    return "[" + value.map((v) => _jsonEncodeText(v, shape[1]))
+      .join(",") + "]";
+  }
+  if (kind === "dict") {
+    if (!(value instanceof Map)) {
+      throw new NewrError(
+        `json: expected dict, got ${typeof value}`);
+    }
+    const parts = [];
+    for (const [k, v] of value) {
+      if (typeof k !== "string") {
+        throw new NewrError("json: dict keys must be str");
+      }
+      parts.push(JSON.stringify(k) + ":"
+        + _jsonEncodeText(v, shape[1]));
+    }
+    return "{" + parts.join(",") + "}";
+  }
+  if (kind === "struct") {
+    if (value === null || typeof value !== "object"
+      || Array.isArray(value) || value instanceof Map) {
+      throw new NewrError(
+        `json: expected struct, got ${typeof value}`);
+    }
+    const parts = [];
+    for (const [fieldName, fieldShape] of shape[2]) {
+      parts.push(JSON.stringify(fieldName) + ":"
+        + _jsonEncodeText(_structField(value, fieldName), fieldShape));
+    }
+    return "{" + parts.join(",") + "}";
+  }
+  throw new NewrError(`json: unknown shape ${JSON.stringify(shape)}`);
+}
+
+function _jsonPreserveNumbers(text) {
+  // Quote every JSON number literal that JSON.parse would corrupt:
+  // an integer outside the safe range (abs over 2^53 - 1) gets the
+  // bigint marker, and every float literal (a "." or an exponent)
+  // gets the float marker, so decode can tell 1.0 from 1. A
+  // number-looking token inside a string is copied verbatim, never
+  // quoted. The markers are strings starting with a control
+  // character, so ordinary JSON text never produces one.
+  let out = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === '"') {
+      let j = i + 1;
+      while (j < n) {
+        if (text[j] === "\\") {
+          j += 2;
+          continue;
+        }
+        if (text[j] === '"') {
+          j += 1;
+          break;
+        }
+        j += 1;
+      }
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (ch === "-" || (ch >= "0" && ch <= "9")) {
+      let j = i;
+      if (text[j] === "-") {
+        j += 1;
+      }
+      const intStart = j;
+      while (j < n && text[j] >= "0" && text[j] <= "9") {
+        j += 1;
+      }
+      const digits = text.slice(intStart, j);
+      if (digits.length === 0) {
+        out += ch;
+        i += 1;
+        continue;
+      }
+      const next = text[j];
+      if (next === "." || next === "e" || next === "E") {
+        let m = j;
+        if (text[m] === ".") {
+          m += 1;
+          while (m < n && text[m] >= "0" && text[m] <= "9") {
+            m += 1;
+          }
+        }
+        if (text[m] === "e" || text[m] === "E") {
+          m += 1;
+          if (text[m] === "+" || text[m] === "-") {
+            m += 1;
+          }
+          while (m < n && text[m] >= "0" && text[m] <= "9") {
+            m += 1;
+          }
+        }
+        out += JSON.stringify(_FLOAT_MARKER + text.slice(i, m));
+        i = m;
+        continue;
+      }
+      const mag = BigInt(digits);
+      if (mag > _SAFE_INT) {
+        const sign = text[i] === "-" ? "-" : "";
+        out += JSON.stringify(_BIGINT_MARKER + sign + digits);
+        i = j;
+        continue;
+      }
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
+
+function _jsonDecodeValue(value, shape) {
+  // The newr value for a parsed JSON value under `shape`. A struct
+  // is built positionally from its fields, in declaration order; a
+  // missing field throws, an extra field is ignored. A JSON float
+  // into an int field always throws (the value is a float by
+  // syntax, even when integral); an integer into a float field is
+  // fine; null lands only in a nullable shape; an integer outside
+  // int64 throws.
+  if (typeof shape === "string") {
+    if (shape === "int") {
+      if (typeof value === "bigint") {
+        // A value built by the runtime itself (the fetch response
+        // status), not one parsed from JSON text.
+        return checkInt(value);
+      }
+      if (typeof value === "string") {
+        if (value.startsWith(_FLOAT_MARKER)) {
+          throw new NewrError(
+            "json: expected int, got a float value");
+        }
+        if (value.startsWith(_BIGINT_MARKER)) {
+          try {
+            return checkInt(BigInt(value.slice(_BIGINT_MARKER.length)));
+          } catch (e) {
+            if (e instanceof NewrError) {
+              throw e;
+            }
+            throw new NewrError(
+              `json: integer outside int64 range: ${value}`);
+          }
+        }
+        throw new NewrError(
+          `json: expected int, got ${typeof value}`);
+      }
+      if (typeof value === "number") {
+        if (!Number.isInteger(value)) {
+          throw new NewrError(
+            `json: expected int, got ${value}`);
+        }
+        return checkInt(BigInt(value));
+      }
+      throw new NewrError(
+        `json: expected int, got ${typeof value}`);
+    }
+    if (shape === "float") {
+      if (typeof value === "boolean") {
+        throw new NewrError("json: expected float, got bool");
+      }
+      if (typeof value === "string") {
+        if (value.startsWith(_FLOAT_MARKER)) {
+          const token = value.slice(_FLOAT_MARKER.length);
+          if (!/^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/.test(token)) {
+            throw new NewrError(
+              `json: invalid JSON number ${JSON.stringify(token)}`);
+          }
+          return Number(token);
+        }
+        if (value.startsWith(_BIGINT_MARKER)) {
+          return Number(BigInt(value.slice(_BIGINT_MARKER.length)));
+        }
+        throw new NewrError(
+          `json: expected float, got ${typeof value}`);
+      }
+      if (typeof value === "number") {
+        return value;
+      }
+      throw new NewrError(
+        `json: expected float, got ${typeof value}`);
+    }
+    if (shape === "str") {
+      if (typeof value !== "string") {
+        throw new NewrError(
+          `json: expected str, got ${typeof value}`);
+      }
+      return value;
+    }
+    if (shape === "bool") {
+      if (typeof value !== "boolean") {
+        throw new NewrError(
+          `json: expected bool, got ${typeof value}`);
+      }
+      return value;
+    }
+    if (shape === "none") {
+      if (value !== null) {
+        throw new NewrError("json: expected null");
+      }
+      return null;
+    }
+    throw new NewrError(`json: unknown shape ${JSON.stringify(shape)}`);
+  }
+  const kind = shape[0];
+  if (kind === "?") {
+    if (value === null) {
+      return null;
+    }
+    return _jsonDecodeValue(value, shape[1]);
+  }
+  if (kind === "list") {
+    if (!Array.isArray(value)) {
+      throw new NewrError(
+        `json: expected list, got ${typeof value}`);
+    }
+    return value.map((v) => _jsonDecodeValue(v, shape[1]));
+  }
+  if (kind === "dict") {
+    const out = new Map();
+    if (value instanceof Map) {
+      for (const [k, v] of value) {
+        if (typeof k !== "string") {
+          throw new NewrError("json: dict keys must be str");
+        }
+        out.set(k, _jsonDecodeValue(v, shape[1]));
+      }
+      return out;
+    }
+    if (value === null || typeof value !== "object"
+      || Array.isArray(value)) {
+      throw new NewrError(
+        `json: expected object, got ${typeof value}`);
+    }
+    for (const k of Object.keys(value)) {
+      out.set(k, _jsonDecodeValue(value[k], shape[1]));
+    }
+    return out;
+  }
+  if (kind === "struct") {
+    if (value === null || typeof value !== "object"
+      || Array.isArray(value) || value instanceof Map) {
+      throw new NewrError(
+        `json: expected object, got ${typeof value}`);
+    }
+    const cls = shape[1];
+    const args = [];
+    for (const [fieldName, fieldShape] of shape[2]) {
+      if (!Object.prototype.hasOwnProperty.call(value, fieldName)) {
+        throw new NewrError(
+          `json: missing field ${JSON.stringify(fieldName)}`);
+      }
+      args.push(_jsonDecodeValue(value[fieldName], fieldShape));
+    }
+    return new cls(...args);
+  }
+  throw new NewrError(`json: unknown shape ${JSON.stringify(shape)}`);
+}
+
+function jsonEncode(value, shape) {
+  // newr `json.encode(value)`: JSON text, compact, in struct
+  // declaration order. Floats use the shortest round-trip decimal,
+  // with ".0" for integral floats; ints are exact decimal,
+  // including int64. Non-ASCII text is written as UTF-8, not \u
+  // escapes. A non-finite float is not valid JSON, so encoding
+  // one throws instead of writing Infinity.
+  return _jsonEncodeText(value, shape);
+}
+
+function jsonDecode(text, shape) {
+  // newr `json.decode(text)`: the typed value for `text` under
+  // `shape`. An empty string throws, trailing data after the JSON
+  // value throws, duplicate keys keep the last value (the parser
+  // behaviour), a JSON fraction into an int field throws, an
+  // integer into a float field is fine, null only into a nullable
+  // shape, and an integer outside int64 throws.
+  if (typeof text !== "string") {
+    throw new NewrError("json: decode takes a string");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(_jsonPreserveNumbers(text));
+  } catch (e) {
+    throw new NewrError(`json: invalid JSON: ${e.message}`);
+  }
+  return _jsonDecodeValue(parsed, shape);
+}
+
+function _buildFromShape(shape, values) {
+  // Build a struct from a plain object of field values, converting
+  // each field through its shape. Used for the fetch response and
+  // the server request, whose fields arrive as plain values, not
+  // as JSON text.
+  if (!Array.isArray(shape) || shape.length !== 3
+    || shape[0] !== "struct") {
+    throw new NewrError("http: internal: expected a struct shape");
+  }
+  const cls = shape[1];
+  const args = [];
+  for (const [fieldName, fieldShape] of shape[2]) {
+    if (!Object.prototype.hasOwnProperty.call(values, fieldName)) {
+      throw new NewrError(
+        `http: missing field ${JSON.stringify(fieldName)}`);
+    }
+    args.push(_jsonDecodeValue(values[fieldName], fieldShape));
+  }
+  return new cls(...args);
+}
+
+// ---------------------------------------------------------------- http module
+// Sync HTTP server plus fetch client (SPEC.md section 12.6): the
+// `node:http` builtin for serve, the global `fetch` for the client.
+// Routes live in a module-level registry, exact-match only; a
+// request with no route, or a method mismatch, gets 404 with an
+// empty body (not 405).
+//
+// Node has no synchronous fetch, and newr programs are synchronous,
+// so the fetch helper runs the global fetch inside a short-lived
+// `node -e` subprocess and reads the result back over its stdout
+// (a JSON envelope carrying status, headers, and the body as
+// base64). The timeout covers the whole request in the subprocess
+// via AbortSignal.timeout, and the parent waits a little longer so
+// a stuck subprocess is killed instead of hanging the program.
+
+const _HTTP_METHODS = new Set([
+  "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
+]);
+
+// The fetch allowlist the runtime can enforce without a manifest
+// (SPEC.md section 12.6): localhost only. The checker enforces the
+// manifest allowlist for literal URLs; the runtime enforces this
+// default list for computed URLs, and for every URL at call time.
+const _DEFAULT_HTTP_ALLOWLIST = ["localhost", "127.0.0.1"];
+
+// (method, path, handler, request shape), in registration order.
+const _httpRoutes = [];
+
+// The fetch program run by the subprocess: it reads a JSON payload
+// {method, url, body, timeoutMs, headers} from stdin, performs one
+// fetch, and writes {ok, status, headers, bodyB64} (or {ok: false,
+// error}) to stdout. It never throws out of the script: every
+// failure is reported in the envelope, so the parent decides.
+const _HTTP_FETCH_SCRIPT = [
+  "const payload = JSON.parse("
+    + "require(\"node:fs\").readFileSync(0, \"utf-8\"));",
+  "(async () => {",
+  "  try {",
+  "    const init = { method: payload.method, headers: payload.headers,",
+  "      signal: AbortSignal.timeout(payload.timeoutMs) };",
+  "    if (payload.body !== null) { init.body = payload.body; }",
+  "    const resp = await fetch(payload.url, init);",
+  "    const buf = Buffer.from(await resp.arrayBuffer());",
+  "    const headers = [];",
+  "    resp.headers.forEach((value, key) => headers.push([key, value]));",
+  "    process.stdout.write(JSON.stringify({ ok: true,",
+  "      status: resp.status, headers,",
+  "      bodyB64: buf.toString(\"base64\") }));",
+  "  } catch (e) {",
+  "    process.stdout.write(JSON.stringify({ ok: false,",
+  "      error: e && e.message ? e.message : String(e) }));",
+  "  }",
+  "})();",
+].join("\n");
+
+function httpRoute(method, path, handler, reqShape) {
+  // newr `http.route(method, path, handler)`: register one
+  // exact-match route. A computed method that is not one of the
+  // uppercase methods, or a computed path without a leading slash,
+  // throws here (literal ones are E2012 from the checker).
+  if (typeof method !== "string" || !_HTTP_METHODS.has(method)) {
+    throw new NewrError(
+      `http: invalid method ${JSON.stringify(method)}`);
+  }
+  if (typeof path !== "string" || !path.startsWith("/")) {
+    throw new NewrError(
+      `http: route path must start with '/', got ${JSON.stringify(path)}`);
+  }
+  if (typeof handler !== "function") {
+    throw new NewrError("http: route handler must be callable");
+  }
+  _httpRoutes.push([method, path, handler, reqShape]);
+  return null;
+}
+
+function _httpSend(res, req, status, headers, body) {
+  // Write one response: the given headers (a Map), Content-Length
+  // always set (a handler Content-Length is ignored), no body on
+  // a HEAD response.
+  const bytes = Buffer.from(body, "utf-8");
+  const out = {};
+  for (const [k, v] of headers) {
+    if (k.toLowerCase() === "content-length") {
+      continue;
+    }
+    out[k] = v;
+  }
+  out["Content-Length"] = String(bytes.length);
+  res.writeHead(status, out);
+  if (req.method === "HEAD") {
+    res.end();
+    return;
+  }
+  res.end(bytes);
+}
+
+function _httpDispatch(req, res) {
+  // One request: read the whole body, build the request struct,
+  // call the handler, write the response. Handler exceptions, an
+  // out-of-range status, and a non-UTF-8 body surface as a 500
+  // with an empty body, so one bad request never takes the server
+  // down.
+  const chunks = [];
+  req.on("data", (chunk) => chunks.push(chunk));
+  req.on("end", () => {
+    try {
+      const raw = Buffer.concat(chunks);
+      let body;
+      try {
+        body = new TextDecoder("utf-8", { fatal: true }).decode(raw);
+      } catch (e) {
+        _httpSend(res, req, 500, new Map(), "");
+        return;
+      }
+      let path = req.url || "/";
+      let query = new Map();
+      try {
+        const parsed = new URL(req.url, "http://127.0.0.1");
+        path = parsed.pathname;
+        for (const [k, v] of parsed.searchParams) {
+          query.set(k, v);
+        }
+      } catch (e) {
+        const q = path.indexOf("?");
+        if (q !== -1) {
+          path = path.slice(0, q);
+        }
+        query = new Map();
+      }
+      const headers = new Map();
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === "string") {
+          headers.set(k, v);
+        } else if (Array.isArray(v)) {
+          headers.set(k, v.join(", "));
+        }
+      }
+      let found = null;
+      for (const route of _httpRoutes) {
+        if (route[0] === req.method && route[1] === path) {
+          found = route;
+          break;
+        }
+      }
+      if (found === null) {
+        _httpSend(res, req, 404, new Map(), "");
+        return;
+      }
+      const handler = found[2];
+      const reqShape = found[3];
+      const values = {
+        method: req.method, path, headers, body, query,
+      };
+      let resp;
+      try {
+        resp = handler(_buildFromShape(reqShape, values));
+      } catch (e) {
+        _httpSend(res, req, 500, new Map(), "");
+        return;
+      }
+      const status = _structField(resp, "status");
+      const respHeaders = _structField(resp, "headers");
+      const respBody = _structField(resp, "body");
+      const statusNum = typeof status === "bigint"
+        ? status : (typeof status === "number"
+          && Number.isInteger(status) ? BigInt(status) : null);
+      if (statusNum === null || statusNum < 100n || statusNum > 599n) {
+        _httpSend(res, req, 500, new Map(), "");
+        return;
+      }
+      if (!(respHeaders instanceof Map)) {
+        _httpSend(res, req, 500, new Map(), "");
+        return;
+      }
+      if (typeof respBody !== "string") {
+        _httpSend(res, req, 500, new Map(), "");
+        return;
+      }
+      for (const [k, v] of respHeaders) {
+        if (typeof k !== "string" || typeof v !== "string") {
+          _httpSend(res, req, 500, new Map(), "");
+          return;
+        }
+      }
+      _httpSend(res, req, Number(statusNum), respHeaders, respBody);
+    } catch (e) {
+      try {
+        _httpSend(res, req, 500, new Map(), "");
+      } catch (_ignored) {
+        // The response is already gone; nothing left to do.
+      }
+    }
+  });
+  req.on("error", () => {
+    try {
+      _httpSend(res, req, 500, new Map(), "");
+    } catch (_ignored) {
+      // The response is already gone; nothing left to do.
+    }
+  });
+}
+
+function httpServe(port, host = "127.0.0.1") {
+  // newr `http.serve(port)` / `http.serve(port, host)`: serve the
+  // registered routes forever, until the process is killed. Prints
+  // `listening on <host>:<port>` (the real port when 0) as its
+  // first line, once the server is listening. The call returns
+  // after the server starts listening; the listening server keeps
+  // the Node event loop (and the process) alive.
+  const portNum = typeof port === "bigint" ? port
+    : (typeof port === "number" && Number.isInteger(port)
+      ? BigInt(port) : null);
+  if (portNum === null || portNum < 0n || portNum > 65535n) {
+    throw new NewrError(
+      `http: port must be 0 to 65535, got ${port}`);
+  }
+  if (typeof host !== "string") {
+    throw new NewrError(
+      `http: host must be a str, got ${typeof host}`);
+  }
+  const server = http.createServer((req, res) => {
+    _httpDispatch(req, res);
+  });
+  server.listen(Number(portNum), host, () => {
+    const addr = server.address();
+    console.log(`listening on ${host}:${addr.port}`);
+  });
+  return null;
+}
+
+function httpFetch(method, url, body, timeout = 10n, headers = null,
+  shape = null) {
+  // The fetch primitive behind `http.get` / `http.post` /
+  // `http.request`: one request, whole-request timeout in seconds
+  // (default 10, connect plus body). POST/request set
+  // `Content-Type: application/json` unless the program sets one;
+  // GET sets none. A 4xx/5xx status is a response, not a throw: the
+  // caller reads `resp.status`. Anything else that fails (an
+  // unreachable host, a timeout, a bad URL, a host outside the
+  // allowlist) throws.
+  if (typeof method !== "string" || !_HTTP_METHODS.has(method)) {
+    throw new NewrError(
+      `http: invalid method ${JSON.stringify(method)}`);
+  }
+  const timeoutBig = typeof timeout === "bigint" ? timeout
+    : (typeof timeout === "number" && Number.isInteger(timeout)
+      ? BigInt(timeout) : null);
+  if (timeoutBig === null || timeoutBig <= 0n) {
+    throw new NewrError(
+      "http: timeout must be a positive number of seconds, "
+      + `got ${timeout}`);
+  }
+  if (typeof url !== "string") {
+    throw new NewrError(
+      `http: URL must be a str, got ${typeof url}`);
+  }
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (e) {
+    throw new NewrError(
+      "http: fetch URL must start with http:// or https://, "
+      + `got ${JSON.stringify(url)}`);
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new NewrError(
+      "http: fetch URL must start with http:// or https://, "
+      + `got ${JSON.stringify(url)}`);
+  }
+  if (!parsed.hostname) {
+    throw new NewrError(
+      `http: fetch URL has no host: ${JSON.stringify(url)}`);
+  }
+  if (parsed.username !== "" || parsed.password !== "") {
+    throw new NewrError(
+      "http: a URL must not carry userinfo; read the token "
+      + "from env and pass it as a header");
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!_DEFAULT_HTTP_ALLOWLIST.includes(host)) {
+    throw new NewrError(
+      `http: fetch host ${JSON.stringify(host)} is not on the `
+      + "allowlist (localhost, 127.0.0.1)");
+  }
+  if (shape === null || shape === undefined) {
+    throw new NewrError("http: internal: fetch without a response shape");
+  }
+  const reqHeaders = {};
+  if (headers !== null && headers !== undefined) {
+    if (!(headers instanceof Map)) {
+      throw new NewrError("http: headers must be a dict");
+    }
+    for (const [k, v] of headers) {
+      if (typeof k !== "string" || typeof v !== "string") {
+        throw new NewrError("http: headers must be dict[str, str]");
+      }
+      reqHeaders[k] = v;
+    }
+  }
+  if (body !== null && body !== undefined) {
+    if (typeof body !== "string") {
+      throw new NewrError("http: body must be a str");
+    }
+    if (!Object.keys(reqHeaders).some(
+      (k) => k.toLowerCase() === "content-type")) {
+      reqHeaders["Content-Type"] = "application/json";
+    }
+  }
+  const timeoutMs = Number(timeoutBig) * 1000;
+  const payload = JSON.stringify({
+    method, url,
+    body: body === null || body === undefined ? null : body,
+    timeoutMs, headers: reqHeaders,
+  });
+  const result = spawnSync(process.execPath,
+    ["-e", _HTTP_FETCH_SCRIPT],
+    {
+      input: payload, encoding: "utf-8",
+      timeout: timeoutMs + 5000, maxBuffer: 64 * 1024 * 1024,
+    });
+  if (result.error) {
+    throw new NewrError(
+      `http: fetch ${method} ${url} failed: ${result.error.message}`);
+  }
+  let data;
+  try {
+    data = JSON.parse(result.stdout);
+  } catch (e) {
+    throw new NewrError(
+      `http: fetch ${method} ${url} failed: bad fetch helper output`);
+  }
+  if (!data.ok) {
+    throw new NewrError(
+      `http: fetch ${method} ${url} failed: ${data.error || "unknown error"}`);
+  }
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true })
+      .decode(Buffer.from(data.bodyB64, "base64"));
+  } catch (e) {
+    throw new NewrError("http: response body is not valid UTF-8");
+  }
+  const values = {
+    status: BigInt(data.status),
+    headers: new Map(data.headers),
+    body: text,
+  };
+  return _buildFromShape(shape, values);
+}
+
+function httpGet(url, timeout = 10n, headers = null, shape = null) {
+  // newr `http.get(url[, timeout[, headers]])`: GET, no body,
+  // no Content-Type unless the program sets one.
+  return httpFetch("GET", url, null, timeout, headers, shape);
+}
+
+function httpPost(url, body, timeout = 10n, headers = null,
+  shape = null) {
+  // newr `http.post(url, body[, timeout[, headers]])`.
+  return httpFetch("POST", url, body, timeout, headers, shape);
+}
+
+function httpRequest(method, url, body, timeout = 10n, headers = null,
+  shape = null) {
+  // newr `http.request(method, url, body[, timeout[, headers]])`:
+  // the generic fetch primitive.
+  return httpFetch(method, url, body, timeout, headers, shape);
+}
+
+// ------------------------------------------------------------------ ui module
+// One small widget set (SPEC.md section 12.8): no native toolkit on
+// js, so the render core is the whole surface and `show` / `run`
+// write the HTML sink. A Widget is an opaque value: a kind tag plus
+// its fields. Handlers are plain JS functions (the lambdas the
+// emitter produces). The render core is pure and deterministic: no
+// I/O, byte-identical to the py reference (see SPEC.md SS12.8 for
+// the format). `ui.show` writes the rendered HTML to `<stem>.html`
+// next to the program and prints the path, then returns; `ui.run`
+// calls the view once, renders, and writes the same sink. The
+// interactive loop is a documented no-op on js (SPEC.md SS12.8).
+
+class Widget {
+  // A ui widget value: `kind` plus the fields that kind uses.
+  // Only the constructors below build one; programs never build a
+  // Widget by hand.
+  constructor(kind, fields = {}) {
+    this.kind = kind;
+    this.text = fields.text ?? "";
+    this.label = fields.label ?? "";
+    this.handler = fields.handler ?? null;
+    this.placeholder = fields.placeholder ?? "";
+    this.value = fields.value ?? "";
+    this.url = fields.url ?? "";
+    this.children = fields.children ?? [];
+  }
+}
+
+function uiText(text) {
+  // newr `ui.text(s)`.
+  if (typeof text !== "string") {
+    throw new NewrError(`ui: text takes a string, got ${typeof text}`);
+  }
+  return new Widget("text", { text });
+}
+
+function uiButton(label, handler) {
+  // newr `ui.button(label, handler)`.
+  if (typeof label !== "string") {
+    throw new NewrError(
+      `ui: button label takes a string, got ${typeof label}`);
+  }
+  if (typeof handler !== "function") {
+    throw new NewrError("ui: button handler must be callable");
+  }
+  return new Widget("button", { label, handler });
+}
+
+function uiInput(placeholder, value, handler) {
+  // newr `ui.input(placeholder, value, handler)`.
+  if (typeof placeholder !== "string" || typeof value !== "string") {
+    throw new NewrError("ui: input takes strings for placeholder and value");
+  }
+  if (typeof handler !== "function") {
+    throw new NewrError("ui: input handler must be callable");
+  }
+  return new Widget("input", { placeholder, value, handler });
+}
+
+function uiList(children) {
+  // newr `ui.list(children)`.
+  return new Widget("list", { children: _uiChildren(children, "list") });
+}
+
+function uiImage(url) {
+  // newr `ui.image(url)`.
+  if (typeof url !== "string") {
+    throw new NewrError(`ui: image url takes a string, got ${typeof url}`);
+  }
+  return new Widget("image", { url });
+}
+
+function uiRow(children) {
+  // newr `ui.row(children)`.
+  return new Widget("row", { children: _uiChildren(children, "row") });
+}
+
+function uiColumn(children) {
+  // newr `ui.column(children)`.
+  return new Widget("column", { children: _uiChildren(children, "column") });
+}
+
+function _uiChildren(children, what) {
+  if (!Array.isArray(children)) {
+    throw new NewrError(`ui: ${what} takes a list of widgets`);
+  }
+  for (const child of children) {
+    if (!(child instanceof Widget)) {
+      throw new NewrError(
+        `ui: ${what} takes widgets, got ${typeof child}`);
+    }
+  }
+  return children.slice();
+}
+
+function _uiEscape(s) {
+  // The SPEC.md SS12.8 escape: & then < > ", in that order,
+  // in text and attributes alike.
+  return s.split("&").join("&amp;").split("<").join("&lt;")
+    .split(">").join("&gt;").split('"').join("&quot;");
+}
+
+function uiRender(widget) {
+  // newr `ui.render(w)`: the widget tree as deterministic HTML
+  // (SPEC.md SS12.8). No outer wrapper, no insignificant
+  // whitespace, UTF-8. Button and input indices are separate
+  // pre-order counters.
+  if (!(widget instanceof Widget)) {
+    throw new NewrError("ui: render takes a widget");
+  }
+  const counters = { button: 0, input: 0 };
+  return _uiRenderWidget(widget, counters);
+}
+
+function _uiRenderWidget(w, counters) {
+  const kind = w.kind;
+  if (kind === "text") {
+    return `<p>${_uiEscape(w.text)}</p>`;
+  }
+  if (kind === "button") {
+    const n = counters.button;
+    counters.button += 1;
+    return `<button data-action="${n}">${_uiEscape(w.label)}</button>`;
+  }
+  if (kind === "input") {
+    const n = counters.input;
+    counters.input += 1;
+    return `<input placeholder="${_uiEscape(w.placeholder)}" `
+      + `value="${_uiEscape(w.value)}" data-input="${n}">`;
+  }
+  if (kind === "list") {
+    let inner = "";
+    for (const c of w.children) {
+      inner += `<li>${_uiRenderWidget(c, counters)}</li>`;
+    }
+    return `<ul>${inner}</ul>`;
+  }
+  if (kind === "image") {
+    return `<img src="${_uiEscape(w.url)}" alt="">`;
+  }
+  if (kind === "row") {
+    let inner = "";
+    for (const c of w.children) {
+      inner += _uiRenderWidget(c, counters);
+    }
+    return `<div data-layout="row">${inner}</div>`;
+  }
+  if (kind === "column") {
+    let inner = "";
+    for (const c of w.children) {
+      inner += _uiRenderWidget(c, counters);
+    }
+    return `<div data-layout="column">${inner}</div>`;
+  }
+  throw new NewrError(`ui: unknown widget kind ${JSON.stringify(kind)}`);
+}
+
+function _uiHtmlPath() {
+  // `<stem>.html` next to the program (the emitted `.js` file),
+  // or in the current directory when the program path is unknown.
+  const main = process.argv[1];
+  if (typeof main === "string" && main.length > 0) {
+    const base = path.basename(main).replace(/\.js$/, "");
+    return path.join(path.dirname(main), `${base}.html`);
+  }
+  return path.join(process.cwd(), "newr.html");
+}
+
+function _uiWriteHtml(widget) {
+  const outPath = _uiHtmlPath();
+  fs.writeFileSync(outPath, uiRender(widget), "utf-8");
+  console.log(outPath);
+}
+
+function uiShow(widget) {
+  // newr `ui.show(w)`: write the rendered HTML to `<stem>.html`
+  // next to the program and print the path, then return. It never
+  // opens a browser itself.
+  if (!(widget instanceof Widget)) {
+    throw new NewrError("ui: show takes a widget");
+  }
+  _uiWriteHtml(widget);
+  return null;
+}
+
+function uiRun(view) {
+  // newr `ui.run(view)`: call the view once, render, write the
+  // same HTML sink, print the path, return. The interactive loop
+  // is a documented no-op on js (SPEC.md SS12.8).
+  if (typeof view !== "function") {
+    throw new NewrError("ui: run takes a view function");
+  }
+  const tree = view();
+  if (!(tree instanceof Widget)) {
+    throw new NewrError("ui: a view must return a widget");
+  }
+  _uiWriteHtml(tree);
+  return null;
+}
+
 module.exports = {
   INT64_MIN,
   INT64_MAX,
@@ -966,7 +2241,12 @@ module.exports = {
   listIndex,
   listGet,
   listContains,
+  setAdd,
+  setContains,
   setRemove,
+  toSet,
+  strCmp,
+  lenOf,
   unwrapOpt,
   eq,
   range,
@@ -980,4 +2260,31 @@ module.exports = {
   fileWrite,
   fileAppend,
   fileExists,
+  dbOpen,
+  dbExec,
+  dbQuery,
+  dbBegin,
+  dbCommit,
+  dbRollback,
+  dbLastId,
+  dbClose,
+  jsonEncode,
+  jsonDecode,
+  httpRoute,
+  httpServe,
+  httpGet,
+  httpPost,
+  httpRequest,
+  httpFetch,
+  Widget,
+  uiText,
+  uiButton,
+  uiInput,
+  uiList,
+  uiImage,
+  uiRow,
+  uiColumn,
+  uiRender,
+  uiShow,
+  uiRun,
 };

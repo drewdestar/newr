@@ -1050,6 +1050,30 @@ public static class NewrRt
         return outList;
     }
 
+    /// <summary>Lexicographic string comparison by CODE POINT
+    /// (SPEC pin P5 / type model: strings order by code point,
+    /// never by host semantics). .NET's string.CompareOrdinal
+    /// compares UTF-16 code units, so an astral character sorts
+    /// BEFORE U+FFFD (its high surrogate D83D &lt; FFFD) even
+    /// though its code point U+1F600 is greater; the
+    /// culture-sensitive CompareTo is wrong too. EnumerateRunes
+    /// yields one Rune per code point; a strict prefix sorts
+    /// first. Mirrors Java's strCmp.</summary>
+    public static int StrCmp(string a, string b)
+    {
+        var ac = new List<int>();
+        foreach (var r in a.EnumerateRunes()) ac.Add(r.Value);
+        var bc = new List<int>();
+        foreach (var r in b.EnumerateRunes()) bc.Add(r.Value);
+        int n = Math.Min(ac.Count, bc.Count);
+        for (int i = 0; i < n; i++)
+        {
+            int d = ac[i] - bc[i];
+            if (d != 0) return d;
+        }
+        return ac.Count - bc.Count;
+    }
+
     /// <summary><c>s.split(sep)</c> with a LITERAL separator
     /// (unlike Java's String.split, .NET's string.Split with a
     /// string[] separator is already literal) and Python's

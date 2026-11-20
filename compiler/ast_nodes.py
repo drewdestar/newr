@@ -24,26 +24,35 @@ class Type:
     ``name`` is the base name (``int``, ``list``, ``Point``, ...);
     ``params`` holds generic arguments (``list[int]`` -> name ``list``,
     params ``(int,)``). ``nullable`` is the ``T?`` spelling (SPEC.md §7.2
-    - exactly one absent value; there is no ``option[T]``). A function
+    — exactly one absent value; there is no ``option[T]``). A function
     type has name ``"fn"`` and params ``(T1, ..., R)`` (return type last).
-    ``span`` is where the type was written (not part of equality - two
-    ``int`` types are equal wherever they were written).
+    ``span`` is where the type was written (not part of equality — two
+    ``int`` types are equal wherever they were written). ``module``
+    is the qualifying module of a qualified type (``m.T``, M9 L7):
+    the alias as written. It is not part of equality or hashing
+    either — ``shop_shared.Product`` and a bare ``Product`` that
+    resolves to the same struct compare equal, so existing
+    type-equality logic is untouched; the module is validation
+    metadata (the checker proves the module exists and declares
+    the type), and the emitters resolve the bare name as before.
     """
 
     name: str
     params: tuple["Type", ...] = ()
     span: Span | None = field(default=None, compare=False)
     nullable: bool = False
+    module: str | None = field(default=None, compare=False, hash=False)
 
     def __str__(self) -> str:
+        qual = f"{self.module}." if self.module else ""
         if self.name == "fn" and self.params:
             inner = ", ".join(str(p) for p in self.params[:-1])
             base = f"fn({inner}) -> {self.params[-1]}"
         elif not self.params:
-            base = self.name
+            base = f"{qual}{self.name}"
         else:
             inner = ", ".join(str(p) for p in self.params)
-            base = f"{self.name}[{inner}]"
+            base = f"{qual}{self.name}[{inner}]"
         return base + "?" if self.nullable else base
 
 
@@ -57,12 +66,12 @@ DURATION = Type("duration")
 
 BUILTIN_TYPE_NAMES = {
     "int", "float", "str", "bool", "list", "dict", "set", "Result", "fn",
-    "error", "none", "duration",
+    "error", "none", "duration", "Widget",
 }
 
 # Discord entity types (SPEC.md §7.1). Their *fields* are owned by the
 # discord module (discord_limits.py) and injected into the checker as a
-# type provider - the core never imports the discord tables (§2.1).
+# type provider — the core never imports the discord tables (§2.1).
 ENTITY_TYPE_NAMES = {
     "user", "member", "guild", "channel", "role", "interaction",
     "embed", "message",
@@ -80,7 +89,7 @@ def dict_of(value: Type) -> Type:
 
 
 def nullable_of(inner: Type) -> Type:
-    """``T?`` - the one nullability spelling (SPEC.md §7.2, G19)."""
+    """``T?`` — the one nullability spelling (SPEC.md §7.2, G19)."""
     return Type(inner.name, inner.params, span=inner.span, nullable=True)
 
 
@@ -99,6 +108,14 @@ def fn_of(params: list[Type], ret: Type) -> Type:
 @dataclass
 class Node:
     span: Span
+    # `///` doc comment attached by the parser (SPEC.md section 6,
+    # M6): the text of the doc-comment lines directly above this
+    # node, joined with "\n", or None when there is none. Doc
+    # comments are syntax only, never semantic, so this field is
+    # excluded from equality and from __init__ (init=False): no
+    # constructor call site changes, and no subclass field order
+    # changes (several subclasses have fields without defaults).
+    doc: str | None = field(default=None, compare=False, init=False)
 
 
 @dataclass
@@ -168,7 +185,7 @@ class Lambda(Expr):
 
 @dataclass
 class TryExpr(Expr):
-    """``try <expr>`` - returns ``Result[T, error]`` (SPEC.md §10)."""
+    """``try <expr>`` — returns ``Result[T, error]`` (SPEC.md §10)."""
 
     expr: Expr | None = None
 
@@ -180,7 +197,7 @@ class Propagate(Expr):
     Wraps the RHS expression of a statement. On ``Err``/``none`` the
     enclosing function returns early; on ``Ok``/``Some`` it unwraps to
     ``T``. The parser only ever creates this node as the outermost
-    postfix of a statement RHS - a nested ``?`` is a parse error.
+    postfix of a statement RHS — a nested ``?`` is a parse error.
     """
 
     expr: Expr | None = None
@@ -196,7 +213,7 @@ class Call(Expr):
 
 @dataclass
 class TCall(Expr):
-    """The i18n lookup ``t("key", name: expr, ...)`` (SPEC.md §15 - discord module).
+    """The i18n lookup ``t("key", name: expr, ...)`` (SPEC.md §15 — discord module).
 
     The parser produces this node for calls to the builtin name ``t``;
     the checker validates the key and the argument names against the
@@ -374,7 +391,7 @@ class MatchArm:
 
 @dataclass
 class Match(Stmt):
-    """``match expr:`` - statement in v1 (SPEC.md §9.6, G12)."""
+    """``match expr:`` — statement in v1 (SPEC.md §9.6, G12)."""
 
     scrutinee: Expr | None = None
     arms: list[MatchArm] = field(default_factory=list)
@@ -382,14 +399,14 @@ class Match(Stmt):
 
 @dataclass
 class Require(Stmt):
-    """``requires <expr>`` - first statement(s) of a fn body (§9.7)."""
+    """``requires <expr>`` — first statement(s) of a fn body (§9.7)."""
 
     cond: Expr | None = None
 
 
 @dataclass
 class Ensure(Stmt):
-    """``ensures <expr>`` - ``result`` is bound to the return value (§9.7)."""
+    """``ensures <expr>`` — ``result`` is bound to the return value (§9.7)."""
 
     cond: Expr | None = None
 
@@ -567,6 +584,27 @@ class StructDecl(Decl):
 
 
 @dataclass
+class TestBlock(Decl):
+    """A named test block (SPEC.md section 8.7, M6 Phase 2c).
+
+    ``test "adds two numbers":`` plus an indented body. The display
+    name is a plain string, so it may contain spaces, unlike a
+    function name. The parser lowers the block to a synthetic
+    function named ``func_name`` (``_newr_test_<n>``, in source
+    order) with the same body, so the resolver, checker, and all
+    seven emitters handle it exactly like a `fn` with no params
+    and no return value. The display name is what the test runner
+    reports; the synthetic name is what the harness calls. User
+    code can never use that name: the resolver rejects the
+    `_newr_` prefix (E3001).
+    """
+
+    name: str = ""
+    body: list[Stmt] = field(default_factory=list)
+    func_name: str = ""
+
+
+@dataclass
 class FnDecl(Decl):
     name: str = ""
     params: list[Param] = field(default_factory=list)
@@ -688,10 +726,21 @@ class StoreDecl(Decl):
 
 @dataclass
 class Program(Node):
+    # `///` file header (SPEC.md section 6, M6): the leading doc
+    # block at the top of the file, followed by a blank line (or
+    # end of file). None when the file has no header. Filled in by
+    # the parser; a block directly above the first item is that
+    # item's doc instead, not the file header.
+    file_doc: str | None = None
     imports: list[Import] = field(default_factory=list)
     structs: list[StructDecl] = field(default_factory=list)
     enums: list[EnumDecl] = field(default_factory=list)
     functions: list[FnDecl] = field(default_factory=list)
+    # Named test blocks, in source order (SPEC.md section 8.7).
+    # Each block also has a synthetic FnDecl in `functions`
+    # (same body, name `_newr_test_<n>`), which is what the
+    # resolver, checker, and emitters see.
+    test_blocks: list[TestBlock] = field(default_factory=list)
     bot: BotDecl | None = None
     commands: list[CommandDecl] = field(default_factory=list)
     events: list[EventDecl] = field(default_factory=list)

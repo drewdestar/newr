@@ -316,6 +316,21 @@ class _CSEmitter:
         self.uses_discord: bool = False
         self.discord_names: set[str] = set()
         self.uses_sqlite: bool = False
+        # This file uses `db.*` (set by `_emit_db_call`) — the
+        # `NewrDb` helper class is emitted into the file only then.
+        self._file_uses_db: bool = False
+        self.uses_http: bool = False
+        # This file uses `http.*` (set by `_emit_http_call`), the
+        # `NewrHttp` helper class is emitted into the file only then.
+        self._file_uses_http: bool = False
+        self.uses_json: bool = False
+        # This file uses `json.*` (set by `_emit_json_call`), the
+        # `NewrJson` helper class is emitted into the file only then.
+        self._file_uses_json: bool = False
+        self.uses_ui: bool = False
+        # This file uses `ui.*` (set by `_emit_ui_call`), the
+        # `NewrUi` helper class is emitted into the file only then.
+        self._file_uses_ui: bool = False
         self.rt_helpers: set[str] = set()
         # Module-level declarations of the file being emitted.
         self.fns: dict[str, A.FnDecl] = {}
@@ -380,6 +395,18 @@ class _CSEmitter:
         # Whether the file being emitted is the entry file (set by
         # _emit_file_set before _emit_one).
         self._is_main_file = True
+        # The entry file's class name, for a file module (None on
+        # the entry file itself). A file module reads the shared
+        # `NewrUi` helper as `<root>.NewrUi` (M9 L2 twin of the rs
+        # E0308 fix): the helper lives once, in the entry file.
+        # Set by _emit_file_set when it creates sub-emitters.
+        self._root_stem: str | None = None
+        # Whether any file in the transitive import closure uses
+        # `ui.*` (M9 L2): the entry file emits `NewrUi` once when
+        # any file uses it, so a module's `<root>.NewrUi`
+        # reference resolves. Filled by _emit_file_set BEFORE the
+        # entry file is emitted.
+        self._closure_uses_ui: bool = False
 
     # ------------------------------------------------------------ errors
 
@@ -428,6 +455,30 @@ class _CSEmitter:
             return name + "_"
         return name
 
+    def _member_name(self, name: str, class_name: str) -> str:
+        """A member name inside class `class_name` (M9 L2): C#
+        forbids a member with the same name as its enclosing type
+        (CS0542), so a colliding name gets a trailing underscore
+        after keyword/reserved mangling. The definition site
+        (`_bind_module_level`, class `self.output_stem`) and every
+        cross-file use site (class = the imported file's stem)
+        compute the name from this one rule, so they agree."""
+        java = self._mangle(name)
+        if java == class_name:
+            java += "_"
+        return java
+
+    def _ui_ref(self) -> str:
+        """The `NewrUi` helper reference for this file (M9 L2):
+        bare on the entry file, `<root>.NewrUi` on a file module,
+        where `<root>` is the entry file's class. Every `NewrUi`
+        use (the Widget type, the constructors, `Render`, `Show`,
+        `Run`) goes through here, so all files share the one
+        Widget type emitted in the entry file."""
+        if self._root_stem is None:
+            return "NewrUi"
+        return f"{self._root_stem}.NewrUi"
+
     def _bind(self, name: str, type: Type | None = None,
               kind: str = "local", interp: str | None = None) -> _Binding:
         """Bind `name` in the current scope.
@@ -470,8 +521,14 @@ class _CSEmitter:
         fn `add` mangled to `add_` colliding with a user fn `add_`),
         a numeric suffix is appended. The checker forbids duplicate
         newr names, so a collision here only ever comes from
-        mangling."""
-        java = self._mangle(name)
+        mangling. A member named the same as its enclosing class
+        is also mangled (M9 L2, CS0542) — except an import binding,
+        which is not a member of the class (its java name is the
+        lookup key for `imported_modules`)."""
+        if kind in ("module", "file-module"):
+            java = self._mangle(name)
+        else:
+            java = self._member_name(name, self.output_stem)
         if java in self._module_used:
             n = 1
             while f"{java}_{n}" in self._module_used:
@@ -497,6 +554,18 @@ class _CSEmitter:
     def _need_sqlite(self):
         self.uses_sqlite = True
 
+    def _need_http(self):
+        self.uses_http = True
+        self._file_uses_http = True
+
+    def _need_json(self):
+        self.uses_json = True
+        self._file_uses_json = True
+
+    def _need_ui(self):
+        self.uses_ui = True
+        self._file_uses_ui = True
+
     def _render_imports(self) -> list[str]:
         """The `using` block: `System` and
         `System.Collections.Generic` are unconditional (emitted code
@@ -512,6 +581,31 @@ class _CSEmitter:
             lines.append("using System.Threading.Tasks;")
         if self.uses_sqlite:
             lines.append("using Microsoft.Data.Sqlite;")
+        if self.uses_http:
+            # HttpListener, HttpClient, threads, streams: stdlib only,
+            # no package reference is added for http/json.
+            lines.append("using System.Net;")
+            lines.append("using System.Net.Http;")
+            lines.append("using System.Net.Sockets;")
+            lines.append("using System.Threading;")
+            lines.append("using System.Threading.Tasks;")
+            lines.append("using System.IO;")
+        if self.uses_ui:
+            # Avalonia (the ui toolkit, SPEC.md section 12.8): the
+            # inline NewrUi helper builds controls in code, no XAML.
+            lines.append("using Avalonia;")
+            lines.append("using Avalonia.Controls;")
+            lines.append("using Avalonia.Controls.ApplicationLifetimes;")
+            lines.append("using Avalonia.Input;")
+            lines.append("using Avalonia.Layout;")
+            lines.append("using Avalonia.Themes.Fluent;")
+        if self.uses_http or self.uses_json or self.uses_ui:
+            # The inline NewrHttp/NewrJson helpers use JSON parsing,
+            # reflection for struct construction, and text encoding.
+            lines.append("using System.Text;")
+            lines.append("using System.Text.Json;")
+            lines.append("using System.Reflection;")
+            lines.append("using System.Globalization;")
         for ns in sorted(self.discord_names):
             lines.append(f"using {ns};")
         return lines
@@ -581,6 +675,16 @@ class _CSEmitter:
         if t.name == "object":
             # The union type of conflicting enum variant fields.
             return "object"
+        if t.name == "__unknown__":
+            # The checker leaves `__unknown__` params on a bare
+            # builtin used as a value (`let f = len`); it is not a
+            # real type. In a declaration position it must become
+            # the generic object, matching the generic fallback in
+            # _emit_builtin_value (type_model.newr, cs 74/75,
+            # 7 Nov). The first fix only patched the value
+            # expression; the field type is rendered here, so the
+            # build still failed until this was added.
+            return "object"
         if t.name == "error":
             return "NewrRt.NewrError"
         if t.name == "list":
@@ -601,6 +705,12 @@ class _CSEmitter:
         if t.name in ("user", "member", "guild", "channel", "role",
                       "interaction", "embed", "message"):
             return self._cs_entity_type(t.name)
+        if t.name == "Widget":
+            # The ui module's opaque value type (SPEC.md section
+            # 12.8): the Widget model class inside the inline
+            # NewrUi helper, emitted once in the entry file (M9
+            # L2) — a file module reads it as `<root>.NewrUi`.
+            return f"{self._ui_ref()}.Widget"
         # A struct or enum: the (possibly module-qualified) class.
         return self._struct_cs_name(t.name)
 
@@ -666,7 +776,7 @@ class _CSEmitter:
             for decl in list(sub.structs) + list(sub.enums):
                 if decl.name == name:
                     stem = self.imported_modules.get(bound, bound)
-                    return f"{stem}.{self._mangle(name)}"
+                    return f"{stem}.{self._member_name(name, stem)}"
         return self._mangle(name)
 
     # ------------------------------------------------------------ expressions
@@ -839,8 +949,14 @@ class _CSEmitter:
         # First-class builtin values: `len`/`min`/`max` as a value
         # are small lambdas. The cast type comes from the context
         # (fn_target) when known; the fallback forms are the
-        # generic ones (Object in, Long out).
-        cast = self._cs_fn_type(fn_target) if _is_fn(fn_target) else None
+        # generic ones (Object in, Long out). A bare builtin's type
+        # carries `__unknown__` params (the checker never resolves
+        # them without a call), and that is not a real type: fall
+        # back to the generic form instead of emitting `__unknown__`
+        # into the output (type_model.newr, cs 74/75, 7 Nov).
+        known = _is_fn(fn_target) and not any(
+            p.name == "__unknown__" for p in fn_target.params)
+        cast = self._cs_fn_type(fn_target) if known else None
         if name == "len":
             self._need_rt("lenOf")
             form = cast or "Func<object, long>"
@@ -855,7 +971,7 @@ class _CSEmitter:
             return (f"(({form}) ((a, b) => a < b ? b : a))",
                     _PREC["primary"])
         if name == "abs":
-            # int -> absLong, float -> Math.abs; the context type
+            # int -> absLong, float -> Math.Abs; the context type
             # decides (the fallback is the int form).
             if fn_target is not None and _is_fn(fn_target) and \
                     _is_float(fn_target.params[0]):
@@ -1023,14 +1139,19 @@ class _CSEmitter:
                     return expr, _PREC["primary"]
                 jsop = "==" if op == "==" else "!="
                 return f"{left} {jsop} {right}", prec
-            # Ordering: strings compare lexicographically
-            # (compareTo); numbers compare bare (autounboxing a
-            # boxed operand would NPE on null, but the checker only
-            # allows ordering on non-nullable values).
+            # Ordering: strings compare lexicographically by code
+            # point (NewrRt.StrCmp; string.CompareOrdinal compares
+            # UTF-16 code units, so an astral character sorts before
+            # U+FFFD, and the culture-sensitive CompareTo is wrong
+            # too); numbers compare bare (autounboxing a boxed
+            # operand would NPE on null, but the checker only allows
+            # ordering on non-nullable values).
             if _is_str(lt) or _is_str(rt):
+                self._need_rt("strCmp")
                 cmp = {"<": "< 0", "<=": "<= 0", ">": "> 0",
                        ">=": ">= 0"}[op]
-                return f"({left}.CompareTo({right}) {cmp})", prec
+                return (f"(NewrRt.StrCmp({left}, {right}) "
+                        f"{cmp})", prec)
             jsop = {"<": "<", "<=": "<=", ">": ">", ">=": ">="}[op]
             return f"{left} {jsop} {right}", prec
         # Arithmetic: the result type decides checked vs bare.
@@ -1106,7 +1227,9 @@ class _CSEmitter:
                 if binding is not None and binding.kind in (
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                       or obj.name in ("db", "http",
+                                                       "json", "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
                     # and the reference.
@@ -1296,7 +1419,9 @@ class _CSEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.CompareTo({b}) < 0 ? {a} : {b})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.StrCmp({a}, {b}) < 0 "
+                        f"? {a} : {b})",
                         _PREC["primary"])
             return f"({a} < {b} ? {a} : {b})", _PREC["primary"]
         if name == "max":
@@ -1304,7 +1429,9 @@ class _CSEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.CompareTo({b}) < 0 ? {b} : {a})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.StrCmp({a}, {b}) < 0 "
+                        f"? {b} : {a})",
                         _PREC["primary"])
             return f"({a} < {b} ? {b} : {a})", _PREC["primary"]
         if name == "abs":
@@ -1313,7 +1440,7 @@ class _CSEmitter:
             if _is_int(t):
                 self._need_rt("absLong")
                 return f"NewrRt.AbsLong({arg})", _PREC["primary"]
-            return f"Math.abs({arg})", _PREC["primary"]
+            return f"Math.Abs({arg})", _PREC["primary"]
         self._fail(f"internal error: cannot emit builtin `{name}`")
 
     def _emit_conversion(self, node: A.Call) -> tuple[str, int]:
@@ -1367,7 +1494,8 @@ class _CSEmitter:
         declaration comes from the imported module and the class
         lives under the module reference; the local form takes both
         from this file."""
-        prefix = (f"{ref}." if ref else "") + self._mangle(enum_name)
+        prefix = (f"{ref}." if ref else "") + self._member_name(
+            enum_name, ref if ref else self.output_stem)
         decl = decl if decl is not None else self.enums.get(enum_name)
         if decl is not None:
             fields = []
@@ -1488,7 +1616,7 @@ class _CSEmitter:
         imported = self._imported_enum(node)
         if imported is not None:
             ref, enum_name, variant, _decl = imported
-            return (f"{ref}.{self._mangle(enum_name)}."
+            return (f"{ref}.{self._member_name(enum_name, ref)}."
                     f"{self._mangle(variant)}", _PREC["primary"])
         obj_type = self._type_of(obj)
         t = self._type_of(node)
@@ -2249,12 +2377,26 @@ class _CSEmitter:
         fn_type = self._type_of(node)
         cast = fn_target if _is_fn(fn_target) else fn_type
         cast_text = self._cs_fn_type(cast)
+        # A `-> none` lambda is `Func<object>` in C# (there is no
+        # void-returning Func), and a void body does not convert
+        # to it — `() => Console.WriteLine(...)` is CS0029/CS1662
+        # (proven by probe: a plain `let h = fn() -> none:
+        # print("tapped")` failed to build). A none-returning
+        # lambda is therefore emitted as a block that runs the body
+        # as a statement and returns null. This is what makes ui
+        # handlers (`fn() -> none: print(...)`) compile at all.
+        ret_none = node.return_type is None or \
+            _is_none(node.return_type)
         if node.expr_body is not None:
             body, hoists = self._emit_expr_with_hoists(node.expr_body)
             self._fn_used = saved_used
             self._pop_scope()
             if not hoists:
-                arrow = f"({params_text}) => {body}"
+                if ret_none:
+                    arrow = (f"({params_text}) => {{ {body}; "
+                             f"return null; }}")
+                else:
+                    arrow = f"({params_text}) => {body}"
                 if fn_target is not None and _is_fn(fn_target):
                     return arrow, _PREC["primary"]
                 return f"(({cast_text}) ({arrow}))", _PREC["primary"]
@@ -2266,20 +2408,27 @@ class _CSEmitter:
             lines = [f"{cast_text} {name} = ({params_text}) => {{"]
             for h in hoists:
                 lines.append("  " + h)
-            lines.append(f"  return {body};")
+            if ret_none:
+                lines.append(f"  {body};")
+                lines.append("  return null;")
+            else:
+                lines.append(f"  return {body};")
             lines.append("};")
             self._hoists_add(lines)
             return name, _PREC["primary"]
         # Block body: hoist a const arrow.
         name = self._new_lambda_name()
         self._fn_ctx.append({"return_type": node.return_type,
-                             "ensures": [], "in_handler": False})
+                             "ensures": [], "in_handler": False,
+                             "in_lambda": True})
         body_lines = self._emit_block(node.body or [], 1)
         self._fn_ctx.pop()
         self._fn_used = saved_used
         self._pop_scope()
         lines = [f"{cast_text} {name} = ({params_text}) => {{"]
         lines.extend(body_lines if body_lines else ["  ;"])
+        if ret_none:
+            lines.append("  return null;")
         lines.append("};")
         self._hoists_add(lines)
         return name, _PREC["primary"]
@@ -2765,6 +2914,11 @@ class _CSEmitter:
         is_void = ret_type is None or _is_none(ret_type)
         if stmt.value is None:
             if not ensures:
+                if ctx.get("in_lambda") and is_void:
+                    # A bare `return;` inside a block-body lambda
+                    # whose type is Func<object>: a void return does
+                    # not convert, so return null instead.
+                    return [f"{p}return null;"]
                 return [f"{p}return;"]
             lines = [f"{p}_newrResult = null;"]
             lines.extend(self._ensures_check_lines(ensures, indent))
@@ -3129,11 +3283,11 @@ class _CSEmitter:
                         for kname, value, _span in node.kwargs:
                             values[kname] = self.emit_expr(value, 0)
                         parts = [values[f] for f in order if f in values]
-                        return (f"new {ref}.{self._mangle(name)}"
+                        return (f"new {ref}.{self._member_name(name, ref)}"
                                 f"({', '.join(parts)})", _PREC["primary"])
             args = [self.emit_expr(a, 0) for a in node.args]
             kwargs = self._emit_module_kwargs(node, sub)
-            return (f"{ref}.{self._mangle(name)}"
+            return (f"{ref}.{self._member_name(name, ref)}"
                     f"({', '.join(args + kwargs)})", _PREC["primary"])
         real = binding.module or binding.java
         if real == "file":
@@ -3149,6 +3303,17 @@ class _CSEmitter:
                         f"({self.emit_expr(node.args[0], 0)})",
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
+        if real == "db":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_db_call(node, args)
+        if real == "http":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_http_call(node, args)
+        if real == "json":
+            args = [self.emit_expr(a, 0) for a in node.args]
+            return self._emit_json_call(node, args)
+        if real == "ui":
+            return self._emit_ui_call(node)
         args = [self.emit_expr(a, 0) for a in node.args]
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
@@ -3222,6 +3387,1828 @@ class _CSEmitter:
                 return f"NewrRt.EnvGet({args[0]})", _PREC["primary"]
         self._fail(f"module `{real}` has no function `{name}`")
 
+    def _emit_db_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`db.*` calls (SPEC.md section 12.5): the helpers live in
+        the `NewrDb` class emitted into this file (see
+        `_emit_db_class`) — inline, not in newr_rt.cs, because the
+        runtime file is dependency-free and a program that never
+        uses `db` must not need the Sqlite package. Handles are
+        longs, fd-style. The checker (db_check) has already
+        validated the call, so the arity here is trusted.
+        `db.query` maps each converted `object[]` row to the row
+        struct through `QueryAs<T>`."""
+        name = node.func.name
+        self._need_sqlite()
+        self._need_rt("NewrError")
+        self._file_uses_db = True
+        if name == "open":
+            return f"NewrDb.Open({args[0]})", _PREC["primary"]
+        if name == "exec":
+            rest = ", ".join(args[2:])
+            if rest:
+                return (f"NewrDb.Exec({args[0]}, {args[1]}, {rest})",
+                        _PREC["primary"])
+            return f"NewrDb.Exec({args[0]}, {args[1]})", _PREC["primary"]
+        if name == "query":
+            cs_struct, decl = self._db_row_struct(node)
+            names = [_cs_str(f.name) for f in decl.fields]
+            types = [_cs_str(self._db_field_type(f.type))
+                     for f in decl.fields]
+            casts = ", ".join(
+                f"({self._cs_type(f.type)}) row[{i}]"
+                for i, f in enumerate(decl.fields))
+            names_lit = "new string[] {" + ", ".join(names) + "}"
+            types_lit = "new string[] {" + ", ".join(types) + "}"
+            rest = ", ".join(args[2:])
+            return (f"NewrDb.QueryAs<{cs_struct}>({args[0]}, {args[1]}, "
+                    f"new object[] {{{rest}}}, {names_lit}, {types_lit}, "
+                    f"row => new {cs_struct}({casts}))",
+                    _PREC["primary"])
+        if name == "begin":
+            return f"NewrDb.Begin({args[0]})", _PREC["primary"]
+        if name == "commit":
+            return f"NewrDb.Commit({args[0]})", _PREC["primary"]
+        if name == "rollback":
+            return f"NewrDb.Rollback({args[0]})", _PREC["primary"]
+        if name == "last_id":
+            return f"NewrDb.LastId({args[0]})", _PREC["primary"]
+        if name == "close":
+            return f"NewrDb.Close({args[0]})", _PREC["primary"]
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (C# constructor, decl) of the row struct for a
+        `db.query` call. The row type comes from `node.expr_type`,
+        set by db_check to `list[Row]`. A struct from an imported
+        file module resolves to its qualified class name."""
+        t = self._type_of(node)
+        if t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._struct_cs_name(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    return self._struct_cs_name(row_name), s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
+
+    # ------------------------------------------------------------ http/json
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring the Python emitter's `_struct_decl`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """C# source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7), mirroring the Python
+        emitter's `_shape_literal`: a scalar is `"int"` /
+        `"float"` / `"str"` / `"bool"` / `"none"`, a nullable is
+        `new object[] {"?", inner}`, a list is
+        `new object[] {"list", elem}`, a dict is
+        `new object[] {"dict", value}`, a struct is
+        `new object[] {"struct", Name, new object[] { new object[]
+        {field, shape}, ... }}` in declaration order, where Name
+        is the struct's short name (the runtime resolves it by
+        reflection). The runtime walks the shape for json.encode /
+        decode and for building the http request/response structs."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return ("new object[] {\"?\", "
+                    f"{self._shape_literal(inner)}}}")
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return _cs_str(t.name)
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail("internal: list type without one element "
+                           f"type: `{t}`")
+            return ("new object[] {\"list\", "
+                    f"{self._shape_literal(t.params[0])}}}")
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail("internal: dict type without two params: "
+                           f"`{t}`")
+            return ("new object[] {\"dict\", "
+                    f"{self._shape_literal(t.params[1])}}}")
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        short = t.name.rsplit(".", 1)[-1] if "." in t.name else t.name
+        fields = ", ".join(
+            "new object[] {" + _cs_str(f.name) + ", "
+            + self._shape_literal(f.type) + "}"
+            for f in decl.fields)
+        return ("new object[] {\"struct\", " + _cs_str(short)
+                + ", new object[] {" + fields + "}}")
+
+    def _http_handler_request_type(self, handler_arg: A.Expr) -> Type:
+        """The request struct type of a route handler: the parameter
+        type of an inline lambda, or the first parameter of the fn
+        type of a let-bound lambda variable (the checker tracks
+        let-bound lambdas the same way, in http_check._lambdas).
+        A named function is not a handler in M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and t.params:
+                    return t.params[0]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _emit_http_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`http.*` calls (SPEC.md section 12.6): the helpers live
+        in the `NewrHttp` class emitted into this file (see
+        `_emit_http_class`), inline, not in newr_rt.cs, because
+        the runtime file is dependency-free and a program that
+        never uses `http` must not need a new package. The checker
+        (http_check) has already validated the call, so the arity
+        here is trusted. Fetch calls carry the response struct
+        shape from `node.expr_type`, set by http_check; route calls
+        carry the request struct shape from the handler lambda's
+        parameter type."""
+        name = node.func.name
+        self._need_http()
+        self._need_rt("NewrError")
+        if name == "route":
+            req_type = self._http_handler_request_type(node.args[2])
+            shape = self._shape_literal(req_type)
+            return (f"NewrHttp.Route({args[0]}, {args[1]}, {args[2]}, "
+                    f"{shape})", _PREC["primary"])
+        if name == "serve":
+            return f"NewrHttp.Serve({', '.join(args)})", _PREC["primary"]
+        if name in ("get", "post", "request"):
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            resp_cs = self._cs_type(t)
+            if name == "get":
+                timeout = args[1] if len(args) > 1 else "10"
+                headers = args[2] if len(args) > 2 else "null"
+                return (f"({resp_cs}) NewrHttp.Get({args[0]}, {timeout}, "
+                        f"{headers}, {shape})", _PREC["primary"])
+            if name == "post":
+                timeout = args[2] if len(args) > 2 else "10"
+                headers = args[3] if len(args) > 3 else "null"
+                return (f"({resp_cs}) NewrHttp.Post({args[0]}, {args[1]}, "
+                        f"{timeout}, {headers}, {shape})",
+                        _PREC["primary"])
+            timeout = args[3] if len(args) > 3 else "10"
+            headers = args[4] if len(args) > 4 else "null"
+            return (f"({resp_cs}) NewrHttp.Request({args[0]}, {args[1]}, "
+                    f"{args[2]}, {timeout}, {headers}, {shape})",
+                    _PREC["primary"])
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`json.*` calls (SPEC.md section 12.7): the helpers live
+        in the `NewrJson` class emitted into this file (see
+        `_emit_json_class`). `json.encode` takes its shape from
+        the argument's static type; `json.decode` takes its shape
+        from `node.expr_type`, the expected type set by json_check."""
+        name = node.func.name
+        self._need_json()
+        self._need_rt("NewrError")
+        if name == "encode":
+            shape = self._shape_literal(self._type_of(node.args[0]))
+            return (f"NewrJson.Encode({args[0]}, {shape})",
+                    _PREC["primary"])
+        if name == "decode":
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            return (f"NewrJson.Decode<{self._cs_boxed_type(t)}>"
+                    f"({args[0]}, {shape})", _PREC["primary"])
+        self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): the helpers live
+        in the `NewrUi` class emitted into this file (see
+        `_emit_ui_class`), inline, not in newr_rt.cs, because the
+        runtime file is dependency-free and a program that never
+        uses `ui` must not need Avalonia. The checker (ui_check)
+        has already validated the call, so the arity here is
+        trusted. Constructors build a `NewrUi.Widget`; `render`
+        is the pure HTML core; `show` and `run` open the Avalonia
+        window. Handler arguments are the fn values the
+        call-site emitter already produced, with one C# wrinkle
+        Java does not have: a `void` method (a named `fn() ->
+        none`) and a `void` lambda body do NOT convert to
+        `Func<object>`, so a named function used as a handler is
+        wrapped in a lambda that calls it and returns null (the
+        inline-lambda case is fixed in `_emit_lambda` instead,
+        where every none-returning lambda is wrapped the same
+        way). A let-bound lambda variable already has the
+        `Func<object>` / `Func<string, object>` type, so it
+        passes through unwrapped; a named view function returns
+        a Widget, so its method group converts to
+        `Func<NewrUi.Widget>` directly."""
+        name = node.func.name
+        self._need_ui()
+        if name not in ("text", "button", "input", "list", "image",
+                        "row", "column", "render", "show", "run"):
+            self._fail(f"module `ui` has no function `{name}`")
+        # Handler argument index per call: button takes its
+        # handler second, input third, run takes the view first.
+        handler_idx = {"button": 1, "input": 2, "run": 0}.get(name)
+        args: list[str] = []
+        for i, arg in enumerate(node.args):
+            if i == handler_idx and isinstance(arg, A.Name):
+                binding = self._lookup(arg.name)
+                if binding is not None and binding.kind == "fn":
+                    # A named function as a handler or view: wrap
+                    # it, because a void method group does not
+                    # convert to Func<object>. The fn type's params
+                    # (all but the last, which is the return type)
+                    # give the wrapper's arity.
+                    fn_type = binding.type
+                    n_params = (len(fn_type.params) - 1
+                                if fn_type is not None
+                                and _is_fn(fn_type) else 0)
+                    params = [self._new_temp_name()
+                              for _ in range(n_params)]
+                    plist = ", ".join(params)
+                    target = self.emit_expr(arg, 0)
+                    if fn_type is not None and _is_fn(fn_type) \
+                            and _is_none(fn_type.params[-1]):
+                        args.append(
+                            f"({plist}) => {{ {target}({plist}); "
+                            f"return null; }}")
+                    else:
+                        args.append(
+                            f"({plist}) => {target}({plist})")
+                    continue
+            args.append(self.emit_expr(arg, 0))
+        method = {"text": "Text", "button": "Button",
+                  "input": "Input", "list": "List",
+                  "image": "Image", "row": "Row",
+                  "column": "Column", "render": "Render",
+                  "show": "Show", "run": "Run"}[name]
+        return (f"{self._ui_ref()}.{method}({', '.join(args)})",
+                _PREC["primary"])
+
+    def _emit_ui_class(self) -> list[str]:
+        """The `NewrUi` helper class, emitted into a file that uses
+        `ui.*` (at indent 1, nested in the program class). The
+        Widget model class plus the constructors, the pure HTML
+        render core (byte-identical to the Python reference in
+        newr_rt.py, SPEC.md section 12.8), and the Avalonia
+        window: `Show` builds one static window and blocks until
+        it closes; `Run` re-invokes the view after every handler
+        call and rebuilds the window content from the new tree.
+        The class is public, not private like NewrHttp/NewrJson:
+        Widget values leak into public signatures (a top-level
+        `let w: Widget` is a public static field, a `fn view()
+        -> Widget` is a public static method), and a private
+        nested type there is CS0052. The window is built in code
+        (no XAML files): the App subclass adds the Fluent theme
+        in Initialize and builds the window in
+        OnFrameworkInitializationCompleted. An image widget shows
+        a placeholder label with the URL (the Python reference
+        does the same; a load failure is not an error, SPEC.md
+        section 12.8 U6). State lives outside the view (a db
+        handle or an http backend); the view re-reads it each
+        time, so the handlers never capture mutable state."""
+        return [
+            "  public static class NewrUi {",
+            "    public sealed class Widget {",
+            "      public string Kind { get; }",
+            "      public string Text { get; }",
+            "      public string Label { get; }",
+            "      public Func<object> ButtonHandler { get; }",
+            "      public Func<string, object> InputHandler { get; }",
+            "      public string Placeholder { get; }",
+            "      public string Value { get; }",
+            "      public string Url { get; }",
+            "      public List<Widget> Children { get; }",
+            "",
+            "      private Widget(string kind, string text,",
+            "          string label, Func<object> buttonHandler,",
+            "          Func<string, object> inputHandler,",
+            "          string placeholder, string value, string url,",
+            "          List<Widget> children) {",
+            "        Kind = kind;",
+            "        Text = text;",
+            "        Label = label;",
+            "        ButtonHandler = buttonHandler;",
+            "        InputHandler = inputHandler;",
+            "        Placeholder = placeholder;",
+            "        Value = value;",
+            "        Url = url;",
+            "        Children = children;",
+            "      }",
+            "",
+            "      internal static Widget MakeText(string text) {",
+            "        return new Widget(\"text\", text, \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeButton(string label,",
+            "          Func<object> handler) {",
+            "        return new Widget(\"button\", \"\", label, handler,",
+            "            null, \"\", \"\", \"\", new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeInput(string placeholder,",
+            "          string value, Func<string, object> handler) {",
+            "        return new Widget(\"input\", \"\", \"\", null, handler,",
+            "            placeholder, value, \"\", new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeList(List<Widget> children) {",
+            "        return new Widget(\"list\", \"\", \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>(children));",
+            "      }",
+            "",
+            "      internal static Widget MakeImage(string url) {",
+            "        return new Widget(\"image\", \"\", \"\", null, null,",
+            "            \"\", \"\", url, new List<Widget>());",
+            "      }",
+            "",
+            "      internal static Widget MakeRow(List<Widget> children) {",
+            "        return new Widget(\"row\", \"\", \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>(children));",
+            "      }",
+            "",
+            "      internal static Widget MakeColumn(",
+            "          List<Widget> children) {",
+            "        return new Widget(\"column\", \"\", \"\", null, null,",
+            "            \"\", \"\", \"\", new List<Widget>(children));",
+            "      }",
+            "    }",
+            "",
+            "    public static Widget Text(string text) {",
+            "      return Widget.MakeText(text);",
+            "    }",
+            "",
+            "    public static Widget Button(string label,",
+            "        Func<object> handler) {",
+            "      return Widget.MakeButton(label, handler);",
+            "    }",
+            "",
+            "    public static Widget Input(string placeholder,",
+            "        string value, Func<string, object> handler) {",
+            "      return Widget.MakeInput(placeholder, value, handler);",
+            "    }",
+            "",
+            "    public static Widget List(List<Widget> children) {",
+            "      return Widget.MakeList(children);",
+            "    }",
+            "",
+            "    public static Widget Image(string url) {",
+            "      return Widget.MakeImage(url);",
+            "    }",
+            "",
+            "    public static Widget Row(List<Widget> children) {",
+            "      return Widget.MakeRow(children);",
+            "    }",
+            "",
+            "    public static Widget Column(List<Widget> children) {",
+            "      return Widget.MakeColumn(children);",
+            "    }",
+            "",
+            "    public static string Escape(string s) {",
+            "      return s.Replace(\"&\", \"&amp;\").Replace(\"<\", \"&lt;\")",
+            "          .Replace(\">\", \"&gt;\").Replace(\"\\\"\", \"&quot;\");",
+            "    }",
+            "",
+            "    public static string Render(Widget w) {",
+            "      int buttons = 0;",
+            "      int inputs = 0;",
+            "      return RenderWidget(w, ref buttons, ref inputs);",
+            "    }",
+            "",
+            "    private static string RenderWidget(Widget w,",
+            "        ref int buttons, ref int inputs) {",
+            "      switch (w.Kind) {",
+            "        case \"text\":",
+            "          return \"<p>\" + Escape(w.Text) + \"</p>\";",
+            "        case \"button\": {",
+            "          int n = buttons++;",
+            "          return \"<button data-action=\\\"\" + n + \"\\\">\"",
+            "              + Escape(w.Label) + \"</button>\";",
+            "        }",
+            "        case \"input\": {",
+            "          int n = inputs++;",
+            "          return \"<input placeholder=\\\"\"",
+            "              + Escape(w.Placeholder) + \"\\\" value=\\\"\"",
+            "              + Escape(w.Value) + \"\\\" data-input=\\\"\"",
+            "              + n + \"\\\">\";",
+            "        }",
+            "        case \"list\": {",
+            "          StringBuilder sb = new StringBuilder();",
+            "          sb.Append(\"<ul>\");",
+            "          foreach (Widget c in w.Children) {",
+            "            sb.Append(\"<li>\");",
+            "            sb.Append(RenderWidget(c, ref buttons,",
+            "                ref inputs));",
+            "            sb.Append(\"</li>\");",
+            "          }",
+            "          sb.Append(\"</ul>\");",
+            "          return sb.ToString();",
+            "        }",
+            "        case \"image\":",
+            "          return \"<img src=\\\"\" + Escape(w.Url)",
+            "              + \"\\\" alt=\\\"\\\">\";",
+            "        case \"row\": {",
+            "          StringBuilder sb = new StringBuilder();",
+            "          sb.Append(\"<div data-layout=\\\"row\\\">\");",
+            "          foreach (Widget c in w.Children) {",
+            "            sb.Append(RenderWidget(c, ref buttons,",
+            "                ref inputs));",
+            "          }",
+            "          sb.Append(\"</div>\");",
+            "          return sb.ToString();",
+            "        }",
+            "        case \"column\": {",
+            "          StringBuilder sb = new StringBuilder();",
+            "          sb.Append(\"<div data-layout=\\\"column\\\">\");",
+            "          foreach (Widget c in w.Children) {",
+            "            sb.Append(RenderWidget(c, ref buttons,",
+            "                ref inputs));",
+            "          }",
+            "          sb.Append(\"</div>\");",
+            "          return sb.ToString();",
+            "        }",
+            "        default:",
+            "          throw new InvalidOperationException(",
+            "              \"ui: unknown widget kind \" + w.Kind);",
+            "      }",
+            "    }",
+            "",
+            "    private static Func<Widget> _view;",
+            "    private static Widget _root;",
+            "    private static Window _window;",
+            "    private static bool _rerendering;",
+            "",
+            "    public static void Show(Widget root) {",
+            "      _view = null;",
+            "      _root = root;",
+            "      AppBuilder.Configure<UiApp>().UsePlatformDetect()",
+            "          .StartWithClassicDesktopLifetime(",
+            "              Array.Empty<string>());",
+            "    }",
+            "",
+            "    public static void Run(Func<Widget> view) {",
+            "      _view = view;",
+            "      _root = null;",
+            "      AppBuilder.Configure<UiApp>().UsePlatformDetect()",
+            "          .StartWithClassicDesktopLifetime(",
+            "              Array.Empty<string>());",
+            "    }",
+            "",
+            "    private static void Rerender() {",
+            "      if (_window == null || _view == null || _rerendering) {",
+            "        return;",
+            "      }",
+            "      _rerendering = true;",
+            "      try {",
+            "        _window.Content = Build(_view(), Rerender);",
+            "      } finally {",
+            "        _rerendering = false;",
+            "      }",
+            "    }",
+            "",
+            "    private static Control Build(Widget w, Action rerender) {",
+            "      switch (w.Kind) {",
+            "        case \"text\":",
+            "          return new TextBlock { Text = w.Text };",
+            "        case \"button\": {",
+            "          Button b = new Button { Content = w.Label };",
+            "          Func<object> handler = w.ButtonHandler;",
+            "          b.Click += (_, _) => {",
+            "            handler();",
+            "            if (rerender != null) {",
+            "              rerender();",
+            "            }",
+            "          };",
+            "          return b;",
+            "        }",
+            "        case \"input\": {",
+            "          TextBox t = new TextBox {",
+            "            PlaceholderText = w.Placeholder, Text = w.Value };",
+            "          Func<string, object> handler = w.InputHandler;",
+            "          t.KeyDown += (_, e) => {",
+            "            if (e.Key == Key.Return) {",
+            "              handler(t.Text ?? \"\");",
+            "              if (rerender != null) {",
+            "                rerender();",
+            "              }",
+            "            }",
+            "          };",
+            "          t.LostFocus += (_, _) => {",
+            "            handler(t.Text ?? \"\");",
+            "            if (rerender != null) {",
+            "              rerender();",
+            "            }",
+            "          };",
+            "          return t;",
+            "        }",
+            "        case \"list\": {",
+            "          StackPanel p = new StackPanel {",
+            "            Orientation = Orientation.Vertical };",
+            "          foreach (Widget c in w.Children) {",
+            "            p.Children.Add(Build(c, rerender));",
+            "          }",
+            "          return p;",
+            "        }",
+            "        case \"image\":",
+            "          return new TextBlock {",
+            "            Text = \"[image: \" + w.Url + \"]\" };",
+            "        case \"row\": {",
+            "          StackPanel p = new StackPanel {",
+            "            Orientation = Orientation.Horizontal };",
+            "          foreach (Widget c in w.Children) {",
+            "            p.Children.Add(Build(c, rerender));",
+            "          }",
+            "          return p;",
+            "        }",
+            "        case \"column\": {",
+            "          StackPanel p = new StackPanel {",
+            "            Orientation = Orientation.Vertical };",
+            "          foreach (Widget c in w.Children) {",
+            "            p.Children.Add(Build(c, rerender));",
+            "          }",
+            "          return p;",
+            "        }",
+            "        default:",
+            "          throw new InvalidOperationException(",
+            "              \"ui: unknown widget kind \" + w.Kind);",
+            "      }",
+            "    }",
+            "",
+            "    private sealed class UiApp : Application {",
+            "      public UiApp() {",
+            "      }",
+            "",
+            "      public override void Initialize() {",
+            "        Styles.Add(new FluentTheme());",
+            "      }",
+            "",
+            "      public override void OnFrameworkInitializationCompleted() {",
+            "        if (ApplicationLifetime",
+            "            is IClassicDesktopStyleApplicationLifetime desktop) {",
+            "          Window window = new Window {",
+            "            Title = \"newr\", Width = 400, Height = 300 };",
+            "          if (_view != null) {",
+            "            _window = window;",
+            "            window.Content = Build(_view(), Rerender);",
+            "          } else {",
+            "            window.Content = Build(_root, null);",
+            "          }",
+            "          desktop.MainWindow = window;",
+            "        }",
+            "        base.OnFrameworkInitializationCompleted();",
+            "      }",
+            "    }",
+            "  }",
+        ]
+
+    def _emit_db_class(self) -> list[str]:
+        """The `NewrDb` helper class, emitted into a file that uses
+        `db.*` (at indent 1, nested in the program class). The int
+        handle registry plus open/exec/query/begin/commit/rollback/
+        last_id/close over Microsoft.Data.Sqlite (the store's
+        library, 8.0.0 — the same sync API the store uses).
+        Conversion mirrors the Python `_db_value` (newr_rt.py) and
+        the Java `_dbValue` (newr_rt.java): NULL lands only in a
+        nullable field, `?` binds are positional (the Nth added
+        parameter binds the Nth `?`), bool binds as 0/1, a value
+        that cannot convert throws instead of silently producing
+        a wrong value. `Query` looks rows up by column NAME (a
+        missing column throws, extra columns are ignored)."""
+        return [
+            "  private static class NewrDb {",
+            "    private static readonly Dictionary<long, SqliteConnection> Conns = new();",
+            "    private static long NextId = 1;",
+            "",
+            "    private static SqliteConnection Conn(long handle) {",
+            "      if (!Conns.TryGetValue(handle, out SqliteConnection conn)) {",
+            "        throw new NewrRt.NewrError(\"db: unknown or closed handle \" + handle);",
+            "      }",
+            "      return conn;",
+            "    }",
+            "",
+            "    private static object BindArg(object value) {",
+            "      if (value == null) {",
+            "        return DBNull.Value;",
+            "      }",
+            "      if (value is bool b) {",
+            "        return b ? 1L : 0L;",
+            "      }",
+            "      return value;",
+            "    }",
+            "",
+            "    private static object DbValue(object value, string typeStr) {",
+            "      bool nullable = typeStr.EndsWith(\"?\");",
+            "      string baseType = nullable ? typeStr.Substring(0, typeStr.Length - 1) : typeStr;",
+            "      if (value == null || value is DBNull) {",
+            "        if (nullable) {",
+            "          return null;",
+            "        }",
+            "        throw new NewrRt.NewrError(\"db: NULL in non-nullable \" + baseType + \" field\");",
+            "      }",
+            "      switch (baseType) {",
+            "        case \"int\":",
+            "          if (value is bool) {",
+            "            throw new NewrRt.NewrError(\"db: cannot convert bool to int\");",
+            "          }",
+            "          if (value is long l) {",
+            "            return l;",
+            "          }",
+            "          if (value is double d) {",
+            "            if (d != Math.Floor(d) || d < (double) long.MinValue || d > (double) long.MaxValue) {",
+            "              throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to int\");",
+            "            }",
+            "            return (long) d;",
+            "          }",
+            "          if (value is string s) {",
+            "            if (long.TryParse(s.Trim(), out long parsed)) {",
+            "              return parsed;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to int\");",
+            "          }",
+            "          throw new NewrRt.NewrError(\"db: cannot convert \" + value.GetType().Name + \" to int\");",
+            "        case \"float\":",
+            "          if (value is bool) {",
+            "            throw new NewrRt.NewrError(\"db: cannot convert bool to float\");",
+            "          }",
+            "          if (value is long li) {",
+            "            return (double) li;",
+            "          }",
+            "          if (value is double dd) {",
+            "            return dd;",
+            "          }",
+            "          if (value is string ss) {",
+            "            if (double.TryParse(ss.Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsedF)) {",
+            "              return parsedF;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to float\");",
+            "          }",
+            "          throw new NewrRt.NewrError(\"db: cannot convert \" + value.GetType().Name + \" to float\");",
+            "        case \"str\":",
+            "          if (value is bool bb) {",
+            "            return bb ? \"true\" : \"false\";",
+            "          }",
+            "          if (value is string str) {",
+            "            return str;",
+            "          }",
+            "          return NewrRt.ToStr(value);",
+            "        case \"bool\":",
+            "          if (value is bool b2) {",
+            "            return b2;",
+            "          }",
+            "          if (value is long v) {",
+            "            if (v == 0) {",
+            "              return false;",
+            "            }",
+            "            if (v == 1) {",
+            "              return true;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to bool\");",
+            "          }",
+            "          if (value is double dv) {",
+            "            long w = (long) dv;",
+            "            if (w == 0) {",
+            "              return false;",
+            "            }",
+            "            if (w == 1) {",
+            "              return true;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to bool\");",
+            "          }",
+            "          if (value is string s2) {",
+            "            if (s2 == \"0\") {",
+            "              return false;",
+            "            }",
+            "            if (s2 == \"1\") {",
+            "              return true;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"db: cannot convert \" + value + \" to bool\");",
+            "          }",
+            "          throw new NewrRt.NewrError(\"db: cannot convert \" + value.GetType().Name + \" to bool\");",
+            "        default:",
+            "          throw new NewrRt.NewrError(\"db: unknown field type \" + typeStr);",
+            "      }",
+            "    }",
+            "",
+            "    private static SqliteCommand Prepare(SqliteConnection conn, string sql, object[] args) {",
+            "      string rewritten = RewritePlaceholders(sql, out int count);",
+            "      if (args.Length != count) {",
+            "        throw new NewrRt.NewrError(\"db: SQL has \" + count + \" `?` placeholder(s) but \" + args.Length + \" bound value(s)\");",
+            "      }",
+            "      SqliteCommand cmd = conn.CreateCommand();",
+            "      cmd.CommandText = rewritten;",
+            "      for (int i = 0; i < args.Length; i++) {",
+            "        cmd.Parameters.AddWithValue(\"?\" + (i + 1), BindArg(args[i]));",
+            "      }",
+            "      return cmd;",
+            "    }",
+            "",
+            "    private static string RewritePlaceholders(string sql, out int count) {",
+            "      // Microsoft.Data.Sqlite binds `?` only by number: an",
+            "      // unnamed `?` cannot take a named parameter (it errors",
+            "      // \"Must add values for the following parameters\"). So",
+            "      // each bare `?` outside quoted text becomes `?N`, and",
+            "      // the Nth argument binds `?N` — the same positional",
+            "      // rule the other targets get from their drivers for",
+            "      // free. A `?N` already in the SQL is kept as-is",
+            "      // (SQLite numbers a bare `?` one above the largest",
+            "      // number seen so far), and `?` inside single- or",
+            "      // double-quoted text is a literal question mark, not a",
+            "      // placeholder (the same rule as the checker's",
+            "      // `_count_placeholders` in db_check.py).",
+            "      var text = new System.Text.StringBuilder();",
+            "      int max = 0;",
+            "      bool inSingle = false;",
+            "      bool inDouble = false;",
+            "      int i = 0;",
+            "      while (i < sql.Length) {",
+            "        char c = sql[i];",
+            "        if (inSingle) {",
+            "          text.Append(c);",
+            "          if (c == '\\'') {",
+            "            if (i + 1 < sql.Length && sql[i + 1] == '\\'') {",
+            "              text.Append(sql[i + 1]);",
+            "              i += 2;",
+            "              continue;",
+            "            }",
+            "            inSingle = false;",
+            "          }",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (inDouble) {",
+            "          text.Append(c);",
+            "          if (c == '\"') {",
+            "            inDouble = false;",
+            "          }",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (c == '\\'') {",
+            "          inSingle = true;",
+            "          text.Append(c);",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (c == '\"') {",
+            "          inDouble = true;",
+            "          text.Append(c);",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        if (c == '?') {",
+            "          int j = i + 1;",
+            "          int num = 0;",
+            "          while (j < sql.Length && sql[j] >= '0' && sql[j] <= '9') {",
+            "            num = num * 10 + (sql[j] - '0');",
+            "            j++;",
+            "          }",
+            "          if (j > i + 1) {",
+            "            if (num > max) {",
+            "              max = num;",
+            "            }",
+            "            text.Append(sql.Substring(i, j - i));",
+            "            i = j;",
+            "            continue;",
+            "          }",
+            "          max++;",
+            "          text.Append(\"?\" + max);",
+            "          i++;",
+            "          continue;",
+            "        }",
+            "        text.Append(c);",
+            "        i++;",
+            "      }",
+            "      count = max;",
+            "      return text.ToString();",
+            "    }",
+            "",
+            "    public static long Open(string path) {",
+            "      SqliteConnection conn = new SqliteConnection(\"Data Source=\" + path);",
+            "      conn.Open();",
+            "      using (SqliteCommand cmd = conn.CreateCommand()) {",
+            "        cmd.CommandText = \"PRAGMA foreign_keys = ON\";",
+            "        cmd.ExecuteNonQuery();",
+            "        cmd.CommandText = \"PRAGMA busy_timeout = 5000\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "      long handle = NextId++;",
+            "      Conns[handle] = conn;",
+            "      return handle;",
+            "    }",
+            "",
+            "    public static long Exec(long handle, string sql, params object[] args) {",
+            "      using (SqliteCommand cmd = Prepare(Conn(handle), sql, args)) {",
+            "        int affected = cmd.ExecuteNonQuery();",
+            "        return affected >= 0 ? affected : 0;",
+            "      }",
+            "    }",
+            "",
+            "    public static List<object[]> Query(long handle, string sql, object[] args, string[] names, string[] types) {",
+            "      using (SqliteCommand cmd = Prepare(Conn(handle), sql, args)) {",
+            "        using (SqliteDataReader reader = cmd.ExecuteReader()) {",
+            "          List<object[]> rows = new();",
+            "          while (reader.Read()) {",
+            "            Dictionary<string, object> byName = new();",
+            "            for (int i = 0; i < reader.FieldCount; i++) {",
+            "              object v = reader.GetValue(i);",
+            "              byName[reader.GetName(i)] = v is DBNull ? null : v;",
+            "            }",
+            "            object[] row = new object[names.Length];",
+            "            for (int i = 0; i < names.Length; i++) {",
+            "              if (!byName.TryGetValue(names[i], out object raw)) {",
+            "                throw new NewrRt.NewrError(\"db: column '\" + names[i] + \"' missing from query result\");",
+            "              }",
+            "              row[i] = DbValue(raw, types[i]);",
+            "            }",
+            "            rows.Add(row);",
+            "          }",
+            "          return rows;",
+            "        }",
+            "      }",
+            "    }",
+            "",
+            "    public static List<T> QueryAs<T>(long handle, string sql, object[] args, string[] names, string[] types, Func<object[], T> map) {",
+            "      List<object[]> rows = Query(handle, sql, args, names, types);",
+            "      List<T> result = new();",
+            "      foreach (object[] row in rows) {",
+            "        result.Add(map(row));",
+            "      }",
+            "      return result;",
+            "    }",
+            "",
+            "    public static void Begin(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"BEGIN IMMEDIATE\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "    }",
+            "",
+            "    public static void Commit(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"COMMIT\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "    }",
+            "",
+            "    public static void Rollback(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"ROLLBACK\";",
+            "        cmd.ExecuteNonQuery();",
+            "      }",
+            "    }",
+            "",
+            "    public static long LastId(long handle) {",
+            "      using (SqliteCommand cmd = Conn(handle).CreateCommand()) {",
+            "        cmd.CommandText = \"SELECT last_insert_rowid()\";",
+            "        return (long) cmd.ExecuteScalar();",
+            "      }",
+            "    }",
+            "",
+            "    public static void Close(long handle) {",
+            "      SqliteConnection conn = Conn(handle);",
+            "      conn.Close();",
+            "      Conns.Remove(handle);",
+            "    }",
+            "  }",
+        ]
+
+    def _emit_json_class(self) -> list[str]:
+        """The `NewrJson` helper class, emitted into a file that uses
+        `json.*` (at indent 1, nested in the program class). Typed
+        JSON over System.Text.Json: the emitter passes a recursive
+        shape descriptor (see `_shape_literal`), the helper walks
+        it for both directions. Structs are built by reflection
+        from the struct name in the shape (the emitted struct
+        classes are nested in the program class, so a lookup by
+        name in the executing assembly finds them; field values
+        are read the same way, trying the plain field name then
+        the mangled name with a trailing underscore). Floats use
+        the shortest round-trip decimal with ".0" for integral
+        floats (the "R" format gives plain decimal inside the
+        pinned range; System.Text.Json would print "1" for 1.0).
+        Decode distinguishes int from float by the JSON syntax
+        (the raw text), so 1.0 into an int field always throws,
+        and an integer outside int64 throws. Duplicate keys keep
+        the last value, trailing data and empty input throw, a
+        missing struct field throws, an extra field is ignored,
+        null lands only in a nullable shape. Strings are written
+        as UTF-8 with no \\u escapes (UnsafeRelaxedJsonEscaping).
+        `BuildFromShape` / `FieldValue` are shared with NewrHttp:
+        they build a struct from plain (non-JSON) field values
+        and read one field back."""
+        return [
+            "  private static class NewrJson {",
+            "    private static readonly Dictionary<string, Type> StructCache = new Dictionary<string, Type>();",
+            "",
+            "    public static string Encode(object value, object shape) {",
+            "      StringBuilder sb = new StringBuilder();",
+            "      WriteValue(sb, value, shape);",
+            "      return sb.ToString();",
+            "    }",
+            "",
+            "    public static T Decode<T>(string text, object shape) {",
+            "      if (text == null) {",
+            "        throw new NewrRt.NewrError(\"json: decode takes a string\");",
+            "      }",
+            "      JsonElement root;",
+            "      try {",
+            "        using (JsonDocument doc = JsonDocument.Parse(text)) {",
+            "          root = doc.RootElement.Clone();",
+            "        }",
+            "      } catch (JsonException e) {",
+            "        throw new NewrRt.NewrError(\"json: invalid JSON: \" + e.Message);",
+            "      }",
+            "      return (T) ReadValue(root, shape);",
+            "    }",
+            "",
+            "    public static object BuildFromShape(object shape, Dictionary<string, object> values) {",
+            "      if (!(shape is object[] parts) || parts.Length != 3 || !Equals(parts[0], \"struct\")) {",
+            "        throw new NewrRt.NewrError(\"http: internal: expected a struct shape\");",
+            "      }",
+            "      object[] fields = (object[]) parts[2];",
+            "      object[] args = new object[fields.Length];",
+            "      for (int i = 0; i < fields.Length; i++) {",
+            "        object[] field = (object[]) fields[i];",
+            "        string name = (string) field[0];",
+            "        if (!values.TryGetValue(name, out object v)) {",
+            "          throw new NewrRt.NewrError(\"http: missing field \" + name);",
+            "        }",
+            "        args[i] = ConvertPlain(v, field[1]);",
+            "      }",
+            "      return BuildStruct((string) parts[1], args);",
+            "    }",
+            "",
+            "    public static object FieldValue(object obj, string fieldName) {",
+            "      if (obj == null) {",
+            "        throw new NewrRt.NewrError(\"json: missing field \" + fieldName);",
+            "      }",
+            "      Type t = obj.GetType();",
+            "      FieldInfo f = t.GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);",
+            "      if (f == null) {",
+            "        f = t.GetField(fieldName + \"_\", BindingFlags.Public | BindingFlags.Instance);",
+            "      }",
+            "      if (f == null) {",
+            "        throw new NewrRt.NewrError(\"json: missing field \" + fieldName);",
+            "      }",
+            "      return f.GetValue(obj);",
+            "    }",
+            "",
+            "    private static string FmtDouble(double d) {",
+            "      if (double.IsNaN(d) || double.IsInfinity(d)) {",
+            "        throw new NewrRt.NewrError(\"json: cannot encode a non-finite float\");",
+            "      }",
+            "      string s = d.ToString(\"R\", CultureInfo.InvariantCulture);",
+            "      if (s.IndexOf('.') < 0 && s.IndexOf('E') < 0 && s.IndexOf('e') < 0) {",
+            "        s += \".0\";",
+            "      }",
+            "      return s;",
+            "    }",
+            "",
+            "    private static string Quote(string s) {",
+            "      return JsonSerializer.Serialize(s, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });",
+            "    }",
+            "",
+            "    private static Type FindStruct(string name) {",
+            "      if (StructCache.TryGetValue(name, out Type found)) {",
+            "        return found;",
+            "      }",
+            "      foreach (Type t in Assembly.GetExecutingAssembly().GetTypes()) {",
+            "        if (t.Name == name) {",
+            "          StructCache[name] = t;",
+            "          return t;",
+            "        }",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown struct \" + name);",
+            "    }",
+            "",
+            "    private static object BuildStruct(string name, object[] args) {",
+            "      Type t = FindStruct(name);",
+            "      try {",
+            "        return Activator.CreateInstance(t, args);",
+            "      } catch (Exception e) {",
+            "        throw new NewrRt.NewrError(\"json: cannot build \" + name + \": \" + e.Message);",
+            "      }",
+            "    }",
+            "",
+            "    private static Type TypeForShape(object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": return typeof(long);",
+            "          case \"float\": return typeof(double);",
+            "          case \"str\": return typeof(string);",
+            "          case \"bool\": return typeof(bool);",
+            "          case \"none\": return typeof(object);",
+            "          default: throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        Type inner = TypeForShape(parts[1]);",
+            "        if (inner == typeof(long)) {",
+            "          return typeof(long?);",
+            "        }",
+            "        if (inner == typeof(double)) {",
+            "          return typeof(double?);",
+            "        }",
+            "        if (inner == typeof(bool)) {",
+            "          return typeof(bool?);",
+            "        }",
+            "        return inner;",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        return typeof(List<>).MakeGenericType(TypeForShape(parts[1]));",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        return typeof(Dictionary<,>).MakeGenericType(typeof(string), TypeForShape(parts[1]));",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        return FindStruct((string) parts[1]);",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "",
+            "    private static void WriteValue(StringBuilder sb, object value, object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": {",
+            "            if (value is bool) {",
+            "              throw new NewrRt.NewrError(\"json: expected int, got bool\");",
+            "            }",
+            "            if (value is long l) {",
+            "              sb.Append(l.ToString(CultureInfo.InvariantCulture));",
+            "              return;",
+            "            }",
+            "            if (value is int iv) {",
+            "              sb.Append(iv.ToString(CultureInfo.InvariantCulture));",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected int\");",
+            "          }",
+            "          case \"float\": {",
+            "            if (value is bool) {",
+            "              throw new NewrRt.NewrError(\"json: expected float, got bool\");",
+            "            }",
+            "            if (value is double d) {",
+            "              sb.Append(FmtDouble(d));",
+            "              return;",
+            "            }",
+            "            if (value is long lv) {",
+            "              sb.Append(FmtDouble((double) lv));",
+            "              return;",
+            "            }",
+            "            if (value is int iv2) {",
+            "              sb.Append(FmtDouble((double) iv2));",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected float\");",
+            "          }",
+            "          case \"str\": {",
+            "            if (value is string s) {",
+            "              sb.Append(Quote(s));",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected str\");",
+            "          }",
+            "          case \"bool\": {",
+            "            if (value is bool b) {",
+            "              sb.Append(b ? \"true\" : \"false\");",
+            "              return;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected bool\");",
+            "          }",
+            "          case \"none\": {",
+            "            if (value != null) {",
+            "              throw new NewrRt.NewrError(\"json: expected null\");",
+            "            }",
+            "            sb.Append(\"null\");",
+            "            return;",
+            "          }",
+            "          default:",
+            "            throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        if (value == null) {",
+            "          sb.Append(\"null\");",
+            "          return;",
+            "        }",
+            "        WriteValue(sb, value, parts[1]);",
+            "        return;",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        if (value is string) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        if (!(value is System.Collections.IEnumerable items)) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        sb.Append('[');",
+            "        bool first = true;",
+            "        foreach (object item in items) {",
+            "          if (!first) {",
+            "            sb.Append(',');",
+            "          }",
+            "          first = false;",
+            "          WriteValue(sb, item, parts[1]);",
+            "        }",
+            "        sb.Append(']');",
+            "        return;",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        if (!(value is System.Collections.IDictionary dict)) {",
+            "          throw new NewrRt.NewrError(\"json: expected dict\");",
+            "        }",
+            "        sb.Append('{');",
+            "        bool first = true;",
+            "        foreach (System.Collections.DictionaryEntry entry in dict) {",
+            "          if (!(entry.Key is string key)) {",
+            "            throw new NewrRt.NewrError(\"json: dict keys must be str\");",
+            "          }",
+            "          if (!first) {",
+            "            sb.Append(',');",
+            "          }",
+            "          first = false;",
+            "          sb.Append(Quote(key));",
+            "          sb.Append(':');",
+            "          WriteValue(sb, entry.Value, parts[1]);",
+            "        }",
+            "        sb.Append('}');",
+            "        return;",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        sb.Append('{');",
+            "        object[] fields = (object[]) parts[2];",
+            "        for (int i = 0; i < fields.Length; i++) {",
+            "          object[] field = (object[]) fields[i];",
+            "          string name = (string) field[0];",
+            "          if (i > 0) {",
+            "            sb.Append(',');",
+            "          }",
+            "          sb.Append(Quote(name));",
+            "          sb.Append(':');",
+            "          WriteValue(sb, FieldValue(value, name), field[1]);",
+            "        }",
+            "        sb.Append('}');",
+            "        return;",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "",
+            "    private static object ReadValue(JsonElement el, object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": {",
+            "            if (el.ValueKind != JsonValueKind.Number) {",
+            "              throw new NewrRt.NewrError(\"json: expected int\");",
+            "            }",
+            "            string raw = el.GetRawText();",
+            "            if (raw.IndexOf('.') >= 0 || raw.IndexOf('e') >= 0 || raw.IndexOf('E') >= 0) {",
+            "              throw new NewrRt.NewrError(\"json: expected int, got a float\");",
+            "            }",
+            "            if (!el.TryGetInt64(out long v)) {",
+            "              throw new NewrRt.NewrError(\"json: integer outside int64 range\");",
+            "            }",
+            "            return v;",
+            "          }",
+            "          case \"float\": {",
+            "            if (el.ValueKind != JsonValueKind.Number) {",
+            "              throw new NewrRt.NewrError(\"json: expected float\");",
+            "            }",
+            "            string raw = el.GetRawText();",
+            "            if (raw.IndexOf('.') >= 0 || raw.IndexOf('e') >= 0 || raw.IndexOf('E') >= 0) {",
+            "              return el.GetDouble();",
+            "            }",
+            "            if (!el.TryGetInt64(out long v)) {",
+            "              throw new NewrRt.NewrError(\"json: integer too large for float\");",
+            "            }",
+            "            return (double) v;",
+            "          }",
+            "          case \"str\": {",
+            "            if (el.ValueKind != JsonValueKind.String) {",
+            "              throw new NewrRt.NewrError(\"json: expected str\");",
+            "            }",
+            "            return el.GetString();",
+            "          }",
+            "          case \"bool\": {",
+            "            if (el.ValueKind == JsonValueKind.True) {",
+            "              return true;",
+            "            }",
+            "            if (el.ValueKind == JsonValueKind.False) {",
+            "              return false;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected bool\");",
+            "          }",
+            "          case \"none\": {",
+            "            if (el.ValueKind != JsonValueKind.Null) {",
+            "              throw new NewrRt.NewrError(\"json: expected null\");",
+            "            }",
+            "            return null;",
+            "          }",
+            "          default:",
+            "            throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        if (el.ValueKind == JsonValueKind.Null) {",
+            "          return null;",
+            "        }",
+            "        return ReadValue(el, parts[1]);",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        if (el.ValueKind != JsonValueKind.Array) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        Type elemType = TypeForShape(parts[1]);",
+            "        Type listType = typeof(List<>).MakeGenericType(elemType);",
+            "        System.Collections.IList list = (System.Collections.IList) Activator.CreateInstance(listType);",
+            "        foreach (JsonElement item in el.EnumerateArray()) {",
+            "          list.Add(ReadValue(item, parts[1]));",
+            "        }",
+            "        return list;",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        if (el.ValueKind != JsonValueKind.Object) {",
+            "          throw new NewrRt.NewrError(\"json: expected dict\");",
+            "        }",
+            "        Type valueType = TypeForShape(parts[1]);",
+            "        Type dictType = typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType);",
+            "        System.Collections.IDictionary dict = (System.Collections.IDictionary) Activator.CreateInstance(dictType);",
+            "        foreach (JsonProperty prop in el.EnumerateObject()) {",
+            "          dict[prop.Name] = ReadValue(prop.Value, parts[1]);",
+            "        }",
+            "        return dict;",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        if (el.ValueKind != JsonValueKind.Object) {",
+            "          throw new NewrRt.NewrError(\"json: expected object\");",
+            "        }",
+            "        Dictionary<string, JsonElement> props = new Dictionary<string, JsonElement>();",
+            "        foreach (JsonProperty prop in el.EnumerateObject()) {",
+            "          props[prop.Name] = prop.Value;",
+            "        }",
+            "        object[] fields = (object[]) parts[2];",
+            "        object[] args = new object[fields.Length];",
+            "        for (int i = 0; i < fields.Length; i++) {",
+            "          object[] field = (object[]) fields[i];",
+            "          string name = (string) field[0];",
+            "          if (!props.TryGetValue(name, out JsonElement v)) {",
+            "            throw new NewrRt.NewrError(\"json: missing field \" + name);",
+            "          }",
+            "          args[i] = ReadValue(v, field[1]);",
+            "        }",
+            "        return BuildStruct((string) parts[1], args);",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "",
+            "    private static object ConvertPlain(object value, object shape) {",
+            "      if (shape is string scalar) {",
+            "        switch (scalar) {",
+            "          case \"int\": {",
+            "            if (value is long l) {",
+            "              return l;",
+            "            }",
+            "            if (value is int iv) {",
+            "              return (long) iv;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected int\");",
+            "          }",
+            "          case \"float\": {",
+            "            if (value is double d) {",
+            "              return d;",
+            "            }",
+            "            if (value is long lv) {",
+            "              return (double) lv;",
+            "            }",
+            "            if (value is int iv2) {",
+            "              return (double) iv2;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected float\");",
+            "          }",
+            "          case \"str\": {",
+            "            if (value is string s) {",
+            "              return s;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected str\");",
+            "          }",
+            "          case \"bool\": {",
+            "            if (value is bool b) {",
+            "              return b;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected bool\");",
+            "          }",
+            "          case \"none\": {",
+            "            if (value == null) {",
+            "              return null;",
+            "            }",
+            "            throw new NewrRt.NewrError(\"json: expected null\");",
+            "          }",
+            "          default:",
+            "            throw new NewrRt.NewrError(\"json: unknown shape \" + scalar);",
+            "        }",
+            "      }",
+            "      object[] parts = (object[]) shape;",
+            "      string kind = (string) parts[0];",
+            "      if (kind == \"?\") {",
+            "        if (value == null) {",
+            "          return null;",
+            "        }",
+            "        return ConvertPlain(value, parts[1]);",
+            "      }",
+            "      if (kind == \"list\") {",
+            "        if (value is string) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        if (!(value is System.Collections.IEnumerable items)) {",
+            "          throw new NewrRt.NewrError(\"json: expected list\");",
+            "        }",
+            "        Type elemType = TypeForShape(parts[1]);",
+            "        Type listType = typeof(List<>).MakeGenericType(elemType);",
+            "        System.Collections.IList list = (System.Collections.IList) Activator.CreateInstance(listType);",
+            "        foreach (object item in items) {",
+            "          list.Add(ConvertPlain(item, parts[1]));",
+            "        }",
+            "        return list;",
+            "      }",
+            "      if (kind == \"dict\") {",
+            "        if (!(value is System.Collections.IDictionary source)) {",
+            "          throw new NewrRt.NewrError(\"json: expected dict\");",
+            "        }",
+            "        Type valueType = TypeForShape(parts[1]);",
+            "        Type dictType = typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType);",
+            "        System.Collections.IDictionary dict = (System.Collections.IDictionary) Activator.CreateInstance(dictType);",
+            "        foreach (System.Collections.DictionaryEntry entry in source) {",
+            "          dict[(string) entry.Key] = ConvertPlain(entry.Value, parts[1]);",
+            "        }",
+            "        return dict;",
+            "      }",
+            "      if (kind == \"struct\") {",
+            "        if (!(value is System.Collections.IDictionary fields)) {",
+            "          throw new NewrRt.NewrError(\"json: expected object\");",
+            "        }",
+            "        object[] fieldShapes = (object[]) parts[2];",
+            "        object[] args = new object[fieldShapes.Length];",
+            "        for (int i = 0; i < fieldShapes.Length; i++) {",
+            "          object[] field = (object[]) fieldShapes[i];",
+            "          string name = (string) field[0];",
+            "          if (!fields.Contains(name)) {",
+            "            throw new NewrRt.NewrError(\"json: missing field \" + name);",
+            "          }",
+            "          args[i] = ConvertPlain(fields[name], field[1]);",
+            "        }",
+            "        return BuildStruct((string) parts[1], args);",
+            "      }",
+            "      throw new NewrRt.NewrError(\"json: unknown shape\");",
+            "    }",
+            "  }",
+        ]
+
+    def _emit_http_class(self) -> list[str]:
+        """The `NewrHttp` helper class, emitted into a file that uses
+        `http.*` (at indent 1, nested in the program class). The
+        server is System.Net.HttpListener (one thread per request),
+        the client is System.Net.Http.HttpClient, JSON goes through
+        NewrJson. Routes are exact-match only; no route, or a method
+        mismatch, returns 404 with an empty body. The server reads
+        the whole body before calling the handler; a non-UTF-8 body,
+        a handler exception, or an out-of-range status surfaces as
+        500 with an empty body and the server stays alive. Serve
+        prints `listening on <host>:<port>` as its first line (the
+        real port when 0: HttpListener rejects port 0 in a prefix,
+        so a TcpListener probe allocates the ephemeral port first)
+        and blocks forever. Query strings parse into dict[str, str]
+        with the last value winning for a repeated key, "+" as a
+        space, and %XX as UTF-8 bytes. Fetch validates the method,
+        the timeout (whole seconds, default 10, connect plus body),
+        the URL (http/https, a host, no userinfo), and the default
+        localhost allowlist (localhost, 127.0.0.1) only; the manifest
+        allowlist is a static checker concern. POST/request set
+        Content-Type: application/json unless the program sets one;
+        GET sets none. A 4xx/5xx status is a response struct, not a
+        throw; an unreachable host, a timeout, a bad URL, or a
+        disallowed host throws NewrError. The fetch connects through
+        a SocketsHttpHandler whose ConnectCallback opens an explicit
+        IPv4 socket: the handler default (a dual-mode socket) has
+        its connect redirected to the VM egress proxy, which cannot
+        reach a loopback server, while an IPv4 socket connects
+        direct (verified live on this VM)."""
+        return [
+            "  private static class NewrHttp {",
+            "    private static readonly string[] Methods = { \"GET\", \"POST\", \"PUT\", \"PATCH\", \"DELETE\", \"HEAD\", \"OPTIONS\" };",
+            "    private static readonly string[] Allowlist = { \"localhost\", \"127.0.0.1\" };",
+            "",
+            "    private sealed class RouteEntry {",
+            "      public string Method;",
+            "      public string Path;",
+            "      public Delegate Handler;",
+            "      public object Shape;",
+            "    }",
+            "",
+            "    private static readonly List<RouteEntry> Routes = new List<RouteEntry>();",
+            "",
+            "    public static void Route(string method, string path, Delegate handler, object shape) {",
+            "      if (method == null || Array.IndexOf(Methods, method) < 0) {",
+            "        throw new NewrRt.NewrError(\"http: invalid method \" + method);",
+            "      }",
+            "      if (path == null || !path.StartsWith(\"/\")) {",
+            "        throw new NewrRt.NewrError(\"http: route path must start with '/', got \" + path);",
+            "      }",
+            "      if (handler == null) {",
+            "        throw new NewrRt.NewrError(\"http: route handler must be callable\");",
+            "      }",
+            "      Routes.Add(new RouteEntry { Method = method, Path = path, Handler = handler, Shape = shape });",
+            "    }",
+            "",
+            "    public static void Serve(long port, string host = \"127.0.0.1\") {",
+            "      if (port < 0 || port > 65535) {",
+            "        throw new NewrRt.NewrError(\"http: port must be 0 to 65535, got \" + port);",
+            "      }",
+            "      if (host == null) {",
+            "        throw new NewrRt.NewrError(\"http: host must be a str\");",
+            "      }",
+            "      long realPort = port;",
+            "      if (realPort == 0) {",
+            "        realPort = FreePort(host);",
+            "      }",
+            "      string prefixHost = host == \"0.0.0.0\" ? \"+\" : host;",
+            "      HttpListener listener = new HttpListener();",
+            "      listener.Prefixes.Add(\"http://\" + prefixHost + \":\" + realPort + \"/\");",
+            "      listener.Start();",
+            "      Console.WriteLine(\"listening on \" + host + \":\" + realPort);",
+            "      Console.Out.Flush();",
+            "      while (true) {",
+            "        HttpListenerContext ctx = listener.GetContext();",
+            "        Thread t = new Thread(() => Handle(ctx));",
+            "        t.IsBackground = true;",
+            "        t.Start();",
+            "      }",
+            "    }",
+            "",
+            "    private static long FreePort(string host) {",
+            "      IPAddress addr;",
+            "      if (host == \"0.0.0.0\") {",
+            "        addr = IPAddress.Any;",
+            "      } else if (host == \"localhost\") {",
+            "        addr = IPAddress.Loopback;",
+            "      } else {",
+            "        try {",
+            "          addr = IPAddress.Parse(host);",
+            "        } catch (FormatException) {",
+            "          throw new NewrRt.NewrError(\"http: invalid host \" + host);",
+            "        }",
+            "      }",
+            "      TcpListener probe = new TcpListener(addr, 0);",
+            "      probe.Start();",
+            "      long port = ((IPEndPoint) probe.LocalEndpoint).Port;",
+            "      probe.Stop();",
+            "      return port;",
+            "    }",
+            "",
+            "    private static void Handle(HttpListenerContext ctx) {",
+            "      try {",
+            "        string path = ctx.Request.Url.AbsolutePath;",
+            "        Dictionary<string, string> query = ParseQuery(ctx.Request.Url.Query);",
+            "        byte[] raw;",
+            "        using (MemoryStream ms = new MemoryStream()) {",
+            "          ctx.Request.InputStream.CopyTo(ms);",
+            "          raw = ms.ToArray();",
+            "        }",
+            "        string body;",
+            "        try {",
+            "          body = new UTF8Encoding(false, true).GetString(raw);",
+            "        } catch (DecoderFallbackException) {",
+            "          Send(ctx, 500, null, new byte[0]);",
+            "          return;",
+            "        }",
+            "        Dictionary<string, string> headers = new Dictionary<string, string>();",
+            "        foreach (string key in ctx.Request.Headers.AllKeys) {",
+            "          headers[key] = ctx.Request.Headers[key];",
+            "        }",
+            "        RouteEntry found = null;",
+            "        foreach (RouteEntry r in Routes) {",
+            "          if (r.Method == ctx.Request.HttpMethod && r.Path == path) {",
+            "            found = r;",
+            "            break;",
+            "          }",
+            "        }",
+            "        if (found == null) {",
+            "          Send(ctx, 404, null, new byte[0]);",
+            "          return;",
+            "        }",
+            "        Dictionary<string, object> values = new Dictionary<string, object>();",
+            "        values[\"method\"] = ctx.Request.HttpMethod;",
+            "        values[\"path\"] = path;",
+            "        values[\"headers\"] = headers;",
+            "        values[\"body\"] = body;",
+            "        values[\"query\"] = query;",
+            "        object req = NewrJson.BuildFromShape(found.Shape, values);",
+            "        object resp;",
+            "        try {",
+            "          resp = found.Handler.DynamicInvoke(req);",
+            "        } catch (TargetInvocationException e) {",
+            "          throw e.InnerException ?? (Exception) e;",
+            "        }",
+            "        object statusObj = NewrJson.FieldValue(resp, \"status\");",
+            "        if (!(statusObj is long status)) {",
+            "          throw new NewrRt.NewrError(\"http: response status must be an int\");",
+            "        }",
+            "        if (status < 100 || status > 599) {",
+            "          throw new NewrRt.NewrError(\"http: response status must be 100 to 599, got \" + status);",
+            "        }",
+            "        object headersObj = NewrJson.FieldValue(resp, \"headers\");",
+            "        if (!(headersObj is Dictionary<string, string> respHeaders)) {",
+            "          throw new NewrRt.NewrError(\"http: response headers must be a dict\");",
+            "        }",
+            "        object bodyObj = NewrJson.FieldValue(resp, \"body\");",
+            "        if (!(bodyObj is string respBody)) {",
+            "          throw new NewrRt.NewrError(\"http: response body must be a str\");",
+            "        }",
+            "        Send(ctx, (int) status, respHeaders, Encoding.UTF8.GetBytes(respBody));",
+            "      } catch (Exception) {",
+            "        try {",
+            "          Send(ctx, 500, null, new byte[0]);",
+            "        } catch (Exception) {",
+            "        }",
+            "      } finally {",
+            "        try {",
+            "          ctx.Response.Close();",
+            "        } catch (Exception) {",
+            "        }",
+            "      }",
+            "    }",
+            "",
+            "    private static void Send(HttpListenerContext ctx, int status, Dictionary<string, string> headers, byte[] body) {",
+            "      HttpListenerResponse r = ctx.Response;",
+            "      r.StatusCode = status;",
+            "      if (headers != null) {",
+            "        foreach (KeyValuePair<string, string> kv in headers) {",
+            "          if (string.Equals(kv.Key, \"Content-Length\", StringComparison.OrdinalIgnoreCase)) {",
+            "            continue;",
+            "          }",
+            "          if (string.Equals(kv.Key, \"Content-Type\", StringComparison.OrdinalIgnoreCase)) {",
+            "            r.ContentType = kv.Value;",
+            "            continue;",
+            "          }",
+            "          try {",
+            "            r.Headers[kv.Key] = kv.Value;",
+            "          } catch (Exception) {",
+            "          }",
+            "        }",
+            "      }",
+            "      r.ContentLength64 = body.Length;",
+            "      if (ctx.Request.HttpMethod != \"HEAD\" && body.Length > 0) {",
+            "        r.OutputStream.Write(body, 0, body.Length);",
+            "      }",
+            "    }",
+            "",
+            "    private static Dictionary<string, string> ParseQuery(string rawQuery) {",
+            "      Dictionary<string, string> query = new Dictionary<string, string>();",
+            "      if (string.IsNullOrEmpty(rawQuery)) {",
+            "        return query;",
+            "      }",
+            "      string q = rawQuery.StartsWith(\"?\") ? rawQuery.Substring(1) : rawQuery;",
+            "      foreach (string pair in q.Split('&')) {",
+            "        if (pair.Length == 0) {",
+            "          continue;",
+            "        }",
+            "        int eq = pair.IndexOf('=');",
+            "        string k = eq < 0 ? pair : pair.Substring(0, eq);",
+            "        string v = eq < 0 ? \"\" : pair.Substring(eq + 1);",
+            "        query[DecodeQuery(k)] = DecodeQuery(v);",
+            "      }",
+            "      return query;",
+            "    }",
+            "",
+            "    private static bool IsHex(char c) {",
+            "      return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');",
+            "    }",
+            "",
+            "    private static int HexVal(char c) {",
+            "      if (c >= '0' && c <= '9') {",
+            "        return c - '0';",
+            "      }",
+            "      if (c >= 'a' && c <= 'f') {",
+            "        return c - 'a' + 10;",
+            "      }",
+            "      return c - 'A' + 10;",
+            "    }",
+            "",
+            "    private static string DecodeQuery(string s) {",
+            "      List<byte> bytes = new List<byte>();",
+            "      for (int i = 0; i < s.Length; i++) {",
+            "        char c = s[i];",
+            "        if (c == '+') {",
+            "          bytes.Add((byte) ' ');",
+            "        } else if (c == '%' && i + 2 < s.Length && IsHex(s[i + 1]) && IsHex(s[i + 2])) {",
+            "          bytes.Add((byte) (HexVal(s[i + 1]) * 16 + HexVal(s[i + 2])));",
+            "          i += 2;",
+            "        } else {",
+            "          foreach (byte b in Encoding.UTF8.GetBytes(new char[] { c })) {",
+            "            bytes.Add(b);",
+            "          }",
+            "        }",
+            "      }",
+            "      return Encoding.UTF8.GetString(bytes.ToArray());",
+            "    }",
+            "",
+            "    public static object Get(string url, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      return Fetch(\"GET\", url, null, timeout, headers, shape);",
+            "    }",
+            "",
+            "    public static object Post(string url, string body, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      return Fetch(\"POST\", url, body, timeout, headers, shape);",
+            "    }",
+            "",
+            "    public static object Request(string method, string url, string body, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      return Fetch(method, url, body, timeout, headers, shape);",
+            "    }",
+            "",
+            "    private static bool HasHeader(Dictionary<string, string> headers, string name) {",
+            "      if (headers == null) {",
+            "        return false;",
+            "      }",
+            "      foreach (string key in headers.Keys) {",
+            "        if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase)) {",
+            "          return true;",
+            "        }",
+            "      }",
+            "      return false;",
+            "    }",
+            "",
+            "    private static string HeaderValue(Dictionary<string, string> headers, string name) {",
+            "      foreach (KeyValuePair<string, string> kv in headers) {",
+            "        if (string.Equals(kv.Key, name, StringComparison.OrdinalIgnoreCase)) {",
+            "          return kv.Value;",
+            "        }",
+            "      }",
+            "      return null;",
+            "    }",
+            "",
+            "    private static Stream ConnectDirect(SocketsHttpConnectionContext ctx, CancellationToken ct) {",
+            "      // The connect for a fetch: an explicit IPv4 socket,",
+            "      // connected synchronously. A dual-mode socket (the",
+            "      // SocketsHttpHandler default) has its connect",
+            "      // redirected to the VM egress proxy, which cannot",
+            "      // reach a loopback server; an IPv4 socket connects",
+            "      // direct (verified live on this VM). The fetch",
+            "      // allowlist is loopback only, so IPv4 is always",
+            "      // right here. The proxy is off too: a loopback",
+            "      // fetch must never go through a proxy.",
+            "      Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);",
+            "      try {",
+            "        s.Connect(ctx.DnsEndPoint.Host, ctx.DnsEndPoint.Port);",
+            "      } catch (Exception) {",
+            "        s.Dispose();",
+            "        throw;",
+            "      }",
+            "      return new NetworkStream(s, true);",
+            "    }",
+            "",
+            "    public static object Fetch(string method, string url, string body, long timeout, Dictionary<string, string> headers, object shape) {",
+            "      if (method == null || Array.IndexOf(Methods, method) < 0) {",
+            "        throw new NewrRt.NewrError(\"http: invalid method \" + method);",
+            "      }",
+            "      if (timeout <= 0 || timeout > 2147483) {",
+            "        throw new NewrRt.NewrError(\"http: timeout must be a positive number of seconds, got \" + timeout);",
+            "      }",
+            "      if (url == null) {",
+            "        throw new NewrRt.NewrError(\"http: URL must be a str\");",
+            "      }",
+            "      Uri uri;",
+            "      try {",
+            "        uri = new Uri(url);",
+            "      } catch (UriFormatException e) {",
+            "        throw new NewrRt.NewrError(\"http: invalid URL \" + url + \": \" + e.Message);",
+            "      }",
+            "      if (uri.Scheme != \"http\" && uri.Scheme != \"https\") {",
+            "        throw new NewrRt.NewrError(\"http: fetch URL must start with http:// or https://, got \" + url);",
+            "      }",
+            "      if (string.IsNullOrEmpty(uri.Host)) {",
+            "        throw new NewrRt.NewrError(\"http: fetch URL has no host: \" + url);",
+            "      }",
+            "      if (!string.IsNullOrEmpty(uri.UserInfo)) {",
+            "        throw new NewrRt.NewrError(\"http: a URL must not carry userinfo; read the token from env and pass it as a header\");",
+            "      }",
+            "      string host = uri.Host.ToLowerInvariant();",
+            "      if (Array.IndexOf(Allowlist, host) < 0) {",
+            "        throw new NewrRt.NewrError(\"http: fetch host \" + host + \" is not on the allowlist (localhost, 127.0.0.1)\");",
+            "      }",
+            "      if (shape == null) {",
+            "        throw new NewrRt.NewrError(\"http: internal: fetch without a response shape\");",
+            "      }",
+            "      byte[] data = null;",
+            "      string contentType = null;",
+            "      if (body != null) {",
+            "        data = Encoding.UTF8.GetBytes(body);",
+            "        contentType = HasHeader(headers, \"Content-Type\") ? HeaderValue(headers, \"Content-Type\") : \"application/json\";",
+            "      }",
+            "      TimeSpan span;",
+            "      try {",
+            "        span = TimeSpan.FromSeconds((double) timeout);",
+            "      } catch (Exception) {",
+            "        throw new NewrRt.NewrError(\"http: timeout out of range: \" + timeout);",
+            "      }",
+            "      using (CancellationTokenSource cts = new CancellationTokenSource(span)) {",
+            "        SocketsHttpHandler handler = new SocketsHttpHandler();",
+            "        handler.UseProxy = false;",
+            "        handler.ConnectCallback = (ctx, ct) => new ValueTask<Stream>(ConnectDirect(ctx, ct));",
+            "        using (HttpClient client = new HttpClient(handler)) {",
+            "          client.Timeout = span;",
+            "          using (HttpRequestMessage req = new HttpRequestMessage(new HttpMethod(method), uri)) {",
+            "            if (headers != null) {",
+            "              foreach (KeyValuePair<string, string> kv in headers) {",
+            "                if (string.Equals(kv.Key, \"Content-Type\", StringComparison.OrdinalIgnoreCase)) {",
+            "                  continue;",
+            "                }",
+            "                req.Headers.TryAddWithoutValidation(kv.Key, kv.Value);",
+            "              }",
+            "            }",
+            "            if (data != null) {",
+            "              ByteArrayContent content = new ByteArrayContent(data);",
+            "              try {",
+            "                content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType);",
+            "              } catch (Exception) {",
+            "                throw new NewrRt.NewrError(\"http: invalid Content-Type: \" + contentType);",
+            "              }",
+            "              req.Content = content;",
+            "            } else if (HasHeader(headers, \"Content-Type\")) {",
+            "              req.Headers.TryAddWithoutValidation(\"Content-Type\", HeaderValue(headers, \"Content-Type\"));",
+            "            }",
+            "            HttpResponseMessage resp;",
+            "            try {",
+            "              resp = client.SendAsync(req, cts.Token).GetAwaiter().GetResult();",
+            "            } catch (Exception e) {",
+            "              throw new NewrRt.NewrError(\"http: fetch \" + method + \" \" + url + \" failed: \" + e.Message);",
+            "            }",
+            "            using (resp) {",
+            "              int status = (int) resp.StatusCode;",
+            "              Dictionary<string, string> respHeaders = new Dictionary<string, string>();",
+            "              foreach (var h in resp.Headers) {",
+            "                respHeaders[h.Key] = string.Join(\", \", h.Value);",
+            "              }",
+            "              foreach (var h in resp.Content.Headers) {",
+            "                respHeaders[h.Key] = string.Join(\", \", h.Value);",
+            "              }",
+            "              byte[] raw;",
+            "              try {",
+            "                raw = resp.Content.ReadAsByteArrayAsync(cts.Token).GetAwaiter().GetResult();",
+            "              } catch (Exception e) {",
+            "                throw new NewrRt.NewrError(\"http: fetch \" + method + \" \" + url + \" failed: \" + e.Message);",
+            "              }",
+            "              string text;",
+            "              try {",
+            "                text = new UTF8Encoding(false, true).GetString(raw);",
+            "              } catch (DecoderFallbackException) {",
+            "                throw new NewrRt.NewrError(\"http: response body is not valid UTF-8\");",
+            "              }",
+            "              Dictionary<string, object> values = new Dictionary<string, object>();",
+            "              values[\"status\"] = (long) status;",
+            "              values[\"headers\"] = respHeaders;",
+            "              values[\"body\"] = text;",
+            "              return NewrJson.BuildFromShape(shape, values);",
+            "            }",
+            "          }",
+            "        }",
+            "      }",
+            "    }",
+            "  }",
+        ]
+
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:
         """A named-module member used as a value: a constant, or a
@@ -3240,7 +5227,7 @@ class _CSEmitter:
                 # method, cast to its fn type.
                 cast_text = self._cs_fn_type(t)
                 return (f"(({cast_text}) {ref}."
-                        f"{self._mangle(node.name)})",
+                        f"{self._member_name(node.name, ref)})",
                         _PREC["primary"])
             # A module function as a first-class value.
             if real == "file" and node.name in ("read", "write", "append"):
@@ -3263,6 +5250,22 @@ class _CSEmitter:
         if real == "math" and node.name in ("pi", "e"):
             return ("Math.PI" if node.name == "pi" else "Math.E",
                     _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # `public static` field, through `_member_name` (a
+            # const named the same as its class is CS0542 too,
+            # M9 L2). A non-pub const never reaches here (the
+            # checker rejects it with E3005), but the `pub` check
+            # keeps the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.java)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    return (f"{ref}.{self._member_name(node.name, ref)}",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls
@@ -3730,7 +5733,7 @@ class _CSEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"// Generated by newr from {main_path}. Do not edit by hand.",
+            f"// Generated by newr from {main_path} — do not edit by hand.",
             f"// Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:
@@ -3831,20 +5834,49 @@ class _CSEmitter:
             if body:
                 body.append("")
             body.extend(self._emit_fn(decl, 1))
+        # Top-level statements are emitted first (into a temp
+        # list): a `db.*` call inside them — or inside a function
+        # above — sets `_file_uses_db`, and the `NewrDb` helper
+        # class is emitted only then, before Main() (or the static
+        # constructor for a file module).
+        stmt_lines = (self._emit_block(program.stmts, 2, top_level=True)
+                      if program.stmts else [])
+        if self._file_uses_db:
+            if body:
+                body.append("")
+            body.extend(self._emit_db_class())
+        if self._file_uses_http:
+            if body:
+                body.append("")
+            body.extend(self._emit_http_class())
+        if self._file_uses_json:
+            if body:
+                body.append("")
+            body.extend(self._emit_json_class())
+        if is_main and (self._file_uses_ui or self._closure_uses_ui):
+            # The `NewrUi` helper lives once, in the entry file
+            # (M9 L2): a file module reads it as
+            # `<root>.NewrUi` and never emits its own copy, so
+            # every file shares the one Widget type.
+            if body:
+                body.append("")
+            body.extend(self._emit_ui_class())
         # Top-level statements: Main() for the entry file, a static
         # constructor for a file module.
         if program.stmts:
             if body:
                 body.append("")
             if is_main:
+                if self._file_uses_ui or self._closure_uses_ui:
+                    # Avalonia windows want an STA entry point
+                    # (the proof's Program.cs carries it too).
+                    body.append("  [STAThread]")
                 body.append("  public static void Main(string[] args) {")
-                body.extend(self._emit_block(program.stmts, 2,
-                                             top_level=True))
+                body.extend(stmt_lines)
                 body.append("  }")
             else:
                 body.append(f"  static {self.output_stem}() {{")
-                body.extend(self._emit_block(program.stmts, 2,
-                                             top_level=True))
+                body.extend(stmt_lines)
                 body.append("  }")
         lines = self._header(main_path)
         imports = self._render_imports()
@@ -3867,8 +5899,15 @@ class _CSEmitter:
         statements); a file module gets a static constructor."""
         files: dict[str, str] = {}
         self._is_main_file = is_main
-        text, uses_rt = self._emit_one(program, main_path, is_main=is_main)
-        files[self.output_stem + ".cs"] = text
+        # Walk the imports FIRST (M9 L2, same as the rs emitter):
+        # the entry file is emitted after the whole closure is
+        # known, so it can emit `NewrUi` once when any file uses
+        # ui. Each sub-emitter learns the entry file's class name
+        # (`_root_stem`), so its `NewrUi` references qualify
+        # through it instead of inlining its own Widget type
+        # (CS1503, the C# twin of rs E0308).
+        root_stem = self._root_stem or self.output_stem
+        uses_rt = False
         for imp in program.imports:
             if imp.path is None:
                 continue
@@ -3888,10 +5927,24 @@ class _CSEmitter:
                                   sources=self.sources,
                                   line_comments=self.line_comments,
                                   output_stem=Path(sub_path).stem)
+            sub_em._root_stem = root_stem
             sub_files, sub_rt = sub_em._emit_file_set(sub, sub_path,
                                                       is_main=False)
             files.update(sub_files)
             uses_rt = uses_rt or sub_rt
+            self._closure_uses_ui = (
+                self._closure_uses_ui or sub_em._file_uses_ui
+                or sub_em._closure_uses_ui)
+            # A `db.*` call in a file module needs the Sqlite
+            # package in the csproj too (the gate reads only the
+            # main emitter — see emit_program_cs).
+            self.uses_sqlite = self.uses_sqlite or sub_em.uses_sqlite
+            # Same for a `ui.*` call in a file module: the Avalonia
+            # packages in the csproj come from the main emitter.
+            self.uses_ui = self.uses_ui or sub_em.uses_ui
+        text, main_rt = self._emit_one(program, main_path, is_main=is_main)
+        files[self.output_stem + ".cs"] = text
+        uses_rt = uses_rt or main_rt
         return files, uses_rt
 
     def _emit_one(self, program: A.Program, main_path: str,
@@ -5755,6 +7808,14 @@ def emit_program_cs(program: A.Program, *, main_path: str,
     # Main and is built separately (see _emit_deploy_file).
     # newr_rt.cs is listed conditionally: the caller copies it
     # next to the output only when the program uses the runtime.
+    # CS9057 is suppressed for ui programs only: Avalonia 12.1.6
+    # ships Roslyn 4.14 analyzers, and SDK 8.0.427 runs Roslyn
+    # 4.11, so a code-only Avalonia app (an Application subclass
+    # in .cs, no XAML) warns on every build — proven by probe: a
+    # hand-written code-only app warns the same way, while the
+    # proof's XAML app builds with 0 warnings. The analyzers
+    # still run; only the version-skew warning is silenced.
+    nowarn = "CS8981;CS9057" if em.uses_ui else "CS8981"
     csproj_lines = [
         "<Project Sdk=\"Microsoft.NET.Sdk\">",
         "  <PropertyGroup>",
@@ -5762,18 +7823,52 @@ def emit_program_cs(program: A.Program, *, main_path: str,
         "    <TargetFramework>net8.0</TargetFramework>",
         "    <Nullable>disable</Nullable>",
         "    <ImplicitUsings>disable</ImplicitUsings>",
-        "    <NoWarn>CS8981</NoWarn>",
+        f"    <NoWarn>{nowarn}</NoWarn>",
         f"    <AssemblyName>{stem}</AssemblyName>",
         "  </PropertyGroup>",
     ]
-    if program.bot is not None:
+    # The package references: a bot program needs Discord.Net +
+    # Microsoft.Data.Sqlite (the store backend); a plain program
+    # that uses `db.*` needs Microsoft.Data.Sqlite alone (B8 — the
+    # gate is `bot is not None or uses_sqlite`, not `bot is not
+    # None`). A program that uses neither gets no references at
+    # all, so it stays dependency-free.
+    if program.bot is not None or em.uses_sqlite:
         csproj_lines += [
             "  <ItemGroup>",
-            "    <PackageReference Include=\"Discord.Net\" "
-            "Version=\"3.20.2\" />",
+        ]
+        if program.bot is not None:
+            csproj_lines.append(
+                "    <PackageReference Include=\"Discord.Net\" "
+                "Version=\"3.20.2\" />")
+        csproj_lines += [
             "    <PackageReference Include=\"Microsoft.Data.Sqlite\" "
             "Version=\"8.0.0\" />",
             "  </ItemGroup>",
+        ]
+    if em.uses_ui:
+        # Avalonia 12.1.6 plus Avalonia.Desktop 12.1.6 plus
+        # Avalonia.Themes.Fluent 12.1.6 (SPEC.md section 12.8):
+        # the three references of the official template set,
+        # proven on the build VM (M8c Avalonia proof). Fluent is
+        # required: the Avalonia package alone does not contain
+        # FluentTheme. Restore needs the packages in the global
+        # packages cache or reachable from nuget.org; on this VM
+        # the proof seeded a local feed and cache (see the M8c
+        # Avalonia proof), which `dotnet restore` uses when
+        # NUGET_PACKAGES points at it.
+        csproj_lines += [
+            "  <ItemGroup>",
+            "    <PackageReference Include=\"Avalonia\" "
+            "Version=\"12.1.6\" />",
+            "    <PackageReference Include=\"Avalonia.Desktop\" "
+            "Version=\"12.1.6\" />",
+            "    <PackageReference Include=\"Avalonia.Themes.Fluent\" "
+            "Version=\"12.1.6\" />",
+            "  </ItemGroup>",
+        ]
+    if program.bot is not None:
+        csproj_lines += [
             "  <ItemGroup>",
             "    <Compile Remove=\"*.cs\" />",
         ]

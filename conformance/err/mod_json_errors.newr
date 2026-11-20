@@ -1,0 +1,5 @@
+# expect: E2013
+# A decode with no expected type is E2013 (the target type must
+# be known at the call site).
+let x = json.decode("[]")
+print(x)

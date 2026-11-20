@@ -7,9 +7,9 @@ let passed = true
 let a = Point(x: 1, y: 2)
 let b = Point(x: 1, y: 2)
 let c = Point(x: 1, y: 3)
-if not (a == b):
+if not a == b:
   passed = false
-if (a == c):
+if a == c:
   passed = false
 if passed:
   print "PASS"

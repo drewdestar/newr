@@ -1,0 +1,17 @@
+# sdist contents (M7 step 2). The wheel gets its files from
+# pyproject.toml [tool.setuptools.package-data]; the sdist needs
+# them listed here so a `pip install` from the sdist still ships
+# the seven runtime files the emitters copy next to emitted output.
+include README.md
+include LICENSE
+include pyproject.toml
+include compiler/newr_rt.*
+global-exclude *.pyc
+global-exclude __pycache__
+prune tests
+prune goldens
+prune conformance
+prune benchmarks
+prune stress
+prune docs
+prune examples

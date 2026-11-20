@@ -1,0 +1,6 @@
+# expect: E2014
+# A program has one window: show and run together is E2014.
+fn view() -> Widget:
+  return ui.text("x")
+ui.show(ui.text("a"))
+ui.run(view)

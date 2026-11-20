@@ -1,0 +1,31 @@
+/// todo.newr, a todo list stored in SQLite (M8a example).
+/// Add rows, list them, mark one done, list again. Runs on :memory:
+/// so every run prints the same output.
+/// Build it with: newr build examples/todo.newr
+struct Todo:
+  id: int
+  title: str
+  done: bool
+
+fn add_todo(handle: int, title: str):
+  db.exec(handle, "INSERT INTO todos (title, done) VALUES (?, ?)", title, false)
+
+fn list_todos(handle: int):
+  let todos: list[Todo] = db.query(handle, "SELECT id, title, done FROM todos ORDER BY id")
+  for todo in todos:
+    if todo.done:
+      print "[x] " + todo.title
+    else:
+      print "[ ] " + todo.title
+
+let h = db.open(":memory:")
+db.exec(h, "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")
+add_todo(h, "beli susu")
+add_todo(h, "tulis laporan")
+add_todo(h, "sirami tanaman")
+print "Todos:"
+list_todos(h)
+db.exec(h, "UPDATE todos SET done = ? WHERE id = ?", true, 1)
+print "After marking the first one done:"
+list_todos(h)
+db.close(h)

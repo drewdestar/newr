@@ -1,0 +1,30 @@
+/// hello_api_server.newr, a tiny JSON API server (M8b example).
+/// GET /todos lists the todos as JSON, POST /todos echoes the
+/// posted todo back with status 201. Run it, then fetch it with
+/// hello_api_client.newr (or curl http://127.0.0.1:8080/todos).
+/// Build it with: newr build examples/hello_api_server.newr
+struct Todo:
+  id: int
+  title: str
+  done: bool
+
+struct HttpRequest:
+  method: str
+  path: str
+  headers: dict[str, str]
+  body: str
+  query: dict[str, str]
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let todos = [Todo(id: 1, title: "beli susu", done: false), Todo(id: 2, title: "tulis laporan", done: true)]
+let list_todos = fn(req: HttpRequest) -> HttpResponse: req.method == "GET" ? HttpResponse(status: 200, headers: {}, body: json.encode(todos)) : HttpResponse(status: 404, headers: {}, body: "")
+let create_todo = fn(req: HttpRequest) -> HttpResponse:
+  let todo: Todo = json.decode(req.body)
+  return HttpResponse(status: 201, headers: {}, body: json.encode(todo))
+http.route("GET", "/todos", list_todos)
+http.route("POST", "/todos", create_todo)
+http.serve(8080)

@@ -49,14 +49,19 @@ _RT_HELPERS = frozenset({
     "add", "sub", "mul", "neg", "powInt", "powFloat", "tdiv", "tmod",
     "fmod", "roundHalfAway", "toInt", "toFloat", "toBool", "toStr",
     "floatStr", "checkInt", "asError", "optChain", "coalesce",
-    "listGet", "listIndex", "listContains", "setRemove", "unwrapOpt",
+    "listGet", "listIndex", "listContains", "setAdd", "setContains",
+    "setRemove", "toSet", "strCmp", "lenOf", "unwrapOpt",
     "tryResult", "timeFormat", "fileRead", "fileWrite", "fileAppend",
     "fileExists", "randomInt", "randomChoice", "randomShuffle",
     "eq", "range", "print", "input", "ok", "err",
+    "jsonEncode", "jsonDecode", "httpRoute", "httpServe",
+    "httpGet", "httpPost", "httpRequest", "httpFetch",
+    "uiText", "uiButton", "uiInput", "uiList", "uiImage", "uiRow",
+    "uiColumn", "uiRender", "uiShow", "uiRun",
 })
 _RT_CLASSES = frozenset({
     "NewrError", "NewrOverflowError", "NewrDivisionByZeroError",
-    "Result",
+    "Result", "Widget",
 })
 _DISCORD_JS = frozenset({
     "Client", "GatewayIntentBits", "Events", "SlashCommandBuilder",
@@ -620,12 +625,23 @@ class _JSEmitter:
     def _emit_builtin_value(self, name: str) -> tuple[str, int]:
         # First-class builtin values: `len`/`min`/`max` as a value
         # are small lambdas (a JS `Math.min` does not take BigInts).
+        # `len` is the runtime `lenOf`: a bare `x.length` would count
+        # UTF-16 units for a str, not code points (SPEC 7.6).
         if name == "len":
-            return "((x) => x.length ?? x.size)", _PREC["primary"]
+            self._need_rt("lenOf")
+            return "lenOf", _PREC["primary"]
         if name == "min":
-            return "((a, b) => a < b ? a : b)", _PREC["primary"]
+            # Strings order by code point (SPEC 7.6), not by JS `<`
+            # (UTF-16 units). Numbers and BigInts compare bare.
+            self._need_rt("strCmp")
+            return ("((a, b) => (typeof a === 'string' "
+                    "? strCmp(a, b) < 0 : a < b) ? a : b)",
+                    _PREC["primary"])
         if name == "max":
-            return "((a, b) => a > b ? a : b)", _PREC["primary"]
+            self._need_rt("strCmp")
+            return ("((a, b) => (typeof a === 'string' "
+                    "? strCmp(a, b) > 0 : a > b) ? a : b)",
+                    _PREC["primary"])
         if name == "abs":
             self._need_rt("checkInt")
             return ("((x) => typeof x === 'bigint' ? "
@@ -638,7 +654,12 @@ class _JSEmitter:
             self._need_rt("range")
             return "range", _PREC["primary"]
         if name == "set":
-            return "((xs) => new Set(xs))", _PREC["primary"]
+            # A bare `new Set(xs)` would keep two equal-but-distinct
+            # struct values as two elements (JS Set is identity for
+            # objects). Route through `toSet`, which deduplicates
+            # structurally (SPEC 7.6/7.8).
+            self._need_rt("toSet")
+            return "toSet", _PREC["primary"]
         if name == "ok":
             self._need_rt("ok")
             return "ok", _PREC["primary"]
@@ -731,6 +752,13 @@ class _JSEmitter:
                 return f"listContains({right}, {left})", _PREC["primary"]
             if rt.name in ("set", "dict"):
                 right = self.emit_expr(node.right, _BINOP_PREC["<"] + 1)
+                if rt.name == "set":
+                    # Structural membership: native Set.has is
+                    # identity for objects (SPEC 7.8). Dict keys are
+                    # str, so `.has` on a Map is value-based there.
+                    self._need_rt("setContains")
+                    return (f"setContains({right}, {left})",
+                            _PREC["primary"])
                 return f"{right}.has({left})", _PREC["primary"]
             self._fail(
                 f"cannot emit `in` for a {rt.name} (the checker should "
@@ -757,6 +785,16 @@ class _JSEmitter:
                 if op == "!=":
                     expr = f"!{expr}"
                 return expr, _PREC["primary"]
+            if op in ("<", "<=", ">", ">=") and \
+                    (_is_str(lt) or _is_str(rt)):
+                # String ordering is lexicographic by code point
+                # (SPEC 7.6). Plain JS `<` compares UTF-16 code
+                # units, which mis-orders astral characters against
+                # BMP characters at U+E000 and above.
+                self._need_rt("strCmp")
+                cmp = {"<": "< 0", "<=": "<= 0", ">": "> 0",
+                       ">=": ">= 0"}[op]
+                return f"(strCmp({left}, {right}) {cmp})", prec
             return f"{left} {jsop} {right}", prec
         # Arithmetic: the result type decides checked vs bare.
         result = self._type_of(node)
@@ -832,10 +870,18 @@ class _JSEmitter:
                 if binding is not None and binding.kind in (
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                      or obj.name in ("db", "http", "json",
+                                                      "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
-                    # and the reference.
+                    # and the reference. `db` is a domain module
+                    # like `discord`: it is not in MODULES, but the
+                    # same no-import fallback applies (SPEC.md
+                    # section 12.5); `http` and `json` are domain
+                    # modules the same way (SPEC.md sections 12.6,
+                    # 12.7); `ui` is a domain module the same way
+                    # (SPEC.md section 12.8).
                     fake = _Binding(js=obj.name, kind="module",
                                     module=obj.name)
                     return self._emit_module_call(node, fake)
@@ -891,8 +937,9 @@ class _JSEmitter:
             args = [self.emit_expr(a, 0) for a in node.args]
             return f"range({', '.join(args)})", _PREC["primary"]
         if name == "set":
+            self._need_rt("toSet")
             arg = self.emit_expr(node.args[0], 0)
-            return f"new Set({arg})", _PREC["primary"]
+            return f"toSet({arg})", _PREC["primary"]
         if name == "ok":
             self._need_rt("ok")
             return f"ok({self.emit_expr(node.args[0], 0)})", \
@@ -999,10 +1046,21 @@ class _JSEmitter:
         if name == "min":
             a = self.emit_expr(args[0], 0)
             b = self.emit_expr(args[1], 0)
+            t = self._type_of(args[0])
+            if _is_str(t):
+                # Code-point order (SPEC 7.6), not JS `<` (UTF-16).
+                self._need_rt("strCmp")
+                return f"(strCmp({a}, {b}) < 0 ? {a} : {b})", \
+                    _PREC["primary"]
             return f"({a} < {b} ? {a} : {b})", _PREC["primary"]
         if name == "max":
             a = self.emit_expr(args[0], 0)
             b = self.emit_expr(args[1], 0)
+            t = self._type_of(args[0])
+            if _is_str(t):
+                self._need_rt("strCmp")
+                return f"(strCmp({a}, {b}) > 0 ? {a} : {b})", \
+                    _PREC["primary"]
             return f"({a} > {b} ? {a} : {b})", _PREC["primary"]
         if name == "abs":
             t = self._type_of(args[0])
@@ -1393,12 +1451,19 @@ class _JSEmitter:
                 return f"{obj_text}.has({args[0]})", _PREC["primary"]
         elif tname == "set":
             if name == "add":
-                return f"{obj_text}.add({args[0]})", _PREC["primary"]
+                # Structural dedup: native `.add` is identity for
+                # objects (SPEC 7.6/7.8).
+                self._need_rt("setAdd")
+                return f"setAdd({obj_text}, {args[0]})", \
+                    _PREC["primary"]
             if name == "remove":
                 self._need_rt("setRemove")
                 return f"setRemove({obj_text}, {args[0]})", _PREC["primary"]
             if name == "contains":
-                return f"{obj_text}.has({args[0]})", _PREC["primary"]
+                # Structural membership, not native `.has` (identity).
+                self._need_rt("setContains")
+                return f"setContains({obj_text}, {args[0]})", \
+                    _PREC["primary"]
         elif tname == "Result":
             if name in ("is_ok", "is_err"):
                 # The JS Result exposes isOk/isErr as METHODS
@@ -2274,6 +2339,14 @@ class _JSEmitter:
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
         args = [self.emit_expr(a, 0) for a in node.args]
+        if real == "db":
+            return self._emit_db_call(node, args)
+        if real == "http":
+            return self._emit_http_call(node, args)
+        if real == "json":
+            return self._emit_json_call(node, args)
+        if real == "ui":
+            return self._emit_ui_call(node, args)
         return self._emit_module_call_text(real, binding.js,
                                            node.func.name, args)
 
@@ -2340,6 +2413,238 @@ class _JSEmitter:
                         _PREC["primary"])
         self._fail(f"module `{real}` has no function `{name}`")
 
+    def _emit_db_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`db.*` calls (SPEC.md section 12.5): runtime helpers in
+        newr_rt.js, handles are ints (BigInt in JS), fd-style. The
+        checker (db_check) has already validated the call, so the
+        arity here is trusted."""
+        name = node.func.name
+        if name == "open":
+            self._need_rt("dbOpen")
+            return f"dbOpen({args[0]})", _PREC["primary"]
+        if name == "exec":
+            self._need_rt("dbExec")
+            rest = ", ".join(args[2:])
+            return f"dbExec({args[0]}, {args[1]}, [{rest}])", \
+                _PREC["primary"]
+        if name == "query":
+            self._need_rt("dbQuery")
+            js_struct, decl = self._db_row_struct(node)
+            names = [f.name for f in decl.fields]
+            types = [self._db_field_type(f.type) for f in decl.fields]
+            names_lit = "[" + ", ".join(repr(n) for n in names) + "]"
+            types_lit = "[" + ", ".join(repr(t) for t in types) + "]"
+            rest = ", ".join(args[2:])
+            return (f"dbQuery({args[0]}, {args[1]}, [{rest}], "
+                    f"{names_lit}, {types_lit}).map((row) => "
+                    f"new {js_struct}(...row))", _PREC["primary"])
+        if name == "begin":
+            self._need_rt("dbBegin")
+            return f"dbBegin({args[0]})", _PREC["primary"]
+        if name == "commit":
+            self._need_rt("dbCommit")
+            return f"dbCommit({args[0]})", _PREC["primary"]
+        if name == "rollback":
+            self._need_rt("dbRollback")
+            return f"dbRollback({args[0]})", _PREC["primary"]
+        if name == "last_id":
+            self._need_rt("dbLastId")
+            return f"dbLastId({args[0]})", _PREC["primary"]
+        if name == "close":
+            self._need_rt("dbClose")
+            return f"dbClose({args[0]})", _PREC["primary"]
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (JS constructor, decl) of the row struct for a
+        `db.query` call. The row type comes from `node.expr_type`,
+        set by db_check to `list[Row]`. A struct from an imported
+        file module resolves to its qualified name
+        (`alias.Struct`)."""
+        t = self._type_of(node)
+        if t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._mangle(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    return f"{bound}.{self._mangle(row_name)}", s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
+
+    # ------------------------------------------------------------ http/json
+    # shapes
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring the Python emitter's `_struct_decl`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _struct_js_name(self, name: str) -> str:
+        """The JS constructor reference for a struct type name: the
+        plain mangled class name in this file, or `alias.Struct`
+        for a struct from an imported file module (mirroring
+        `_db_row_struct`)."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        if short in self.structs:
+            return self._mangle(short)
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == short:
+                    return f"{bound}.{self._mangle(short)}"
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """JS source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7), mirroring the Python
+        emitter's `_shape_literal`: a scalar is `"int"` /
+        `"float"` / `"str"` / `"bool"` / `"none"`, a nullable is
+        `["?", inner]`, a list is `["list", elem]`, a dict is
+        `["dict", value]`, a struct is `["struct", <class>,
+        [[field, shape], ...]]` in declaration order, where
+        `<class>` is the emitted struct class itself (the runtime
+        builds structs positionally with `new`)."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return f'["?", {self._shape_literal(inner)}]'
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return _js_str(t.name)
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            return f'["list", {self._shape_literal(t.params[0])}]'
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            return f'["dict", {self._shape_literal(t.params[1])}]'
+        if t.name in ("fn", "Result", "set", "error", "duration",
+                      "Widget"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        js_name = self._struct_js_name(t.name)
+        fields = ", ".join(
+            f"[{_js_str(f.name)}, {self._shape_literal(f.type)}]"
+            for f in decl.fields)
+        return f'["struct", {js_name}, [{fields}]]'
+
+    def _http_handler_request_type(self, handler_arg: A.Expr) -> Type:
+        """The request struct type of a route handler: the parameter
+        type of an inline lambda, or the first parameter of the fn
+        type of a let-bound lambda variable (the checker tracks
+        let-bound lambdas the same way, in http_check._lambdas).
+        A named function is not a handler in M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and t.params:
+                    return t.params[0]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _emit_http_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`http.*` calls (SPEC.md section 12.6): runtime helpers in
+        newr_rt.js. The checker (http_check) has already validated
+        the call, so the arity here is trusted. Fetch calls carry
+        the response struct shape from `node.expr_type`, set by
+        http_check; route calls carry the request struct shape
+        from the handler lambda's parameter type."""
+        name = node.func.name
+        if name == "route":
+            req_type = self._http_handler_request_type(node.args[2])
+            shape = self._shape_literal(req_type)
+            self._need_rt("httpRoute")
+            return (f"httpRoute({args[0]}, {args[1]}, {args[2]}, "
+                    f"{shape})", _PREC["primary"])
+        if name == "serve":
+            self._need_rt("httpServe")
+            return f"httpServe({', '.join(args)})", _PREC["primary"]
+        if name in ("get", "post", "request"):
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            if name == "get":
+                self._need_rt("httpGet")
+                timeout = args[1] if len(args) > 1 else "10n"
+                headers = args[2] if len(args) > 2 else "null"
+                return (f"httpGet({args[0]}, {timeout}, {headers}, "
+                        f"{shape})", _PREC["primary"])
+            if name == "post":
+                self._need_rt("httpPost")
+                timeout = args[2] if len(args) > 2 else "10n"
+                headers = args[3] if len(args) > 3 else "null"
+                return (f"httpPost({args[0]}, {args[1]}, {timeout}, "
+                        f"{headers}, {shape})", _PREC["primary"])
+            self._need_rt("httpRequest")
+            timeout = args[3] if len(args) > 3 else "10n"
+            headers = args[4] if len(args) > 4 else "null"
+            return (f"httpRequest({args[0]}, {args[1]}, {args[2]}, "
+                    f"{timeout}, {headers}, {shape})",
+                    _PREC["primary"])
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`json.*` calls (SPEC.md section 12.7): runtime helpers in
+        newr_rt.js. `json.encode` takes its shape from the
+        argument's static type; `json.decode` takes its shape from
+        `node.expr_type`, the expected type set by json_check."""
+        name = node.func.name
+        if name == "encode":
+            shape = self._shape_literal(self._type_of(node.args[0]))
+            self._need_rt("jsonEncode")
+            return f"jsonEncode({args[0]}, {shape})", _PREC["primary"]
+        if name == "decode":
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            self._need_rt("jsonDecode")
+            return f"jsonDecode({args[0]}, {shape})", _PREC["primary"]
+        self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): runtime helpers in
+        newr_rt.js. The checker (ui_check) has already validated
+        the call, so the arity here is trusted. Constructors build
+        a runtime Widget; `render` is the pure HTML core; `show`
+        and `run` write the HTML sink (SPEC.md section 12.8)."""
+        name = node.func.name
+        if name in ("text", "button", "input", "list", "image", "row",
+                    "column", "render", "show", "run"):
+            self._need_rt(f"ui{name.capitalize()}")
+            return (f"ui{name.capitalize()}({', '.join(args)})",
+                    _PREC["primary"])
+        self._fail(f"module `ui` has no function `{name}`")
+
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:
         """A named-module member used as a value: a constant, or a
@@ -2368,6 +2673,23 @@ class _JSEmitter:
         if real == "math" and node.name in ("pi", "e"):
             return ("Math.PI" if node.name == "pi" else "Math.E",
                     _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # export (a `const` plus export getter, J1). The
+            # require comes from `imported_modules`, registered
+            # at scope registration like the fn-call branch. A
+            # non-pub const never reaches here (the checker
+            # rejects it with E3005), but the `pub` check keeps
+            # the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.js)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    return (f"{ref}.{self._mangle(node.name)}",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls
@@ -3134,7 +3456,7 @@ class _JSEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"// Generated by newr from {main_path}. Do not edit by hand.",
+            f"// Generated by newr from {main_path} — do not edit by hand.",
             f"// Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:

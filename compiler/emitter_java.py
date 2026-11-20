@@ -59,7 +59,7 @@ _RT_HELPERS = frozenset({
     "tryResult", "timeFormat", "fileRead", "fileWrite", "fileAppend",
     "fileExists", "randomInt", "randomChoice", "randomShuffle",
     "eq", "range", "print", "input", "ok", "err", "chars", "splitStr",
-    "strIndex", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
+    "strIndex", "strCmp", "absLong", "lenOf", "dictOf", "envGet", "envArgs",
     "hashOf", "structHash",
 })
 _RT_CLASSES = frozenset({
@@ -593,8 +593,23 @@ class _JavaEmitter:
         if t.name == "object":
             # The union type of conflicting enum variant fields.
             return "Object"
+        if t.name == "__unknown__":
+            # The checker leaves `__unknown__` params on a bare
+            # builtin used as a value (`let f = len`); it is not a
+            # real type. In a declaration position it must become
+            # the generic Object, matching the generic fallback in
+            # _emit_builtin_value (type_model.newr, java 74/75,
+            # 7 Nov). The first fix only patched the value
+            # expression; the field type is rendered here, so the
+            # build still failed until this was added.
+            return "Object"
         if t.name == "error":
             return "NewrRt.NewrError"
+        if t.name == "Widget":
+            # The ui module's opaque value type (SPEC.md section
+            # 12.8): the runtime Widget class in NewrRt.java, the
+            # Java twin of the py emitter's `newr_rt.Widget`.
+            return "NewrRt.Widget"
         if t.name == "list":
             return f"List<{self._java_boxed_type(t.params[0])}>"
         if t.name == "dict":
@@ -834,6 +849,21 @@ class _JavaEmitter:
             # binding is its Java name. A module-level fn used as a
             # value is a method reference (`Main::fn`).
             if binding.kind == "fn":
+                if _is_fn(fn_target) and _is_none(fn_target.params[-1]):
+                    # A `none`-returning fn is a void method, and a
+                    # method reference to it is NOT a FnN<...,
+                    # Void> ("void cannot be converted to Void"):
+                    # wrap it in a lambda that returns null (the
+                    # same rule as none lambdas in _emit_lambda).
+                    params = fn_target.params[:-1]
+                    pnames = [f"_newr_p{i}"
+                              for i in range(len(params))]
+                    call_args = ", ".join(pnames)
+                    params_text = ", ".join(pnames)
+                    return (f"({params_text}) -> {{ "
+                            f"{self.output_stem}.{binding.java}"
+                            f"({call_args}); return null; }}",
+                            _PREC["primary"])
                 return f"{self.output_stem}::{binding.java}", \
                     _PREC["primary"]
             return binding.value, _PREC["primary"]
@@ -854,8 +884,14 @@ class _JavaEmitter:
         # First-class builtin values: `len`/`min`/`max` as a value
         # are small lambdas. The cast type comes from the context
         # (fn_target) when known; the fallback forms are the
-        # generic ones (Object in, Long out).
-        cast = self._java_fn_type(fn_target) if _is_fn(fn_target) else None
+        # generic ones (Object in, Long out). A bare builtin's type
+        # carries `__unknown__` params (the checker never resolves
+        # them without a call), and that is not a real type: fall
+        # back to the generic form instead of emitting `__unknown__`
+        # into the output (type_model.newr, java 74/75, 7 Nov).
+        known = _is_fn(fn_target) and not any(
+            p.name == "__unknown__" for p in fn_target.params)
+        cast = self._java_fn_type(fn_target) if known else None
         if name == "len":
             self._need_rt("lenOf")
             form = cast or "NewrRt.Fn1<Object, Long>"
@@ -1038,14 +1074,16 @@ class _JavaEmitter:
                     return expr, _PREC["primary"]
                 jsop = "==" if op == "==" else "!="
                 return f"{left} {jsop} {right}", prec
-            # Ordering: strings compare lexicographically
-            # (compareTo); numbers compare bare (autounboxing a
-            # boxed operand would NPE on null, but the checker only
-            # allows ordering on non-nullable values).
+            # Ordering: strings compare lexicographically by code
+            # point (NewrRt.strCmp); numbers compare bare
+            # (autounboxing a boxed operand would NPE on null, but
+            # the checker only allows ordering on non-nullable
+            # values).
             if _is_str(lt) or _is_str(rt):
+                self._need_rt("strCmp")
                 cmp = {"<": "< 0", "<=": "<= 0", ">": "> 0",
                        ">=": ">= 0"}[op]
-                return f"({left}.compareTo({right}) {cmp})", prec
+                return f"(NewrRt.strCmp({left}, {right}) {cmp})", prec
             jsop = {"<": "<", "<=": "<=", ">": ">", ">=": ">="}[op]
             return f"{left} {jsop} {right}", prec
         # Arithmetic: the result type decides checked vs bare.
@@ -1121,10 +1159,16 @@ class _JavaEmitter:
                 if binding is not None and binding.kind in (
                         "module", "file-module"):
                     return self._emit_module_call(node, binding)
-                if binding is None and obj.name in MODULES:
+                if binding is None and (obj.name in MODULES
+                                      or obj.name in ("db", "http", "json",
+                                                     "ui")):
                     # A named module used without an import
                     # (N-09/N-10): the name is both the real module
-                    # and the reference.
+                    # and the reference. `db`, `http`, `json`, and
+                    # `ui` are domain modules like `discord`: they
+                    # are not in MODULES, but the same no-import
+                    # fallback applies (SPEC.md sections 12.5, 12.6,
+                    # 12.7, 12.8).
                     fake = _Binding(java=obj.name, kind="module",
                                     module=obj.name)
                     return self._emit_module_call(node, fake)
@@ -1240,7 +1284,23 @@ class _JavaEmitter:
                 method = "get" if not args else "apply"
                 return (f"{binding.java}.{method}({', '.join(args)})",
                         _PREC["primary"])
-            args = [self.emit_expr(a, 0) for a in node.args]
+            # A declared fn: plain call; positional args are
+            # emitted with the declared param type as fn_target
+            # when it is a fn type (a bare builtin passed as an
+            # argument needs its type from the callee's
+            # signature); keyword args are reordered by
+            # _emit_kwargs.
+            fn = self.fns_by_java.get(binding.java)
+            params = [p.type for p in fn.params] \
+                if fn is not None else []
+            args: list[str] = []
+            for i, a in enumerate(node.args):
+                if i < len(params):
+                    p = params[i]
+                    args.append(self.emit_expr(
+                        a, 0, fn_target=p if _is_fn(p) else None))
+                else:
+                    args.append(self.emit_expr(a, 0))
             kwargs = self._emit_kwargs(node, binding)
             return (f"{binding.java}({', '.join(args + kwargs)})",
                     _PREC["primary"])
@@ -1317,7 +1377,8 @@ class _JavaEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.compareTo({b}) < 0 ? {a} : {b})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.strCmp({a}, {b}) < 0 ? {a} : {b})",
                         _PREC["primary"])
             return f"({a} < {b} ? {a} : {b})", _PREC["primary"]
         if name == "max":
@@ -1325,7 +1386,8 @@ class _JavaEmitter:
             b = self.emit_expr(args[1], 0)
             t = self._type_of(args[0])
             if _is_str(t):
-                return (f"({a}.compareTo({b}) < 0 ? {b} : {a})",
+                self._need_rt("strCmp")
+                return (f"(NewrRt.strCmp({a}, {b}) < 0 ? {b} : {a})",
                         _PREC["primary"])
             return f"({a} < {b} ? {b} : {a})", _PREC["primary"]
         if name == "abs":
@@ -2175,12 +2237,28 @@ class _JavaEmitter:
         fn_type = self._type_of(node)
         cast = fn_target if _is_fn(fn_target) else fn_type
         cast_text = self._java_fn_type(cast)
+        # A `none`-returning lambda has Java type FnN<..., Void>,
+        # and a void expression is NOT a value for Void: `() ->
+        # System.out.println(x)` and `() -> { ...; }` both fail
+        # with "void cannot be converted to Void" (the ui corpus
+        # is the first to use none lambdas as values). A none
+        # lambda must therefore be a block ending in `return
+        # null;` (J8's Void twin: the value of a none lambda is
+        # always null).
+        ret = node.return_type
+        if ret is None and _is_fn(fn_type):
+            ret = fn_type.params[-1]
+        returns_none = _is_none(ret)
         if node.expr_body is not None:
             body, hoists = self._emit_expr_with_hoists(node.expr_body)
             self._fn_used = saved_used
             self._pop_scope()
             if not hoists:
-                arrow = f"({params_text}) -> {body}"
+                if returns_none:
+                    arrow = (f"({params_text}) -> {{ {body}; "
+                             f"return null; }}")
+                else:
+                    arrow = f"({params_text}) -> {body}"
                 if fn_target is not None and _is_fn(fn_target):
                     return arrow, _PREC["primary"]
                 return f"(({cast_text}) ({arrow}))", _PREC["primary"]
@@ -2192,20 +2270,35 @@ class _JavaEmitter:
             lines = [f"final {cast_text} {name} = ({params_text}) -> {{"]
             for h in hoists:
                 lines.append("  " + h)
-            lines.append(f"  return {body};")
+            if returns_none:
+                lines.append(f"  {body};")
+                lines.append("  return null;")
+            else:
+                lines.append(f"  return {body};")
             lines.append("};")
             self._hoists_add(lines)
             return name, _PREC["primary"]
         # Block body: hoist a const arrow.
         name = self._new_lambda_name()
         self._fn_ctx.append({"return_type": node.return_type,
-                             "ensures": [], "in_handler": False})
+                             "ensures": [], "in_handler": False,
+                             "in_lambda": True})
         body_lines = self._emit_block(node.body or [], 1)
         self._fn_ctx.pop()
         self._fn_used = saved_used
         self._pop_scope()
         lines = [f"final {cast_text} {name} = ({params_text}) -> {{"]
-        lines.extend(body_lines if body_lines else ["  ;"])
+        if returns_none:
+            # A bare `return;` inside became `return null;` in
+            # _emit_return; append the trailing one unless the
+            # block already ends in a return.
+            last = next((line.strip() for line in reversed(body_lines)
+                         if line.strip()), "")
+            lines.extend(body_lines if body_lines else ["  ;"])
+            if not last.startswith("return "):
+                lines.append("  return null;")
+        else:
+            lines.extend(body_lines if body_lines else ["  ;"])
         lines.append("};")
         self._hoists_add(lines)
         return name, _PREC["primary"]
@@ -2689,6 +2782,12 @@ class _JavaEmitter:
         is_void = ret_type is None or _is_none(ret_type)
         if stmt.value is None:
             if not ensures:
+                if ctx.get("in_lambda") and is_void:
+                    # A bare `return;` in a none lambda: the
+                    # lambda's Java type is FnN<..., Void>, and a
+                    # bare return is "missing return value" there
+                    # (see _emit_lambda).
+                    return [f"{p}return null;"]
                 return [f"{p}return;"]
             lines = [f"{p}_newrResult = null;"]
             lines.extend(self._ensures_check_lines(ensures, indent))
@@ -2700,7 +2799,9 @@ class _JavaEmitter:
             # only to normal (Ok) returns, not to propagated errors.
             unwrapped = self._propagate_unwrapped(stmt.value)
             return [f"{p}return {unwrapped};"]
-        value = self.emit_expr(stmt.value, 0)
+        value = self.emit_expr(stmt.value, 0,
+                               fn_target=ret_type if _is_fn(ret_type)
+                               else None)
         if not ensures:
             return [f"{p}return {value};"]
         lines = [f"{p}_newrResult = {value};"]
@@ -3059,7 +3160,20 @@ class _JavaEmitter:
                         f"({self.emit_expr(node.args[0], 0)})",
                         _PREC["primary"])
             self._fail(f"module `file` has no function `{name}`")
+        if real == "ui":
+            # The ui emitter emits its own args: the handler
+            # positions carry their fn type as context, so an
+            # inline lambda needs no cast and a named fn is
+            # wrapped when it returns none (see _emit_lambda and
+            # _emit_name).
+            return self._emit_ui_call(node)
         args = [self.emit_expr(a, 0) for a in node.args]
+        if real == "db":
+            return self._emit_db_call(node, args)
+        if real == "http":
+            return self._emit_http_call(node, args)
+        if real == "json":
+            return self._emit_json_call(node, args)
         return self._emit_module_call_text(real, binding.java,
                                            node.func.name, args)
 
@@ -3131,6 +3245,284 @@ class _JavaEmitter:
                 return f"NewrRt.envGet({args[0]})", _PREC["primary"]
         self._fail(f"module `{real}` has no function `{name}`")
 
+    def _emit_db_call(self, node: A.Call,
+                      args: list[str]) -> tuple[str, int]:
+        """`db.*` calls (SPEC.md section 12.5): runtime helpers in
+        NewrRt.java over JDBC, handles are longs, fd-style. The
+        checker (db_check) has already validated the call, so the
+        arity here is trusted. `db.query` maps each returned
+        `Object[]` row to the row struct with boxed casts (a
+        nullable field stays boxed, so a NULL survives the cast)."""
+        name = node.func.name
+        self._need_sqlite()
+        if name == "open":
+            self._need_rt("dbOpen")
+            return f"NewrRt.dbOpen({args[0]})", _PREC["primary"]
+        if name == "exec":
+            self._need_rt("dbExec")
+            rest = ", ".join(args[2:])
+            return (f"NewrRt.dbExec({args[0]}, {args[1]}, "
+                    f"new Object[]{{{rest}}})", _PREC["primary"])
+        if name == "query":
+            self._need_rt("dbQuery")
+            java_struct, decl = self._db_row_struct(node)
+            names = [_java_str(f.name) for f in decl.fields]
+            types = [_java_str(self._db_field_type(f.type))
+                     for f in decl.fields]
+            casts = ", ".join(
+                f"({self._java_boxed_type(f.type)}) row[{i}]"
+                for i, f in enumerate(decl.fields))
+            names_lit = "new String[]{" + ", ".join(names) + "}"
+            types_lit = "new String[]{" + ", ".join(types) + "}"
+            rest = ", ".join(args[2:])
+            return (f"NewrRt.dbQuery({args[0]}, {args[1]}, "
+                    f"new Object[]{{{rest}}}, {names_lit}, {types_lit})"
+                    f".stream().map(row -> new {java_struct}({casts}))"
+                    f".collect(java.util.stream.Collectors.toList())",
+                    _PREC["primary"])
+        if name == "begin":
+            self._need_rt("dbBegin")
+            return f"NewrRt.dbBegin({args[0]})", _PREC["primary"]
+        if name == "commit":
+            self._need_rt("dbCommit")
+            return f"NewrRt.dbCommit({args[0]})", _PREC["primary"]
+        if name == "rollback":
+            self._need_rt("dbRollback")
+            return f"NewrRt.dbRollback({args[0]})", _PREC["primary"]
+        if name == "last_id":
+            self._need_rt("dbLastId")
+            return f"NewrRt.dbLastId({args[0]})", _PREC["primary"]
+        if name == "close":
+            self._need_rt("dbClose")
+            return f"NewrRt.dbClose({args[0]})", _PREC["primary"]
+        self._fail(f"module `db` has no function `{name}`")
+
+    def _db_row_struct(self, node: A.Call) -> tuple[str, A.StructDecl]:
+        """The (Java constructor, decl) of the row struct for a
+        `db.query` call. The row type comes from `node.expr_type`,
+        set by db_check to `list[Row]`. A struct from an imported
+        file module resolves to its qualified class name."""
+        t = self._type_of(node)
+        if t.name != "list" or not t.params:
+            self._fail("internal: db.query without a list[Row] type")
+        row_name = t.params[0].name
+        decl = self.structs.get(row_name)
+        if decl is not None:
+            return self._struct_java_name(row_name), decl
+        for bound, sub in self.program.modules.items():
+            for s in sub.structs:
+                if s.name == row_name:
+                    return self._struct_java_name(row_name), s
+        self._fail(f"db.query: row struct `{row_name}` not found")
+
+    @staticmethod
+    def _db_field_type(t: Type) -> str:
+        """The runtime type string for a row field: the base name,
+        with `?` when nullable. Row fields are only int/float/str/
+        bool (db_check enforces it), so no deeper shape is needed."""
+        return t.name + ("?" if t.nullable else "")
+
+    # ------------------------------------------------------------ http/json
+    # shapes
+
+    def _struct_decl(self, name: str) -> A.StructDecl:
+        """The StructDecl for a struct type name (full name, then
+        the short name after a dot, then imported file modules),
+        mirroring `_db_row_struct`."""
+        short = name.rsplit(".", 1)[-1] if "." in name else name
+        decl = self.structs.get(name) or self.structs.get(short)
+        if decl is not None:
+            return decl
+        for sub in self.program.modules.values():
+            for s in sub.structs:
+                if s.name == short:
+                    return s
+        self._fail(f"struct `{name}` not found")
+
+    def _shape_literal(self, t: Type) -> str:
+        """Java source for the shape descriptor of a static type
+        (SPEC.md sections 12.6, 12.7), mirroring the Python
+        `_shape_literal`: a scalar is the String `"int"` /
+        `"float"` / `"str"` / `"bool"` / `"none"`, a nullable is
+        `new Object[]{"?", inner}`, a list is
+        `new Object[]{"list", elem}`, a dict is
+        `new Object[]{"dict", value}`, a struct is
+        `new Object[]{"struct", factory, fields}` where factory is
+        a Function<Object[], Object> building the struct from its
+        field values in declaration order (boxed casts, so a
+        nullable field stays boxed and a primitive field unboxes),
+        and fields is `new Object[][]` of
+        `{newrName, javaFieldName, shape}` in declaration order.
+        The runtime walks the shape for json.encode/decode and for
+        building the http request/response structs."""
+        if t.nullable:
+            inner = Type(t.name, t.params)
+            return (f"new Object[]{{\"?\", "
+                    f"{self._shape_literal(inner)}}}")
+        if t.name in ("int", "float", "str", "bool", "none"):
+            return _java_str(t.name)
+        if t.name == "list":
+            if len(t.params) != 1:
+                self._fail(f"internal: list type without one element "
+                           f"type: `{t}`")
+            return (f"new Object[]{{\"list\", "
+                    f"{self._shape_literal(t.params[0])}}}")
+        if t.name == "dict":
+            if len(t.params) != 2:
+                self._fail(f"internal: dict type without two params: "
+                           f"`{t}`")
+            return (f"new Object[]{{\"dict\", "
+                    f"{self._shape_literal(t.params[1])}}}")
+        if t.name in ("fn", "Result", "set", "error", "duration"):
+            self._fail(f"internal: type `{t}` has no JSON shape")
+        decl = self._struct_decl(t.name)
+        java_name = self._struct_java_name(t.name)
+        if decl.fields:
+            casts = ", ".join(
+                f"({self._java_boxed_type(f.type)}) vals[{i}]"
+                for i, f in enumerate(decl.fields))
+            factory = ("((java.util.function.Function<Object[], "
+                       "Object>) ((Object[] vals) -> new "
+                       f"{java_name}({casts})))")
+        else:
+            factory = ("((java.util.function.Function<Object[], "
+                       "Object>) ((Object[] vals) -> new "
+                       f"{java_name}()))")
+        fields = ", ".join(
+            f"new Object[]{{{_java_str(f.name)}, "
+            f"{_java_str(self._mangle(f.name))}, "
+            f"{self._shape_literal(f.type)}}}"
+            for f in decl.fields)
+        return (f"new Object[]{{\"struct\", {factory}, "
+                f"new Object[][]{{{fields}}}}}")
+
+    def _http_handler_request_type(self, handler_arg: A.Expr) -> Type:
+        """The request struct type of a route handler: the parameter
+        type of an inline lambda, or the first parameter of the fn
+        type of a let-bound lambda variable (the checker tracks
+        let-bound lambdas the same way, in http_check._lambdas).
+        A named function is not a handler in M8b."""
+        if isinstance(handler_arg, A.Lambda):
+            if len(handler_arg.params) != 1:
+                self._fail("a route handler takes exactly one "
+                           "parameter (the request)",
+                           span=handler_arg.span)
+            return handler_arg.params[0].type
+        if isinstance(handler_arg, A.Name):
+            binding = self._lookup(handler_arg.name)
+            if binding is not None and binding.type is not None:
+                t = binding.type
+                if t.name == "fn" and t.params:
+                    return t.params[0]
+            self._fail(f"route handler `{handler_arg.name}` is not a "
+                       "lambda", span=handler_arg.span)
+        self._fail("a route handler must be a lambda",
+                   span=handler_arg.span)
+
+    def _emit_http_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`http.*` calls (SPEC.md section 12.6): runtime helpers in
+        NewrRt.java. The checker (http_check) has already validated
+        the call, so the arity here is trusted. Fetch calls carry
+        the response struct shape from `node.expr_type`, set by
+        http_check; route calls carry the request struct shape
+        from the handler lambda's parameter type."""
+        name = node.func.name
+        if name == "route":
+            req_type = self._http_handler_request_type(node.args[2])
+            shape = self._shape_literal(req_type)
+            self._need_rt("httpRoute")
+            return (f"NewrRt.httpRoute({args[0]}, {args[1]}, "
+                    f"{args[2]}, {shape})", _PREC["primary"])
+        if name == "serve":
+            self._need_rt("httpServe")
+            return (f"NewrRt.httpServe({', '.join(args)})",
+                    _PREC["primary"])
+        if name in ("get", "post", "request"):
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            cast = self._java_boxed_type(t)
+            if name == "get":
+                self._need_rt("httpGet")
+                timeout = args[1] if len(args) > 1 else "10"
+                headers = args[2] if len(args) > 2 else "null"
+                return (f"({cast}) NewrRt.httpGet({args[0]}, "
+                        f"{timeout}, {headers}, {shape})",
+                        _PREC["primary"])
+            if name == "post":
+                self._need_rt("httpPost")
+                timeout = args[2] if len(args) > 2 else "10"
+                headers = args[3] if len(args) > 3 else "null"
+                return (f"({cast}) NewrRt.httpPost({args[0]}, "
+                        f"{args[1]}, {timeout}, {headers}, {shape})",
+                        _PREC["primary"])
+            self._need_rt("httpRequest")
+            timeout = args[3] if len(args) > 3 else "10"
+            headers = args[4] if len(args) > 4 else "null"
+            return (f"({cast}) NewrRt.httpRequest({args[0]}, "
+                    f"{args[1]}, {args[2]}, {timeout}, {headers}, "
+                    f"{shape})", _PREC["primary"])
+        self._fail(f"module `http` has no function `{name}`")
+
+    def _emit_json_call(self, node: A.Call,
+                        args: list[str]) -> tuple[str, int]:
+        """`json.*` calls (SPEC.md section 12.7): runtime helpers in
+        NewrRt.java. `json.encode` takes its shape from the
+        argument's static type; `json.decode` takes its shape from
+        `node.expr_type`, the expected type set by json_check."""
+        name = node.func.name
+        if name == "encode":
+            shape = self._shape_literal(self._type_of(node.args[0]))
+            self._need_rt("jsonEncode")
+            return (f"NewrRt.jsonEncode({args[0]}, {shape})",
+                    _PREC["primary"])
+        if name == "decode":
+            t = self._type_of(node)
+            shape = self._shape_literal(t)
+            cast = self._java_boxed_type(t)
+            self._need_rt("jsonDecode")
+            return (f"({cast}) NewrRt.jsonDecode({args[0]}, {shape})",
+                    _PREC["primary"])
+        self._fail(f"module `json` has no function `{name}`")
+
+    def _emit_ui_call(self, node: A.Call) -> tuple[str, int]:
+        """`ui.*` calls (SPEC.md section 12.8): runtime helpers in
+        NewrRt.java. The checker (ui_check) has already validated
+        the call, so the arity here is trusted. Constructors build
+        a `NewrRt.Widget`; `render` is the pure HTML core; `show`
+        and `run` open the Swing window (the py reference emitter
+        opens tkinter; this is its Java twin). Handler and view
+        arguments are emitted with their fn type as context, so
+        an inline lambda needs no cast, a let-bound lambda
+        variable passes as its FnN value, and a named function
+        is a method reference (or a null-returning wrapper when
+        it returns none, see _emit_name)."""
+        name = node.func.name
+        if name in ("text", "button", "input", "list", "image", "row",
+                    "column", "render", "show", "run"):
+            if name == "button":
+                args = [self.emit_expr(node.args[0], 0),
+                        self.emit_expr(
+                            node.args[1], 0,
+                            fn_target=fn_of([], Type("none")))]
+            elif name == "input":
+                args = [self.emit_expr(node.args[0], 0),
+                        self.emit_expr(node.args[1], 0),
+                        self.emit_expr(
+                            node.args[2], 0,
+                            fn_target=fn_of([Type("str")],
+                                            Type("none")))]
+            elif name == "run":
+                args = [self.emit_expr(
+                    node.args[0], 0,
+                    fn_target=fn_of([], Type("Widget")))]
+            else:
+                args = [self.emit_expr(a, 0) for a in node.args]
+            self._need_rt(f"ui{name.capitalize()}")
+            return (f"NewrRt.ui{name.capitalize()}"
+                    f"({', '.join(args)})", _PREC["primary"])
+        self._fail(f"module `ui` has no function `{name}`")
+
     def _emit_module_member(self, node: A.Member,
                             binding: _Binding) -> tuple[str, int]:
         """A named-module member used as a value: a constant, or a
@@ -3172,6 +3564,20 @@ class _JavaEmitter:
         if real == "math" and node.name in ("pi", "e"):
             return ("Math.PI" if node.name == "pi" else "Math.E",
                     _PREC["primary"])
+        if binding.kind == "file-module":
+            # An imported `pub const` / `pub let` used as a value
+            # (M9 L6): a qualified read of the defining module's
+            # `public static` field. A non-pub const never reaches
+            # here (the checker rejects it with E3005), but the
+            # `pub` check keeps the emitter honest if it ever does.
+            sub = self.program.modules.get(binding.java)
+            if sub is not None:
+                decl = next((s for s in sub.stmts
+                             if isinstance(s, (A.Let, A.Const))
+                             and s.name == node.name and s.pub), None)
+                if decl is not None:
+                    return (f"{ref}.{self._mangle(node.name)}",
+                            _PREC["primary"])
         self._fail(f"module `{real}` has no value member `{node.name}`")
 
     # ------------------------------------------------------------ store calls
@@ -3636,7 +4042,7 @@ class _JavaEmitter:
 
     def _header(self, main_path: str, description: str | None = None) -> list[str]:
         lines = [
-            f"// Generated by newr from {main_path}. Do not edit by hand.",
+            f"// Generated by newr from {main_path} — do not edit by hand.",
             f"// Edit the .newr file and rebuild with: newr build {main_path}",
         ]
         if description:
@@ -4497,8 +4903,7 @@ class _JavaEmitter:
         lines.extend(self._jdbc_read_balance(db, "to", "            ",
                                              var="curTo"))
         lines.append("            long toBalance = curTo;")
-        lines.append("            long nextTo = healed "
-                     "? NewrRt.add(toBalance, amount) : toBalance;")
+        lines.append("            long nextTo = NewrRt.add(toBalance, amount);")
         lines.append("            if (!healed) {")
         lines.extend(self._jdbc_insert_ledger(
             db, "to", "amount", "key != null ? key + \":in\" : null",

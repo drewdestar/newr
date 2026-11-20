@@ -1,0 +1,3 @@
+# expect: E2014
+# A button handler takes no parameters; one that takes a str is E2014.
+ui.button("x", fn(s: str) -> none: print(s))

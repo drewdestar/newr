@@ -1,0 +1,49 @@
+# The http module, client side (SPEC.md section 12.6): fetch a
+# JSON list, post an echo, check a 404 and query decoding. The
+# pair harness runs this with the server's port as env.args[1].
+struct Todo:
+  id: int
+  title: str
+  done: bool
+  score: float
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+let passed = true
+let port = env.args.get(1, "0")
+let base = "http://127.0.0.1:" + port
+let list_resp: HttpResponse = http.get(base + "/todos")
+if list_resp.status != 200:
+  passed = false
+let todos: list[Todo] = json.decode(list_resp.body)
+if todos.len() != 2:
+  passed = false
+let first = todos.get(0, Todo(id: 0, title: "", done: false, score: 0.0))
+if first.id != 9007199254740993 or first.title != "123" or first.done != false or first.score != 1.0:
+  passed = false
+let second = todos.get(1, Todo(id: 0, title: "", done: false, score: 0.0))
+if second.id != 2 or second.title != "tulis laporan" or second.done != true or second.score != 1.5:
+  passed = false
+let new_todo = Todo(id: 7, title: "q", done: true, score: -2.25)
+let created: HttpResponse = http.post(base + "/todos", json.encode(new_todo))
+if created.status != 201:
+  passed = false
+let echoed: Todo = json.decode(created.body)
+if echoed.id != 7 or echoed.title != "q" or echoed.done != true or echoed.score != -2.25:
+  passed = false
+let echo_resp: HttpResponse = http.get(base + "/echo?id=7&name=a+b&name=c%20d")
+if echo_resp.status != 200:
+  passed = false
+let q: dict[str, str] = json.decode(echo_resp.body)
+if q.get("id", "") != "7" or q.get("name", "") != "c d":
+  passed = false
+let missing: HttpResponse = http.get(base + "/nope")
+if missing.status != 404 or missing.body != "":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

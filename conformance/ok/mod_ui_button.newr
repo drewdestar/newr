@@ -1,0 +1,12 @@
+# The ui module (SPEC.md section 12.8): a button renders with a
+# 0-based pre-order data-action index, one per button.
+let passed = true
+if ui.render(ui.button("Tap", fn() -> none: print("tapped"))) != "<button data-action=\"0\">Tap</button>":
+  passed = false
+let two = ui.column([ui.button("A", fn() -> none: print("a")), ui.button("B", fn() -> none: print("b"))])
+if ui.render(two) != "<div data-layout=\"column\"><button data-action=\"0\">A</button><button data-action=\"1\">B</button></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

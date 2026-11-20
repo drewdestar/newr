@@ -1,0 +1,12 @@
+# Line endings: LF everywhere on checkout, on every OS.
+#
+# Without this, Windows runners check out with core.autocrlf=true
+# and every text file becomes CRLF, which breaks two CI jobs:
+# - golden rebuild check: the SHA-256 of examples/hello.py and
+#   examples/showcase.py is compared against hardcoded v0 hashes,
+#   and CRLF changes the hash (ubuntu/macOS pass, Windows fails).
+# - standalone binary: bash chokes on the CRLF line endings of
+#   scripts/build-binary.sh, so the build step fails in seconds.
+# `text=auto` lets git tell text from binary, so no binary file
+# is ever converted; only text files are normalized to LF.
+* text=auto eol=lf

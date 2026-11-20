@@ -1,0 +1,103 @@
+/// shop_frontend_js.newr, the js server frontend (M8d). A Node
+/// server on port 8081. It fetches the product list from the
+/// backend once at start, serves the rendered shop page on GET /,
+/// and dispatches button taps and search changes on GET /action.
+/// Button order is PINNED: Buy buttons in product order
+/// (data-action 0, 1, 2), Checkout last (data-action 3); the
+/// search input is data-input 0. The /action route disambiguates
+/// by the v query value: a request carrying v is a search input
+/// change (redirect to /?q=<v>); a request without v is a button
+/// tap (i is the button index as a string, "0"/"1"/"2"/"3").
+/// After a buy the search filter resets to the full list. The
+/// bridge script is a static string in the shell: data-action
+/// clicks fetch /action?i=N and reload; data-input changes fetch
+/// /action?i=N&v=... and then navigate to /?q=<v>. Buy and
+/// checkout handlers passed to the view are no-ops: the server
+/// never invokes them, the /action route does the work instead.
+/// The /action path is written as a literal (it matches the
+/// shop_shared constant exactly) because the emitters cannot emit
+/// an imported const reference yet (E4001).
+/// Run the backend first (port 8080).
+import "shop_shared.newr"
+import "shop_view.newr"
+
+struct HttpRequest:
+  method: str
+  path: str
+  headers: dict[str, str]
+  body: str
+  query: dict[str, str]
+
+struct HttpResponse:
+  status: int
+  headers: dict[str, str]
+  body: str
+
+/// No-op Buy handler for the view. The server never invokes it.
+/// Pub so the unused parameter is the handler contract, not a bug
+/// signal (SPEC 5.1: pub function parameters do not warn).
+pub fn noop_buy(id: int) -> none:
+  pass
+
+/// No-op Checkout handler for the view. The server never invokes it.
+pub fn noop_checkout() -> none:
+  pass
+
+/// The view handlers, as let-bound lambdas. Let-bound (not inline)
+/// so the dart emitter can Future-wrap them: they call fns that
+/// fetch, and dart only allows a fetching lambda as a route handler
+/// argument or a let-bound lambda. Named fns passed directly would
+/// also work for the emit, but the java emitter passes them as bare
+/// method references, which do not compile against a Void-returning
+/// fn type; the let-bound lambda form compiles on java too.
+let buy_handler = fn(id: int) -> none:
+  noop_buy(id)
+
+let checkout_handler = fn() -> none:
+  noop_checkout()
+
+let bridge = "document.querySelectorAll(\"[data-action]\").forEach(function(el) {{ el.addEventListener(\"click\", function() {{ fetch(\"/action?i=\" + el.getAttribute(\"data-action\")).then(function() {{ location.reload(); }}); }}); }});" + "\n" + "document.querySelectorAll(\"[data-input]\").forEach(function(el) {{ el.addEventListener(\"change\", function() {{ fetch(\"/action?i=\" + el.getAttribute(\"data-input\") + \"&v=\" + encodeURIComponent(el.value)).then(function() {{ location.href = \"/?q=\" + encodeURIComponent(el.value); }}); }}); }});"
+
+let products_resp: HttpResponse = http.get("http://127.0.0.1:8080/products")
+let products: list[Product] = json.decode(products_resp.body)
+
+let home = fn(req: HttpRequest) -> HttpResponse:
+  let query = req.query.get("q", "")
+  let cart_resp: HttpResponse = http.get("http://127.0.0.1:8080/cart")
+  let cart: list[CartLine] = json.decode(cart_resp.body)
+  let total = 0
+  for line in cart:
+    total = total + line.qty * line.price
+  let shown: list[Product] = []
+  for p in products:
+    if query == "" or p.name.contains(query):
+      shown.append(p)
+  let page = ui.render(shop_view.shop_view(shown, total, query, buy_handler, checkout_handler))
+  return HttpResponse(status: 200, headers: {"Content-Type": "text/html"}, body: "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Shop</title></head><body>" + page + "<script>" + bridge + "</script></body></html>")
+
+let action = fn(req: HttpRequest) -> HttpResponse:
+  let i = req.query.get("i", "")
+  if req.query.contains("v"):
+    let v = req.query.get("v", "")
+    return HttpResponse(status: 302, headers: {"Location": "/?q=" + v}, body: "")
+  if i == "0":
+    let bought: HttpResponse = http.post("http://127.0.0.1:8080/cart", json.encode(shop_shared.CartRequest(product_id: 1, qty: 1)))
+    if bought.status != 200:
+      print "buy failed: " + str(bought.status)
+  elif i == "1":
+    let bought: HttpResponse = http.post("http://127.0.0.1:8080/cart", json.encode(shop_shared.CartRequest(product_id: 2, qty: 1)))
+    if bought.status != 200:
+      print "buy failed: " + str(bought.status)
+  elif i == "2":
+    let bought: HttpResponse = http.post("http://127.0.0.1:8080/cart", json.encode(shop_shared.CartRequest(product_id: 3, qty: 1)))
+    if bought.status != 200:
+      print "buy failed: " + str(bought.status)
+  elif i == "3":
+    let bought: HttpResponse = http.post("http://127.0.0.1:8080/checkout", "")
+    if bought.status != 200:
+      print "checkout failed: " + str(bought.status)
+  return HttpResponse(status: 302, headers: {"Location": "/"}, body: "")
+
+http.route("GET", "/", home)
+http.route("GET", "/action", action)
+http.serve(8081)

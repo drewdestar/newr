@@ -1,0 +1,43 @@
+# The db module on :memory: (SPEC.md section 12.5): open, exec with
+# `?` binds, last_id, typed query into a struct list, begin/commit,
+# begin/rollback, close.
+struct Todo:
+  id: int
+  title: str
+  done: bool
+
+let passed = true
+let h = db.open(":memory:")
+db.exec(h, "CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, done INTEGER NOT NULL)")
+let n = db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "beli susu", false)
+if n != 1:
+  passed = false
+let id = db.last_id(h)
+if id != 1:
+  passed = false
+let todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")
+if todos.len() != 1:
+  passed = false
+let first = todos.get(0, Todo(id: 0, title: "", done: false))
+if first.id != 1 or first.title != "beli susu" or first.done != false:
+  passed = false
+db.begin(h)
+db.exec(h, "UPDATE todos SET done = ? WHERE id = ?", true, 1)
+db.commit(h)
+let done_todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos WHERE done = ?", true)
+if done_todos.len() != 1:
+  passed = false
+let done_first = done_todos.get(0, Todo(id: 0, title: "", done: false))
+if done_first.done != true:
+  passed = false
+db.begin(h)
+db.exec(h, "INSERT INTO todos (title, done) VALUES (?, ?)", "rollback me", false)
+db.rollback(h)
+let all_todos: list[Todo] = db.query(h, "SELECT id, title, done FROM todos")
+if all_todos.len() != 1:
+  passed = false
+db.close(h)
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): a row renders as a div
+# with data-layout row, and an empty row as an empty div.
+let passed = true
+if ui.render(ui.row([ui.text("a"), ui.text("b")])) != "<div data-layout=\"row\"><p>a</p><p>b</p></div>":
+  passed = false
+if ui.render(ui.row([])) != "<div data-layout=\"row\"></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): a column renders as a
+# div with data-layout column, and an empty column as an empty div.
+let passed = true
+if ui.render(ui.column([ui.text("a")])) != "<div data-layout=\"column\"><p>a</p></div>":
+  passed = false
+if ui.render(ui.column([])) != "<div data-layout=\"column\"></div>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

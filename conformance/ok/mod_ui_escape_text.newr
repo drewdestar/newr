@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): escaping in text and in
+# a button label, & then < > ", in that order.
+let passed = true
+if ui.render(ui.text("a & b <c> \"q\"")) != "<p>a &amp; b &lt;c&gt; &quot;q&quot;</p>":
+  passed = false
+if ui.render(ui.button("Go & <go>", fn() -> none: print("go"))) != "<button data-action=\"0\">Go &amp; &lt;go&gt;</button>":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"

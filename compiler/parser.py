@@ -23,6 +23,7 @@ decision is recorded here and in the build report):
 
 from __future__ import annotations
 
+import bisect
 import re
 from types import MappingProxyType
 
@@ -35,7 +36,7 @@ from .ast_nodes import (
     NamePattern, OptionDecl, OrPattern, Param, Pass, Program, Propagate,
     Reply, Require, Return, SelectDecl, Send, StoreDecl, StructDecl,
     StructField, StructPattern, StringsDecl, StringsEntry, TableDecl,
-    TaskDecl, TCall, Ternary, TextInputDecl, Throw, Try, TryExpr, Type,
+    TaskDecl, TCall, Ternary, TestBlock, TextInputDecl, Throw, Try, TryExpr, Type,
     UnaryOp, While, WildcardPattern, list_of, nullable_of,
 )
 from .errors import Diagnostic, NewrError, Span
@@ -47,7 +48,7 @@ _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 _TOP_DECL_KEYWORDS = {
     "fn", "struct", "enum", "import", "bot", "command", "event", "task",
-    "strings", "store",
+    "strings", "store", "test",
 }
 # Keywords that may only appear at the top level (using one inside a
 # body is E1001).
@@ -92,6 +93,20 @@ class _Parser:
         # recursion (M-01): past MAX_NESTING_DEPTH the parser stops
         # with E1001 instead of crashing with RecursionError.
         self._depth = 0
+        # Raw byte offset where each 1-based line starts (spans are
+        # raw byte offsets, SPEC.md section 16, so this is computed
+        # on the source as given, not on the lexer's normalized
+        # copy). Used only by _collect_doc to tell whether a doc
+        # comment sits directly above its item.
+        self._line_starts = [0]
+        pos = 0
+        for line in source.split("\n")[:-1]:
+            pos += len(line.encode("utf-8")) + 1
+            self._line_starts.append(pos)
+
+    def _line_no(self, byte_offset: int) -> int:
+        """1-based line of a raw byte offset."""
+        return bisect.bisect_right(self._line_starts, byte_offset)
 
     # ------------------------------------------------------------ cursor
 
@@ -172,6 +187,14 @@ class _Parser:
             return self.advance()
         self.err(self.cur, f"expected {what}, found {_describe(self.cur)}")
 
+    def expect_member_name(self, what: str = "a field or method name") -> Token:
+        # A keyword may be a member name after a dot: `ui.button(...)`
+        # is a call, not a discord `button` block. The dot makes the
+        # position unambiguous, so accept any KEYWORD token here.
+        if self.at("IDENT") or self.at("KEYWORD"):
+            return self.advance()
+        self.err(self.cur, f"expected {what}, found {_describe(self.cur)}")
+
     def _skip_newlines(self) -> None:
         while self.at("NEWLINE"):
             self.advance()
@@ -205,6 +228,91 @@ class _Parser:
             self.err(self.cur, "expected an indented block after `:`",
                      help="indent the block body by 2 spaces")
         self.advance()
+
+    def _collect_file_doc(self) -> str | None:
+        """The file header: a leading `///` block (SPEC.md section 6,
+        M6) that documents the file itself.
+
+        A file header is a `///` block before the first item,
+        followed by a blank line (or end of file). When the first
+        item follows directly below the block, the block is that
+        item's doc instead: rewind so the normal loop attaches it.
+        Blank lines inside the header are kept (as blank lines in
+        the text). Returns None when there is no file header.
+        """
+        if not self.at("DOC_COMMENT"):
+            return None
+        save = self.pos
+        lines: list[tuple[int, str]] = []
+        while self.at("DOC_COMMENT"):
+            tok = self.cur
+            lines.append((self._line_no(tok.span.start_byte),
+                          tok.value or ""))
+            self.advance()
+            if self.at("NEWLINE"):
+                self.advance()
+            else:
+                break
+        if self.at("EOF"):
+            return self._join_doc_lines(lines)
+        item_line = self._line_no(self.cur.span.start_byte)
+        if item_line == lines[-1][0] + 1:
+            self.pos = save
+            return None
+        return self._join_doc_lines(lines)
+
+    @staticmethod
+    def _join_doc_lines(lines: list[tuple[int, str]]) -> str:
+        """Join (line, text) doc lines, keeping blank lines between
+        them."""
+        parts: list[str] = []
+        prev: int | None = None
+        for line_no, text in lines:
+            if prev is not None:
+                parts.append("\n" * (line_no - prev))
+            parts.append(text)
+            prev = line_no
+        return "".join(parts)
+
+    def _collect_doc(self) -> str | None:
+        """Collect consecutive `///` doc-comment lines (SPEC.md
+        section 6, M6) and return their text joined with "\\n".
+
+        A doc comment documents the item directly below it: the doc
+        is the trailing run of `///` lines ending on the line right
+        above the item. A blank line anywhere in the run, or between
+        the run and the item, breaks the attachment: only the lines
+        directly above the item count, the rest document nothing.
+        The lexer collapses blank lines into one NEWLINE token, so
+        adjacency is judged by line numbers, not by tokens. Returns
+        None when no `///` line sits directly above the next item.
+        """
+        if not self.at("DOC_COMMENT"):
+            return None
+        lines: list[tuple[int, str]] = []
+        while self.at("DOC_COMMENT"):
+            tok = self.cur
+            lines.append((self._line_no(tok.span.start_byte),
+                          tok.value or ""))
+            self.advance()
+            if self.at("NEWLINE"):
+                self.advance()
+            else:
+                break
+        if self.at("EOF") or self.at("DEDENT"):
+            return None
+        item_line = self._line_no(self.cur.span.start_byte)
+        doc_lines = []
+        expect = item_line - 1
+        for line_no, text in reversed(lines):
+            if line_no != expect:
+                break
+            doc_lines.append(text)
+            expect -= 1
+        if not doc_lines:
+            return None
+        doc_lines.reverse()
+        return "\n".join(doc_lines)
 
     def _parse_lines(self, line_fn) -> None:
         """Parse an indented key/value-style block (one line_fn per line)."""
@@ -240,7 +348,19 @@ class _Parser:
                 self.err(self.cur,
                          "unexpected end of file; expected the end of "
                          "the block")
-            stmts.append(self._parse_stmt())
+            doc = self._collect_doc()
+            self._skip_newlines()
+            if self.at("DEDENT"):
+                self.advance()
+                return stmts
+            if self.at("EOF"):
+                self.err(self.cur,
+                         "unexpected end of file; expected the end of "
+                         "the block")
+            stmt = self._parse_stmt()
+            if doc is not None:
+                stmt.doc = doc
+            stmts.append(stmt)
             if self.at("NEWLINE"):
                 self.advance()
 
@@ -249,6 +369,9 @@ class _Parser:
     def parse_program(self) -> Program:
         start_byte = 0
         prog = Program(span=Span(self.filename, 0, 0))
+        self._skip_newlines()
+        prog.file_doc = self._collect_file_doc()
+        self._skip_newlines()
         while True:
             self._skip_newlines()
             if self.at("EOF"):
@@ -257,25 +380,43 @@ class _Parser:
                 self.err(self.cur,
                          "indented line outside any block",
                          help="top-level lines start at column 0")
-            self._parse_top_level(prog)
+            doc = self._collect_doc()
+            self._skip_newlines()
+            if self.at("EOF"):
+                break
+            self._parse_top_level(prog, doc)
             if self.at("NEWLINE"):
                 self.advance()
         end_byte = self.tokens[-1].span.end_byte
         prog.span = Span(self.filename, start_byte, end_byte)
         return prog
 
-    def _parse_top_level(self, prog: Program) -> None:
+    def _parse_top_level(self, prog: Program,
+                         doc: str | None = None) -> None:
+        node = self._parse_top_level_node(prog)
+        if doc is not None and node is not None:
+            node.doc = doc
+
+    def _parse_top_level_node(self, prog: Program):
         if self.at_kw("pub"):
             start = self.advance()
             nxt = self.cur
             if self.at_kw("fn"):
-                prog.functions.append(self._parse_fn(pub=True))
+                node = self._parse_fn(pub=True)
+                prog.functions.append(node)
+                return node
             elif self.at_kw("struct"):
-                prog.structs.append(self._parse_struct(pub=True))
+                node = self._parse_struct(pub=True)
+                prog.structs.append(node)
+                return node
             elif self.at_kw("enum"):
-                prog.enums.append(self._parse_enum(pub=True))
+                node = self._parse_enum(pub=True)
+                prog.enums.append(node)
+                return node
             elif self.at_kw("let") or self.at_kw("const"):
-                prog.stmts.append(self._parse_let_const(pub=True))
+                node = self._parse_let_const(pub=True)
+                prog.stmts.append(node)
+                return node
             else:
                 self.err(nxt, f"expected a declaration after `pub`, "
                               f"found {_describe(nxt)}",
@@ -283,30 +424,56 @@ class _Parser:
                               "`let`, or `const`")
             return
         if self.at_kw("import"):
-            prog.imports.append(self._parse_import())
+            node = self._parse_import()
+            prog.imports.append(node)
+            return node
         elif self.at_kw("fn"):
-            prog.functions.append(self._parse_fn())
+            node = self._parse_fn()
+            prog.functions.append(node)
+            return node
+        elif self.at_kw("test"):
+            node = self._parse_test_block(prog)
+            prog.test_blocks.append(node)
+            return node
         elif self.at_kw("struct"):
-            prog.structs.append(self._parse_struct())
+            node = self._parse_struct()
+            prog.structs.append(node)
+            return node
         elif self.at_kw("enum"):
-            prog.enums.append(self._parse_enum())
+            node = self._parse_enum()
+            prog.enums.append(node)
+            return node
         elif self.at_kw("bot"):
             if prog.bot is not None:
                 self.err(self.cur, "only one `bot` block is allowed "
                                    "per file")
-            prog.bot = self._parse_bot()
+            node = self._parse_bot()
+            prog.bot = node
+            return node
         elif self.at_kw("command"):
-            prog.commands.append(self._parse_command())
+            node = self._parse_command()
+            prog.commands.append(node)
+            return node
         elif self.at_kw("event"):
-            prog.events.append(self._parse_event())
+            node = self._parse_event()
+            prog.events.append(node)
+            return node
         elif self.at_kw("task"):
-            prog.tasks.append(self._parse_task())
+            node = self._parse_task()
+            prog.tasks.append(node)
+            return node
         elif self.at_kw("strings"):
-            prog.strings.append(self._parse_strings())
+            node = self._parse_strings()
+            prog.strings.append(node)
+            return node
         elif self.at_kw("store"):
-            prog.stores.append(self._parse_store())
+            node = self._parse_store()
+            prog.stores.append(node)
+            return node
         else:
-            prog.stmts.append(self._parse_stmt())
+            node = self._parse_stmt()
+            prog.stmts.append(node)
+            return node
 
     # ------------------------------------------------------------ imports
 
@@ -363,7 +530,17 @@ class _Parser:
         elif self.at("IDENT") or self.at_kw("none") or self.at_kw("embed"):
             # `embed` is a keyword but also a type name (§7.1); `none`
             # is a keyword and the type of the `none` literal.
+            is_ident = self.at("IDENT")
             name = self.advance().value
+            module = None
+            if is_ident and self.at("DOT"):
+                # A qualified type `m.T` (M9 L7): the module alias,
+                # then the type name. Only a plain IDENT qualifies;
+                # `none` / `embed` are builtins and never qualified.
+                self.advance()
+                mod_tok = self.expect_ident("a type name after `.`")
+                module = name
+                name = mod_tok.value
             params = []
             if self.at("LBRACK"):
                 self.advance()
@@ -374,17 +551,19 @@ class _Parser:
                         continue
                     break
                 self.expect("RBRACK", None, "`]`")
-            base = Type(name, tuple(params))
+            base = Type(name, tuple(params), module=module)
         else:
             self.err(self.cur,
                      f"expected a type, found {_describe(self.cur)}")
         end = self.tokens[self.pos - 1]
         base = Type(base.name, base.params,
-                    span=self.span(start, end), nullable=base.nullable)
+                    span=self.span(start, end), nullable=base.nullable,
+                    module=base.module)
         if self.at("QMARK"):
             q = self.advance()
             base = Type(base.name, base.params,
-                        span=self.span(start, q), nullable=True)
+                        span=self.span(start, q), nullable=True,
+                        module=base.module)
         return base
 
     def _parse_params(self) -> list[Param]:
@@ -423,6 +602,42 @@ class _Parser:
         return FnDecl(span=self.span(start, end), name=name_tok.value,
                       params=params, return_type=return_type, body=body,
                       pub=pub)
+
+    def _parse_test_block(self, prog: Program) -> TestBlock:
+        """Parse `test "display name":` plus an indented body
+        (SPEC.md section 8.7). The name is a plain string (no
+        interpolation, via `_parse_plain_string`), so it may
+        contain spaces. The block is lowered to a synthetic
+        function named `_newr_test_<n>` (n is the block's index
+        in source order) sharing the same body list, and that
+        function is appended to `prog.functions` so the resolver,
+        checker, and emitters handle the block exactly like a
+        parameterless `fn` with no return value. The display name
+        is what `newr test` reports; the synthetic name is what
+        its harness calls."""
+        start = self.expect_kw("test")
+        name, name_span = self._parse_plain_string()
+        if not name:
+            self._err_span(name_span,
+                           "a test block needs a non-empty name",
+                           help="write a name, like "
+                                "`test \"adds two numbers\":`")
+        if "\n" in name or "\r" in name:
+            self._err_span(
+                name_span,
+                "a test block name cannot contain a newline",
+                help="a test name is one line: the runner prints it "
+                     "as one marker line")
+        self.expect("COLON", None, "`:` after the test name")
+        body = self.parse_block()
+        end = self.tokens[self.pos - 1]
+        span = self.span(start, end)
+        func_name = f"_newr_test_{len(prog.test_blocks)}"
+        prog.functions.append(FnDecl(
+            span=span, name=func_name, params=[], return_type=None,
+            body=body, pub=False))
+        return TestBlock(span=span, name=name, body=body,
+                         func_name=func_name)
 
     def _parse_struct(self, pub: bool = False) -> StructDecl:
         start = self.expect_kw("struct")
@@ -1794,13 +2009,13 @@ class _Parser:
             tok = self.cur
             if tok.kind == "DOT":
                 self.advance()
-                name_tok = self.expect_ident("a field or method name")
+                name_tok = self.expect_member_name()
                 expr = Member(span=self.span_from(expr.span.start_byte,
                                                   name_tok),
                               obj=expr, name=name_tok.value)
             elif tok.kind == "QDOT":
                 self.advance()
-                name_tok = self.expect_ident("a field or method name")
+                name_tok = self.expect_member_name()
                 # M1 AST amendment: `?.` builds a Member with
                 # optional=True (see ast_nodes.Member); the checker
                 # needs the flag to enforce the `?.` typing rule.

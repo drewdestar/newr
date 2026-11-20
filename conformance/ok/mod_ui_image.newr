@@ -1,0 +1,11 @@
+# The ui module (SPEC.md section 12.8): an image renders as a
+# void img with src and an empty alt, no closing tag.
+let passed = true
+if ui.render(ui.image("https://example.com/a.png")) != "<img src=\"https://example.com/a.png\" alt=\"\">":
+  passed = false
+if ui.render(ui.image("https://example.com/a.png?x=1&y=2")) != "<img src=\"https://example.com/a.png?x=1&amp;y=2\" alt=\"\">":
+  passed = false
+if passed:
+  print "PASS"
+else:
+  print "FAIL"
