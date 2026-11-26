@@ -158,7 +158,7 @@ class TestDuplicatesAndReserved(unittest.TestCase):
         self.assertEqual(codes(resolve(p)), ["E3003"])
 
     def test_catch_err_may_shadow_builtin(self):
-        # SPEC.md §10's own example is `catch err:` — a catch variable
+        # SPEC.md §10's own example is `catch err:` - a catch variable
         # is a transient error binding, not a redefinition of the
         # builtin `err` (a Result builder).
         p = prog(functions=[fn("f", [], [
@@ -305,7 +305,7 @@ class TestWarnings(unittest.TestCase):
 
     def test_shadowing_outer_name_is_W1004(self):
         # The outer x is read after the if, so the only warning is the
-        # shadowing one — the outer x is not also "unused".
+        # shadowing one - the outer x is not also "unused".
         p = prog(stmts=[let("x", lit(1)),
                         If(span=S(), cond=lit(True),
                            then_body=[let("x", lit(2)),

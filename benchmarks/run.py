@@ -192,35 +192,35 @@ def main() -> int:
         return a["mean"] / b["mean"]
 
     md = []
-    md.append("# Benchmarks — M2 (Python emitter)\n")
+    md.append("# Benchmarks - M2 (Python emitter)\n")
     md.append(f"Machine: {platform.system()} {platform.machine()}, "
               f"Python {platform.python_version()}, "
               f"hyperfine {subprocess.run([str(HYPERFINE), '--version'], capture_output=True, text=True).stdout.strip()}.\n")
     md.append("All figures are measured, not promised. Raw hyperfine JSON "
               "is in `benchmarks/raw/`. No published generated-vs-hand-written "
-              "benchmark exists for any transpiler — these numbers are the "
+              "benchmark exists for any transpiler - these numbers are the "
               "first such measurement for newr, and they are reported as found.\n")
-    md.append("## B1 — Compile, cold (no warmup)\n")
+    md.append("## B1 - Compile, cold (no warmup)\n")
     md.append(f"- hello: {fmt(results['b1_hello'])}")
     md.append(f"- shop: {fmt(results['b1_shop'])}\n")
-    md.append("## B2 — Compile, warm\n")
+    md.append("## B2 - Compile, warm\n")
     md.append(f"- hello (no change): {fmt(results['b2_hello'])}")
     md.append(f"- shop (one file changed): {fmt(results['b2_shop_change'])}\n")
-    md.append("## B3 — `newr --help` startup (SPEC §4.1 target <100 ms)\n")
+    md.append("## B3 - `newr --help` startup (SPEC §4.1 target <100 ms)\n")
     md.append(f"- {fmt(results['b3_help'])}\n")
-    md.append("## B4 — Generated code size\n")
+    md.append("## B4 - Generated code size\n")
     for label, s in sizes.items():
         md.append(f"- {label}: {s['bytes']} bytes, {s['lines']} lines")
     md.append(f"- hello size ratio (generated/hand-written): "
               f"{sizes['hello_gen']['bytes']/sizes['hello_hw']['bytes']:.2f}")
     md.append(f"- loop size ratio (generated/hand-written): "
               f"{sizes['loop_gen']['bytes']/sizes['loop_hw']['bytes']:.2f}\n")
-    md.append("## B5 — Generated program startup\n")
+    md.append("## B5 - Generated program startup\n")
     md.append(f"- generated hello: {fmt(results['b5_hello_gen'])}")
     md.append(f"- hand-written hello: {fmt(results['b5_hello_hw'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b5_hello_gen'], results['b5_hello_hw']):.2f}\n")
-    md.append("## B6 — Generated runtime (checked-int tight loop, 100k iterations)\n")
+    md.append("## B6 - Generated runtime (checked-int tight loop, 100k iterations)\n")
     md.append(f"- generated (checked helpers): {fmt(results['b6_loop_gen'])}")
     md.append(f"- hand-written, plain ints: {fmt(results['b6_loop_plain'])}")
     md.append(f"- hand-written, newr_rt helpers: {fmt(results['b6_loop_checked'])}")
@@ -228,8 +228,8 @@ def main() -> int:
               f"{ratio(results['b6_loop_gen'], results['b6_loop_plain']):.2f}")
     md.append(f"- ratio generated/checked-hand-written: "
               f"{ratio(results['b6_loop_gen'], results['b6_loop_checked']):.2f}")
-    md.append("  (All three print the same checksum, 105003 — the loops agree.)\n")
-    md.append("## B6b — Shop economy, 1,000 credits (aiosqlite, commit per call)\n")
+    md.append("  (All three print the same checksum, 105003 - the loops agree.)\n")
+    md.append("## B6b - Shop economy, 1,000 credits (aiosqlite, commit per call)\n")
     md.append(f"- generated (emitted shop Bot): {fmt(results['b6b_shop_gen'])}")
     md.append(f"- hand-written (aiosqlite directly): {fmt(results['b6b_shop_hw'])}")
     md.append(f"- ratio (generated/hand-written): "
@@ -238,13 +238,13 @@ def main() -> int:
               "dominates and 10k took >4 min; 1k still measures the code path. "
               "Both print the final balance 1000.)")
     md.append("  (Methodology, M2 fix #6: the hand-written driver imports "
-              "discord too — the generated driver imports the whole shop "
+              "discord too - the generated driver imports the whole shop "
               "bot, so without the same import the comparison would measure "
               "interpreter startup, not the economy loop.)\n")
-    md.append("## B7 — Peak RSS\n")
+    md.append("## B7 - Peak RSS\n")
     md.append(f"- compile (shop): {results['b7_compile']['rss_mb']:.1f} MB")
     md.append(f"- run (hello): {results['b7_run']['rss_mb']:.1f} MB\n")
-    md.append("## B8 — Hand-written parity\n")
+    md.append("## B8 - Hand-written parity\n")
     md.append(f"- startup ratio: "
               f"{ratio(results['b5_hello_gen'], results['b5_hello_hw']):.2f} "
               f"(>1.20 would be a bug report)")

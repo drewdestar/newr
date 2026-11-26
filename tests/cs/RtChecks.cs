@@ -2,7 +2,7 @@
 #nullable enable annotations
 //
 // Mirrors tests/js/rt_tests.js case for case (same rule, both
-// targets) — same 61 checks, adapted to C# types (long instead of
+// targets) - same 61 checks, adapted to C# types (long instead of
 // BigInt). Run with `dotnet run` from a temp project holding copies
 // of newr_rt.cs and this file, or via
 // `python -m unittest tests.test_newr_rt_cs`.

@@ -136,7 +136,7 @@ class Bot(commands.Bot):
         # The balance check is inside the transaction (no
         # TOCTOU): a concurrent debit cannot slip between
         # the check and the write. A replayed key returns
-        # True — the debit already happened.
+        # True - the debit already happened.
         async with self.economy_lock:
             if key is not None:
                 async with self.economy_db.execute("SELECT 1 FROM ledger WHERE key = ?", (key,)) as cursor:
@@ -163,7 +163,7 @@ class Bot(commands.Bot):
         # to its intended total (the out-leg debits `amount`,
         # the in-leg credits `amount`), so no money is
         # created or destroyed however the first attempt
-        # died — a crash between the legs, or a poisoned
+        # died - a crash between the legs, or a poisoned
         # ledger row. The leg INSERTs upsert on the key:
         # a row that merely exists (amount 0) is topped up
         # instead of colliding with the UNIQUE constraint.

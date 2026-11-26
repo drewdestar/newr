@@ -1468,7 +1468,7 @@ def _build_emit(args: list[str], *, output: str | None,
         print(f"{path}: ok, {len(warnings)} warning(s) — "
               f"wrote {names}")
     else:
-        print(f"{path}: ok — wrote {names}")
+        print(f"{path}: ok, wrote {names}")
     if app_result is not None:
         if manifest is not None and manifest.description:
             print(f"app: {manifest.description}")

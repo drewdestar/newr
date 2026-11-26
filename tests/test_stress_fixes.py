@@ -119,7 +119,7 @@ class TestCrash1EOF(unittest.TestCase):
         # stress/crashes/corpus-b_truncated_fn.newr, inlined. A bare
         # `return` is valid syntax (it returns `none`), so the clean
         # diagnostics are the checker's E2001 (the fn declares
-        # `-> int`) plus W1001 for the unused parameter `a` — not a
+        # `-> int`) plus W1001 for the unused parameter `a` - not a
         # parse error, and definitely not a traceback.
         self.assertEqual(codes(full("fn f(a: int) -> int:\n  return")),
                          ["W1001", "E2001"])
@@ -174,7 +174,7 @@ class TestLexerEOFHang(unittest.TestCase):
 
     def test_indented_blank_line_at_eof_returns(self):
         # `if true:` with only an indented blank line after it: the
-        # block is missing, so E1001 — but the lexer must return.
+        # block is missing, so E1001 - but the lexer must return.
         r = run_cli_file("if true:\n   ")
         self.assertEqual(r.returncode, 4, r.stdout + r.stderr)
         self.assertNotIn("Traceback", r.stdout + r.stderr)
@@ -187,7 +187,7 @@ class TestTopLevelUseBeforeDef(unittest.TestCase):
     def test_print_before_let_is_E2005(self):
         # stress/corpus/i_use_before_def.newr, inlined. The local
         # E2005 pattern is [E2005, W1001] (see test_resolver:
-        # test_use_before_definition_is_E2005 with no later use) — the
+        # test_use_before_definition_is_E2005 with no later use) - the
         # top-level case matches it, it does not invent a new shape.
         self.assertEqual(codes(full("print later\nlet later = 1\n")),
                          ["E2005", "W1001"])
@@ -315,7 +315,7 @@ class TestTopLevelUseBeforeDef(unittest.TestCase):
 
     def test_handler_calling_fn_reading_later_let_is_ok(self):
         # Handlers run after module initialisation, so a handler may
-        # call a function reading any top-level `let` — even one
+        # call a function reading any top-level `let` - even one
         # declared after the handler block.
         src = ("fn getx() -> int:\n"
                "  return x\n"
@@ -358,7 +358,7 @@ class TestUnderscorePlacement(unittest.TestCase):
         self.assertEqual(codes(full("print 1e3_\n")), ["E_BAD_NUMBER"])
 
     # NOTE: `1._5` is NOT an underscore case: the lexer produces
-    # INT(1) DOT IDENT(_5) — a member access on an int literal — and
+    # INT(1) DOT IDENT(_5) - a member access on an int literal - and
     # the checker rejects the nonexistent member with E3001. The
     # underscore rule only applies inside a number token, so there is
     # no E_BAD_NUMBER test for it here.

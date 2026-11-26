@@ -2,9 +2,9 @@
 
 // A minimal stand-in for discord.js 14, used ONLY by the JS emitter's
 // bot tests (tests/test_emitter_js_bot.py). It implements the API
-// surface the emitted code touches — Client (event registration +
+// surface the emitted code touches - Client (event registration +
 // login), SlashCommandBuilder + the option builders, the component
-// builders, EmbedBuilder, REST/Routes — with the same call shapes
+// builders, EmbedBuilder, REST/Routes - with the same call shapes
 // and return values the real library has for those calls (a setter
 // returns `this` for chaining; `reply` returns a promise; `toJSON`
 // returns the command payload). It is NOT the real discord.js and

@@ -6,7 +6,7 @@
 //
 // Run: NODE_PATH=<discord.js> node benchmarks/generated/shop_economy.js
 // (discord.js is required by the emitted shop bot; the mock in
-// tests/js/mocks stands in for it here — see BENCHMARKS.md.)
+// tests/js/mocks stands in for it here - see BENCHMARKS.md.)
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -27,7 +27,7 @@ async function main() {
                   path.join(d, "newr_rt.js"));
   process.chdir(d);
   // The emitted bot file exports the `bot` instance (not the
-  // class — unlike the Python twin, which exports the class).
+  // class - unlike the Python twin, which exports the class).
   const { bot } = require(path.join(d, "shop.js"));
   await bot._economy_connect();
   for (let i = 0; i < 1000; i++) {

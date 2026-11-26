@@ -1,7 +1,7 @@
 // Hand-written shop economy benchmark (B6b comparison).
 //
 // The same 1,000 credits as benchmarks/generated/shop_economy.cs,
-// written by a human with Microsoft.Data.Sqlite directly — the same
+// written by a human with Microsoft.Data.Sqlite directly - the same
 // SQL shape the emitted C# bot uses (balances stored as TEXT,
 // BEGIN IMMEDIATE / COMMIT per credit, INSERT ... ON CONFLICT for
 // the balance, ledger insert per credit). Prints the final balance
@@ -9,12 +9,12 @@
 //
 // The `new DiscordSocketClient(...)` below is deliberate
 // (M2 fix #6): the generated driver must construct the emitted
-// shop Bot, which IS a DiscordSocketClient — its construction
+// shop Bot, which IS a DiscordSocketClient - its construction
 // costs ~200 ms one-time (measured). A bare `typeof` touch only
 // loads the assembly (~5 ms), so without the same construction
 // here the comparison would measure client construction, not the
 // economy loop: the generated credit loop itself is, if anything,
-// faster than this driver's. It is a construction only — no
+// faster than this driver's. It is a construction only - no
 // Discord connection is made.
 
 // The DB lives in the CWD (economy_.db), like the generated

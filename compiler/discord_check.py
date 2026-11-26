@@ -161,7 +161,7 @@ class DiscordChecker:
         self._providers = discord_providers(program)
         self._economy_calls: list[A.Call] = []
         # Nesting depth of the _walk_stmt/_walk_expr recursion (M-01):
-        # past MAX_NESTING_DEPTH the walk stops silently — the core
+        # past MAX_NESTING_DEPTH the walk stops silently - the core
         # checker already reported E1001, so no second diagnostic.
         self._depth = 0
 
@@ -580,7 +580,7 @@ class DiscordChecker:
             if isinstance(st, (A.Reply, A.Defer, A.Edit, A.Followup,
                                A.Throw, A.ModalDecl)):
                 # A modal answers: it sends a response directly
-                # (send_modal). A button/select does not — it only
+                # (send_modal). A button/select does not - it only
                 # attaches to a reply. (BUG-M2-3.)
                 return True
             if isinstance(st, A.If):
@@ -617,7 +617,7 @@ class DiscordChecker:
             self._walk_stmt(st, context, bindings)
 
     def _walk_stmt(self, st, context: str, bindings: set[str]) -> None:
-        # M-01: stop silently past the nesting limit — the core
+        # M-01: stop silently past the nesting limit - the core
         # checker already reported E1001 for this program.
         self._depth += 1
         if self._depth > MAX_NESTING_DEPTH:
@@ -941,7 +941,7 @@ class DiscordChecker:
     def _walk_expr(self, expr, context: str, bindings: set[str]) -> None:
         if expr is None:
             return
-        # M-01: stop silently past the nesting limit — the core
+        # M-01: stop silently past the nesting limit - the core
         # checker already reported E1001 for this program.
         self._depth += 1
         if self._depth > MAX_NESTING_DEPTH:

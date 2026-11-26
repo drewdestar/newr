@@ -1,9 +1,9 @@
 # Aliased file-module import (SPEC.md §11): the alias is the
 # reference in newr source, but the emitted class is the file
-# STEM (K1) — a Java/C# emitter that references the alias does
+# STEM (K1) - a Java/C# emitter that references the alias does
 # not compile. Covers the enum value, a fn call, and a fielded
 # variant. (A file-module fn used as a VALUE, `let f = h.is_red`,
-# is a known gap in the py/js emitters — they fail E4001 there —
+# is a known gap in the py/js emitters - they fail E4001 there -
 # so it is not part of this program; the Java emitter already
 # handles it via a method reference.)
 import "lib/import_enum_helper.newr" as h

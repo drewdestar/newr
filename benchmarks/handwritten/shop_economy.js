@@ -1,7 +1,7 @@
 // Hand-written shop economy benchmark (B6b comparison).
 //
 // The same 1,000 credits as benchmarks/generated/shop_economy.js,
-// written by a human with node:sqlite directly — the same SQL shape
+// written by a human with node:sqlite directly - the same SQL shape
 // the emitted bot uses (TEXT balances with BigInt arithmetic in JS,
 // BEGIN IMMEDIATE ... COMMIT per call, ledger insert), so the
 // comparison is fair. Prints the final balance as a checksum.

@@ -207,7 +207,7 @@ class TestIndentation(unittest.TestCase):
     def test_indented_first_line_lexes_as_indent(self):
         # The lexer accepts an indented first line (it is a valid INDENT
         # step); the *parser* rejects it ("indented line outside any
-        # block" — the v0 rule). See test_parser.py.
+        # block" - the v0 rule). See test_parser.py.
         toks = values("  x\n")
         self.assertEqual([k for k, _ in toks],
                          ["INDENT", "IDENT", "NEWLINE", "DEDENT", "EOF"])
@@ -225,7 +225,7 @@ class TestLineEndingsAndPositions(unittest.TestCase):
     def test_crlf_normalized(self):
         # Spans are RAW-file byte offsets (SPEC.md §16, M-06): a CRLF
         # newline is 2 bytes on disk, so line/col are derived from the
-        # raw source — the CR byte is part of line 1.
+        # raw source - the CR byte is part of line 1.
         src = "let x = 1\r\nlet y = 2\r\n"
         toks = tokenize(src)
         self.assertEqual([t.kind for t in toks],

@@ -2,7 +2,7 @@
 //
 // Written by a human (not generated-then-edited) for the M4
 // benchmarks (B4/B5/B8): the same observable behavior as
-// `newr build --target java examples/hello.newr` — print
+// `newr build --target java examples/hello.newr` - print
 // "Hello, world!".
 
 public class hello {

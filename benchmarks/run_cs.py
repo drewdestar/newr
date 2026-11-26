@@ -12,7 +12,7 @@ is a bug report, not a marketing line (proposal thresholds).
 
 Method notes (see BENCHMARKS.md for the full text):
 - C# programs are built once by the runner (`dotnet build -c
-  Release`); hyperfine times only `dotnet <dll>` — never plain
+  Release`); hyperfine times only `dotnet <dll>` - never plain
   `dotnet run`, which would measure the build. /tmp is a 512MB
   tmpfs, so dotnet temp dirs live under ~/dotnet-tmp.
 - Both B6b drivers open economy_.db in the CWD; the timed command
@@ -25,7 +25,7 @@ Method notes (see BENCHMARKS.md for the full text):
   (M2 fix #6): a bare `typeof` touch only loads the assembly
   (~5 ms) while constructing the emitted Bot costs ~200 ms, and
   the generated credit loop itself is faster than the
-  hand-written one — without the same construction the ratio
+  hand-written one - without the same construction the ratio
   would measure client construction, not the economy loop.
   Neither makes a Discord connection.
 
@@ -176,11 +176,11 @@ def _run_once(cmd: list[str], cwd: Path, expect: str, what: str,
 
 def _upsert_section(text: str, marker: str, section: str) -> str:
     """Replace the section starting at `marker` (up to the next
-    top-level '# Benchmarks — ' heading, or EOF), or append it."""
+    top-level '# Benchmarks - ' heading, or EOF), or append it."""
     i = text.find(marker)
     if i == -1:
         return text.rstrip("\n") + "\n\n" + section
-    j = text.find("\n# Benchmarks — ", i + 1)
+    j = text.find("\n# Benchmarks - ", i + 1)
     if j == -1:
         return text[:i] + section
     return text[:i] + section + "\n" + text[j + 1:]
@@ -233,7 +233,7 @@ def main() -> int:
         if blessed != fresh:
             raise RuntimeError(
                 "benchmarks/generated/loop.cs differs from a fresh "
-                "`newr build --target cs` of loop.newr — re-bless it")
+                "`newr build --target cs` of loop.newr - re-bless it")
         _dotnet_build(d, "loop.csproj")
         d = build_root / "loop_plain"
         d.mkdir()
@@ -291,7 +291,7 @@ def main() -> int:
         def dotnet_cmd(name: str) -> list[str]:
             return [str(DOTNET), str(dlls[name])]
 
-        # B1: compile cold (no warmup) — the C# target.
+        # B1: compile cold (no warmup) - the C# target.
         results["b1_hello_cs"] = _hyperfine(
             "b1_hello_cs", [PY, str(LAUNCHER), "build", "--target", "cs",
                             "examples/hello.newr", "-o",
@@ -389,7 +389,7 @@ def main() -> int:
     loop_checked_ratio = ratio(results["b6_loop_gen_cs"],
                                results["b6_loop_checked_cs"])
     md = []
-    md.append("# Benchmarks — M4 (C# emitter)\n")
+    md.append("# Benchmarks - M4 (C# emitter)\n")
     md.append(f"Machine: {platform.system()} {platform.machine()}, "
               f"Python {platform.python_version()}, .NET SDK {dotnet_ver}, "
               f"Discord.Net 3.20.2 + Microsoft.Data.Sqlite 8.0.0, "
@@ -397,7 +397,7 @@ def main() -> int:
     md.append("All figures are measured, not promised. Raw hyperfine JSON "
               "is in `benchmarks/raw/` (`*_cs.json`). The compile "
               "benchmarks (B1/B2/B7-compile) measure the same Python "
-              "compiler as M2, emitting C# instead of Python — the "
+              "compiler as M2, emitting C# instead of Python - the "
               "difference is the emitter. C# programs are built once "
               "by the runner (`dotnet build -c Release`); the timed "
               "commands run `dotnet <dll>` only, never plain "
@@ -407,55 +407,55 @@ def main() -> int:
               "both pay the same fsync cost on the same filesystem. "
               "The hand-written B6b driver constructs a "
               "`DiscordSocketClient` so both sides pay the "
-              "same one-time client-construction cost (M2 fix #6) — neither "
+              "same one-time client-construction cost (M2 fix #6) - neither "
               "makes a Discord connection.\n")
-    md.append("## B1 — Compile, cold (no warmup), `--target cs`\n")
+    md.append("## B1 - Compile, cold (no warmup), `--target cs`\n")
     md.append(f"- hello: {fmt(results['b1_hello_cs'])}")
     md.append(f"- shop: {fmt(results['b1_shop_cs'])}\n")
-    md.append("## B2 — Compile, warm, `--target cs`\n")
+    md.append("## B2 - Compile, warm, `--target cs`\n")
     md.append(f"- hello (no change): {fmt(results['b2_hello_cs'])}")
     md.append(f"- shop (one file changed): {fmt(results['b2_shop_change_cs'])}\n")
-    md.append("## B4 — Generated code size (C#)\n")
+    md.append("## B4 - Generated code size (C#)\n")
     for label, s in sizes.items():
         md.append(f"- {label}: {s['bytes']} bytes, {s['lines']} lines")
     md.append(f"- hello size ratio (generated/hand-written): "
               f"{sizes['hello_gen']['bytes']/sizes['hello_hw']['bytes']:.2f}")
     md.append(f"- loop size ratio (generated/hand-written): "
               f"{sizes['loop_gen']['bytes']/sizes['loop_hw']['bytes']:.2f}\n")
-    md.append("## B5 — Generated program startup (`dotnet <dll>`)\n")
+    md.append("## B5 - Generated program startup (`dotnet <dll>`)\n")
     md.append(f"- generated hello: {fmt(results['b5_hello_gen_cs'])}")
     md.append(f"- hand-written hello: {fmt(results['b5_hello_hw_cs'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b5_hello_gen_cs'], results['b5_hello_hw_cs']):.2f}\n")
-    md.append("## B6 — Generated runtime (checked-int tight loop, 100k iterations)\n")
+    md.append("## B6 - Generated runtime (checked-int tight loop, 100k iterations)\n")
     md.append(f"- generated (checked helpers, NewrRt): {fmt(results['b6_loop_gen_cs'])}")
     md.append(f"- hand-written, plain longs: {fmt(results['b6_loop_plain_cs'])}")
     md.append(f"- hand-written, NewrRt helpers: {fmt(results['b6_loop_checked_cs'])}")
     md.append(f"- ratio generated/plain: {loop_ratio:.2f}")
     md.append(f"- ratio generated/checked-hand-written: {loop_checked_ratio:.2f}")
-    md.append("  (All three print the same checksum, 105003 — the loops agree.)")
+    md.append("  (All three print the same checksum, 105003 - the loops agree.)")
     if loop_ratio > 1.20:
         md.append(f"  (Note: the {loop_ratio:.2f} generated/plain ratio is "
-                  f"over the 1.20 proposal threshold — flagged honestly, "
+                  f"over the 1.20 proposal threshold - flagged honestly, "
                   f"not hidden. It is the checked-int price "
                   f"(checked{{}} per operation plus a Tmod call), the "
                   f"same shape as M2's 2.54: the generated code is "
                   f"within noise of hand-written code using the same "
                   f"checked helpers ({loop_checked_ratio:.2f}), and the "
-                  f"plain-long loop is not a fair target — it cannot "
+                  f"plain-long loop is not a fair target - it cannot "
                   f"overflow-check at all.)\n")
     else:
         md.append("")
-    md.append("## B6b — Shop economy, 1,000 credits (Microsoft.Data.Sqlite, commit per call)\n")
+    md.append("## B6b - Shop economy, 1,000 credits (Microsoft.Data.Sqlite, commit per call)\n")
     md.append(f"- generated (emitted shop Bot): {fmt(results['b6b_shop_gen_cs'])}")
     md.append(f"- hand-written (Microsoft.Data.Sqlite directly): {fmt(results['b6b_shop_hw_cs'])}")
     md.append(f"- ratio (generated/hand-written): "
               f"{ratio(results['b6b_shop_gen_cs'], results['b6b_shop_hw_cs']):.2f}")
     md.append("  (Both print the final balance 1000.)\n")
-    md.append("## B7 — Peak RSS (C#)\n")
+    md.append("## B7 - Peak RSS (C#)\n")
     md.append(f"- compile (shop, --target cs): {results['b7_compile_cs']['rss_mb']:.1f} MB")
     md.append(f"- run (hello, dotnet): {results['b7_run_cs']['rss_mb']:.1f} MB\n")
-    md.append("## B8 — Hand-written parity (C#)\n")
+    md.append("## B8 - Hand-written parity (C#)\n")
     md.append(f"- startup ratio: "
               f"{ratio(results['b5_hello_gen_cs'], results['b5_hello_hw_cs']):.2f} "
               f"(>1.20 would be a bug report)")
@@ -474,7 +474,7 @@ def main() -> int:
     section = "\n".join(md)
     bench_md = ROOT / "BENCHMARKS.md"
     text = bench_md.read_text(encoding="utf-8")
-    marker = "# Benchmarks — M4 (C# emitter)"
+    marker = "# Benchmarks - M4 (C# emitter)"
     bench_md.write_text(_upsert_section(text, marker, section),
                         encoding="utf-8")
     print(section)

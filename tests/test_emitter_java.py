@@ -7,7 +7,7 @@ compiles and executes the emitted program with javac/java and
 returns its stdout.
 
 Every test pins a decision from BUILD_REPORT.md §21 (decisions
-K1–K13) or a SPEC rule the emitter must preserve — including the
+K1–K13) or a SPEC rule the emitter must preserve - including the
 Java-specific traps (long ints with the L suffix and the
 Long.MIN_VALUE literal, checked int64 via Math.addExact, Python-repr
 float rendering via NewrRt.floatStr, capture-by-value via snapshot

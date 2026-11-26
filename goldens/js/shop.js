@@ -65,7 +65,7 @@ class Bot extends Client {
     // not an error (P11). One explicit transaction:
     // the balance + ledger land together or not at all.
     // node:sqlite is synchronous and single-threaded,
-    // so no lock is needed — no interleaving is possible.
+    // so no lock is needed - no interleaving is possible.
     if (key !== null && key !== undefined) {
       const dup = this.economy_db.prepare("SELECT 1 FROM ledger WHERE key = ?").get(key);
       if (dup) {
@@ -94,7 +94,7 @@ class Bot extends Client {
     // The balance check is inside the transaction (no
     // TOCTOU): a concurrent debit cannot slip between
     // the check and the write. A replayed key returns
-    // true — the debit already happened.
+    // true - the debit already happened.
     if (key !== null && key !== undefined) {
       const dup = this.economy_db.prepare("SELECT 1 FROM ledger WHERE key = ?").get(key);
       if (dup) {
@@ -126,10 +126,10 @@ class Bot extends Client {
     // to its intended total (the out-leg debits `amount`,
     // the in-leg credits `amount`), so no money is
     // created or destroyed however the first attempt
-    // died — a crash between the legs, or a poisoned
+    // died - a crash between the legs, or a poisoned
     // ledger row. The leg amounts are read from the
     // ledger (not just presence) and summed in JS with
-    // BigInt — never SQL SUM, which would lose precision
+    // BigInt - never SQL SUM, which would lose precision
     // on TEXT amounts (J9). The leg upserts are computed
     // in JS for the same reason (SQLite `+` on TEXT
     // would go through REAL arithmetic).

@@ -212,7 +212,7 @@ def wait_for_gate(max_wait_s=45 * 60, interval_s=60):
                 return True, details
         else:
             consecutive = 0
-            print("[wait] gate RED — fixes not in yet, sleeping "
+            print("[wait] gate RED - fixes not in yet, sleeping "
                   f"{interval_s}s")
         if time.monotonic() + interval_s > deadline:
             break
@@ -281,7 +281,7 @@ def depth_sweep(timeout=30, only=None):
 
     'survive' = CLEAN (ok or clean diagnostic). 'break' = CRASH/TIMEOUT/
     BAD_JSON/WRONG_EXIT. A clean diagnostic at high depth is survival,
-    not a break — the depth guard doing its job.
+    not a break - the depth guard doing its job.
     """
     out = {}
     builders = {k: v for k, v in DEPTH_BUILDERS.items()
@@ -301,7 +301,7 @@ def depth_sweep(timeout=30, only=None):
             idx = grid.index(first_break)
             lo = grid[idx - 1]["n"] if idx > 0 else 1
             hi = first_break["n"]
-            # invariant: lo survives, hi breaks — binary search last survivor
+            # invariant: lo survives, hi breaks - binary search last survivor
             while hi - lo > 1:
                 mid = (lo + hi) // 2
                 cls, r = _depth_probe(builder, mid, timeout=timeout)

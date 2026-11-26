@@ -5,7 +5,7 @@
 // to one user; the final balance is printed as a checksum.
 //
 // The emitted Bot is a private nested class (`private static class
-// Bot` inside `shop`), so the driver reaches it by reflection —
+// Bot` inside `shop`), so the driver reaches it by reflection -
 // that is the only way to drive it from outside the emitted file,
 // and the reflective lookup happens once, outside the timed loop
 // (the 1,000 credit calls go through cached Method objects).

@@ -1,4 +1,4 @@
-# hello_bot.newr — a bot written in the newr language.
+# hello_bot.newr - a bot written in the newr language.
 # Build it with: newr build examples/hello_bot.newr
 # Then run it with: DISCORD_TOKEN=... python examples/hello_bot.py
 

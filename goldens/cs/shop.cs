@@ -131,7 +131,7 @@ public class shop {
       // The balance check is inside the transaction (no
       // TOCTOU): a concurrent debit cannot slip between
       // the check and the write. A replayed key returns
-      // true — the debit already happened.
+      // true - the debit already happened.
       if (key != null) {
         using (SqliteCommand cmd = economy__db.CreateCommand()) {
           cmd.CommandText = "SELECT 1 FROM ledger WHERE key = $key";
@@ -179,7 +179,7 @@ public class shop {
       // created or destroyed however the first attempt
       // died. The leg amounts are read from the
       // ledger (not just presence) and summed in C#
-      // with checked long arithmetic — never SQL SUM,
+      // with checked long arithmetic - never SQL SUM,
       // which would lose precision on TEXT amounts (J9).
       long outDone = 0L;
       long inDone = 0L;

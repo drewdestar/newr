@@ -13,11 +13,11 @@ Rustc form, Elm tone (G10):
 
 Spans are **byte offsets** (SPEC.md §16, research §4.3): a Span is
 ``Span(file, start_byte, end_byte)``. Line/column are *derived* at render
-time from the source text via ``line_col`` — no node ever stores line/col.
+time from the source text via ``line_col`` - no node ever stores line/col.
 
 A Diagnostic carries a span, a stable machine code (``E1xxx`` syntax,
 ``E2xxx`` types, ``E3xxx`` resolver, ``W1xxx`` warnings), a message, and
-— where they exist — ``expected`` / ``found`` (in user terms, never
+- where they exist - ``expected`` / ``found`` (in user terms, never
 internal type-variable names), ``help`` (one concrete edit), ``note``,
 and a ``suggestion`` (a span + replacement + applicability
 ``"certain"`` | ``"maybe"``; only ``"certain"`` suggestions may ever be
@@ -30,7 +30,7 @@ difflib ratio >= 0.7 (SPEC.md §16; the v0 value was 0.6).
 ``Fix`` is the separate ``newr fix`` payload (SPEC.md §5.2): a span and a
 replacement, attached only when the fix is unambiguous (exactly one
 candidate) and safe (a pure rename or a pure deletion of a provably-dead
-token — never a change to program meaning).
+token - never a change to program meaning).
 
 This module has no dependencies on any other compiler module.
 """
@@ -48,7 +48,7 @@ MAX_NESTING_DEPTH = 200
 
 
 def line_col(source: str, byte_offset: int) -> tuple[int, int]:
-    """(line, col) — both 1-based, col in characters — of a byte offset.
+    """(line, col) - both 1-based, col in characters - of a byte offset.
 
     ``byte_offset`` must be at a UTF-8 character boundary (spans always
     are: the lexer only emits boundaries). Decoding only the prefix keeps
@@ -88,7 +88,7 @@ class Fix:
 
     ``span`` is the text to replace; ``replacement`` is what replaces it.
     A fix is only attached when it is unambiguous (exactly one candidate)
-    and safe (a pure rename or a pure deletion of a provably-dead token —
+    and safe (a pure rename or a pure deletion of a provably-dead token -
     never a change to program meaning).
     """
 
@@ -226,7 +226,7 @@ class NewrError(Exception):
 
     Recovery (SPEC.md §16) is a checker/resolver rule only: at most one
     error per function body, so one bad body never drowns the rest of
-    the file in follow-on errors. The PARSER has no recovery — it stops
+    the file in follow-on errors. The PARSER has no recovery - it stops
     at the first syntax error. Warnings are reported separately (see
     CompilerResult).
     """

@@ -2,7 +2,7 @@
 
 The Java twin of tests/test_emitter_js_bot.py: the same bot programs
 (HELLO_BOT, SHOP) must emit JDA 6.7.0 code with the same semantics as
-the Python/JS targets — slash commands, a store economy with SQLite
+the Python/JS targets - slash commands, a store economy with SQLite
 + idempotency, buttons/selects/modals, reply/defer/edit/followup/send,
 a standalone `<stem>_deploy.java` registration program, and a pom.xml
 for bot programs.
@@ -11,7 +11,7 @@ Text-assertion tests run in the normal suite (they need no JDA).
 Compile tests run javac over the emitted files with the JDA +
 sqlite-jdbc jars on the classpath; the jars are found in
 $NEWR_JAVA_JARS, ~/jars, or tests/java/lib, else downloaded once
-from Maven Central into ~/.cache/newr-java-test-libs — and the
+from Maven Central into ~/.cache/newr-java-test-libs - and the
 compile tests skip (they do not fail) when no network and no jars
 are available. No live Discord is ever touched.
 """
@@ -74,10 +74,10 @@ bot "ShopBot":
 
 strings en:
   "buy.ok": "Bought {item} for {price} gold. Balance: {balance}."
-  "buy.poor": "Not enough gold — {item} costs {price}, you have {balance}."
+  "buy.poor": "Not enough gold - {item} costs {price}, you have {balance}."
 strings id:
   "buy.ok": "Membeli {item} seharga {price} gold. Saldo: {balance}."
-  "buy.poor": "Gold tidak cukup — {item} harganya {price}, kamu punya {balance}."
+  "buy.poor": "Gold tidak cukup - {item} harganya {price}, kamu punya {balance}."
 
 store economy:
   table balances (user: str, balance: int)
@@ -304,7 +304,7 @@ class TestBotStatements(unittest.TestCase):
         # §19: a store call lowers to `bot.<store>_<op>`, which only
         # exists inside a handler. At the top level, inside a (sync)
         # top-level fn, or inside a lambda there is no handler
-        # context — a clean E4001, never uncompilable code.
+        # context - a clean E4001, never uncompilable code.
         store = (
             "store economy:\n"
             "  table balances (user: str, balance: int)\n"
@@ -407,7 +407,7 @@ class TestBotStatements(unittest.TestCase):
 
     def test_ephemeral_only_on_interaction_reply(self):
         # `ephemeral` on a member-join reply is a clean E4001 (the
-        # checker allows it; the emitter refuses — only an
+        # checker allows it; the emitter refuses - only an
         # interaction reply can be ephemeral).
         src = (
             "bot \"B\":\n  description: \"b\"\n\n"

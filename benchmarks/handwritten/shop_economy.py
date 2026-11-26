@@ -1,7 +1,7 @@
 """Hand-written shop economy benchmark (B6b comparison).
 
 The same 1,000 credits as benchmarks/generated/shop_economy.py,
-written by a human with aiosqlite directly — the same SQL shape
+written by a human with aiosqlite directly - the same SQL shape
 the emitted bot uses (INSERT ... ON CONFLICT for the balance,
 ledger insert, commit per call), so the comparison is fair.
 Prints the final balance as a checksum.

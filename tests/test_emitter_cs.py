@@ -7,7 +7,7 @@ compiles and executes the emitted program with dotnet and returns
 its stdout.
 
 Every test pins a decision from BUILD_REPORT.md §21 (decisions
-C1–C13) or a SPEC rule the emitter must preserve — including the
+C1–C13) or a SPEC rule the emitter must preserve - including the
 C#-specific traps (checked long via checked{} blocks, `long?`
 nullable value types and the OptChainVal/CoalesceVal/ UnwrapOptVal
 helpers, `#nullable enable annotations` in the runtime vs

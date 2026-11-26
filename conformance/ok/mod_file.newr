@@ -1,4 +1,4 @@
-# The file module: write/read/append/exists (D32 — runtime
+# The file module: write/read/append/exists (D32 - runtime
 # helpers, so the read happens at call time, not at creation).
 let passed = true
 let path = "conformance_tmp.txt"
