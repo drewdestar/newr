@@ -1393,7 +1393,8 @@ class _CSEmitter:
         if all_str:
             if not parts:
                 return "Console.WriteLine()", _PREC["primary"]
-            return (f"Console.WriteLine({' + \" \" + '.join(parts)})",
+            joined = ' + " " + '.join(parts)
+            return (f"Console.WriteLine({joined})",
                     _PREC["primary"])
         self._need_rt("print")
         return f"NewrRt.Print({', '.join(parts)})", _PREC["primary"]
@@ -5922,7 +5923,13 @@ class _CSEmitter:
             # `examples/shop_items.newr` directly give the same
             # shop_items.java header).
             import os
-            sub_path = os.path.relpath(sub_path)
+            try:
+                sub_path = os.path.relpath(sub_path)
+            except ValueError:
+                # Windows: relpath raises when the paths are on
+                # different drives (C: vs D:); the absolute path
+                # still names the file correctly.
+                pass
             sub_em = _CSEmitter(sub, main_path=sub_path,
                                   sources=self.sources,
                                   line_comments=self.line_comments,
@@ -7867,19 +7874,23 @@ def emit_program_cs(program: A.Program, *, main_path: str,
             "Version=\"12.1.6\" />",
             "  </ItemGroup>",
         ]
-    if program.bot is not None:
-        csproj_lines += [
-            "  <ItemGroup>",
-            "    <Compile Remove=\"*.cs\" />",
-        ]
-        for name in sorted(files):
-            if name.endswith(".cs") and not name.endswith("_deploy.cs"):
-                csproj_lines.append(f"    <Compile Include=\"{name}\" />")
-        csproj_lines += [
-            "    <Compile Include=\"newr_rt.cs\" "
-            "Condition=\"Exists('newr_rt.cs')\" />",
-            "  </ItemGroup>",
-        ]
+    # A generated project must build standalone wherever it lands:
+    # without an explicit <Compile> list the SDK globs every .cs file
+    # next to the csproj, so building in a directory that already
+    # holds .cs files (for example the repo root) fails with
+    # duplicate-type errors (CS0101). List exactly the emitted files.
+    csproj_lines += [
+        "  <ItemGroup>",
+        "    <Compile Remove=\"*.cs\" />",
+    ]
+    for name in sorted(files):
+        if name.endswith(".cs") and not name.endswith("_deploy.cs"):
+            csproj_lines.append(f"    <Compile Include=\"{name}\" />")
+    csproj_lines += [
+        "    <Compile Include=\"newr_rt.cs\" "
+        "Condition=\"Exists('newr_rt.cs')\" />",
+        "  </ItemGroup>",
+    ]
     csproj_lines.append("</Project>")
     files[stem + ".csproj"] = "\n".join(csproj_lines) + "\n"
     if program.bot is not None:

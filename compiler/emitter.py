@@ -743,12 +743,12 @@ class _Emitter:
 
     def _interp_field_or_hoist(self, text: str, quote: str) -> str:
         """P1: a backslash in a replacement field is a syntax error
-        on Python 3.10–3.11, so a field whose text contains one is
-        hoisted to a temp variable before the statement. (A field
-        containing the f-string's delimiter quote is impossible: a
-        string literal part already alternates quotes, and a nested
-        f-string uses the other quote.)"""
-        if "\\" in text:
+        on Python 3.10-3.11, so a field whose text contains one is
+        hoisted to a temp variable before the statement. The same
+        holds for a field containing the f-string's delimiter quote:
+        a string literal such as `"hi"` inside an f"..." field is a
+        syntax error before 3.12, so it is hoisted too."""
+        if "\\" in text or quote in text:
             name = self._new_hoist_name()
             self._hoists.append([f"{name} = {text}"])
             return name
@@ -3961,7 +3961,13 @@ class _Emitter:
             # `examples/shop_items.newr` directly give the same
             # shop_items.py header).
             import os
-            sub_path = os.path.relpath(sub_path)
+            try:
+                sub_path = os.path.relpath(sub_path)
+            except ValueError:
+                # Windows: relpath raises when the paths are on
+                # different drives (C: vs D:); the absolute path
+                # still names the file correctly.
+                pass
             sub_em = _Emitter(sub, main_path=sub_path, sources=self.sources,
                               line_comments=self.line_comments)
             sub_files, sub_rt = sub_em._emit_file_set(sub, sub_path)

@@ -27,6 +27,14 @@ ROOT = Path(__file__).resolve().parent.parent
 RT_JS_SRC = ROOT / "compiler" / "newr_rt.js"
 NODE = shutil.which("node")
 
+
+def _safe_disk_name(name):
+    """A file name safe to write on every OS: Windows rejects `<` and
+    `>` in file names, so the `<test>` stem used by the emit helpers
+    cannot be written to disk there. The logical (diagnostic) name
+    stays `<test>.newr`; only the on-disk spelling changes."""
+    return name.replace("<", "_").replace(">", "_")
+
 try:
     from compiler.emitter_js import EmitterError, emit_program as emit_js
     HAS_JS_EMITTER = True
@@ -68,12 +76,12 @@ def run_js_src(src, filename="<test>.newr", argv=None, env=None):
     result = emit_js_src(src, filename)
     with tempfile.TemporaryDirectory() as d:
         for name, text in result.files.items():
-            (Path(d) / name).write_text(text, encoding="utf-8")
+            (Path(d) / _safe_disk_name(name)).write_text(text, encoding="utf-8")
         if result.uses_rt:
             (Path(d) / "newr_rt.js").write_text(
                 RT_JS_SRC.read_text(encoding="utf-8"), encoding="utf-8")
         proc = subprocess.run(
-            [NODE, str(Path(d) / result.main_file), *(argv or [])],
+            [NODE, str(Path(d) / _safe_disk_name(result.main_file)), *(argv or [])],
             capture_output=True, text=True, cwd=d, env=env)
         return proc.stdout, proc.stderr, proc.returncode
 
@@ -986,13 +994,13 @@ class TestDb(unittest.TestCase):
                          sources={"<db-test>.newr": src})
         with tempfile.TemporaryDirectory() as d:
             for name, text in result.files.items():
-                (Path(d) / name).write_text(text, encoding="utf-8")
+                (Path(d) / _safe_disk_name(name)).write_text(text, encoding="utf-8")
             if result.uses_rt:
                 (Path(d) / "newr_rt.js").write_text(
                     RT_JS_SRC.read_text(encoding="utf-8"),
                     encoding="utf-8")
             proc = subprocess.run(
-                [NODE, str(Path(d) / result.main_file)],
+                [NODE, str(Path(d) / _safe_disk_name(result.main_file))],
                 capture_output=True, text=True, cwd=d)
             return proc.stdout, proc.stderr, proc.returncode
 

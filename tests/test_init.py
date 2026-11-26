@@ -309,7 +309,10 @@ class TestFindManifest(unittest.TestCase):
 
     def test_finds_manifest_in_parent_dirs(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            # macOS symlinks /var to /private/var, so the temp path
+            # must be resolved before it is compared with the result
+            # of find_manifest (which resolves).
+            root = Path(tmp).resolve()
             (root / "newr.json").write_text(
                 '{"name": "demo", "version": "0.1.0"}',
                 encoding="utf-8")
@@ -322,7 +325,9 @@ class TestFindManifest(unittest.TestCase):
 
     def test_finds_manifest_in_the_start_dir_itself(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            # See test_finds_manifest_in_parent_dirs: resolve the
+            # macOS /var -> /private/var symlink first.
+            root = Path(tmp).resolve()
             (root / "newr.json").write_text(
                 '{"name": "demo", "version": "0.1.0"}',
                 encoding="utf-8")

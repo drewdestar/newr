@@ -409,6 +409,23 @@ class Resolver:
                         help=help)
             self._record_import(info, imp, bound, is_named=False)
             return
+        # Imports are case-sensitive (SPEC.md §3.3), but on a
+        # case-insensitive filesystem is_file() above also matches a
+        # differently-cased name, so the import would silently bind
+        # the wrong name. Verify the on-disk spelling matches the
+        # requested one exactly.
+        requested = Path(imp.path).name
+        on_disk = [c.name for c in target.parent.iterdir()]
+        if requested not in on_disk:
+            match = next((c for c in on_disk
+                          if c.lower() == requested.lower()), requested)
+            self._error(imp.span, "E3008",
+                        f"cannot find module file `{imp.path}`",
+                        help=(f"there is a file named `{match}` in "
+                              f"{target.parent} — imports are case-"
+                              "sensitive (SPEC.md §3.3)"))
+            self._record_import(info, imp, bound, is_named=False)
+            return
         if target in self._resolving:
             chain = [p.name for p in self._resolving] + [target.name]
             self._error(imp.span, "E3004",

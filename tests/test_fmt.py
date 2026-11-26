@@ -595,8 +595,13 @@ class TestCorpus(FormatTestCase):
 class TestCLI(unittest.TestCase):
 
     def _write_temp(self, directory, name, text):
+        # Write exact bytes: Path.write_text translates \n to \r\n
+        # on Windows, which would make a "clean" fixture CRLF on disk
+        # (and `newr fmt --check` rightly reports CRLF as dirty,
+        # since the canonical form is LF).
         path = Path(directory) / name
-        path.write_text(text, encoding="utf-8")
+        with open(path, "w", encoding="utf-8", newline="") as fh:
+            fh.write(text)
         return path
 
     def test_fmt_rewrites_a_file(self):
