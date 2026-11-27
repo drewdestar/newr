@@ -79,9 +79,11 @@ class TestPackageKt(unittest.TestCase):
 
     def test_toolchain_versions_detected_live(self):
         # Live detection, not hardcoded pins: kotlinc-jvm 2.2.0 and
-        # OpenJDK 21.0.13 on the build VM (EVAL section 11).
-        self.assertRegex(TOOLCHAIN["kotlin"], r"^\d+\.\d+\.\d+$")
-        self.assertRegex(TOOLCHAIN["java"], r"^\d+\.\d+\.\d+$")
+        # OpenJDK 21.0.13 on the build VM (EVAL section 11). Versions
+        # may carry a fourth component (the runners now report Java
+        # 25.0.5.1), so accept three or four numeric parts.
+        self.assertRegex(TOOLCHAIN["kotlin"], r"^\d+\.\d+\.\d+(\.\d+)?$")
+        self.assertRegex(TOOLCHAIN["java"], r"^\d+\.\d+\.\d+(\.\d+)?$")
 
     def test_package_kt_hello_jar_runs(self):
         with tempfile.TemporaryDirectory(

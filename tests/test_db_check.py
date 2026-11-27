@@ -30,6 +30,14 @@ def codes(diags):
     return [d.code for d in diags]
 
 
+def _safe_disk_name(name):
+    """A file name safe to write on every OS: Windows rejects `<` and
+    `>` in file names, so the `<db-test>` stem used by the emit helper
+    cannot be written to disk there. The logical (diagnostic) name
+    stays `<db-test>.newr`; only the on-disk spelling changes."""
+    return name.replace("<", "_").replace(">", "_")
+
+
 def errs(diags):
     return [d for d in diags if d.is_error()]
 
@@ -349,13 +357,13 @@ class TestDbEmitAndRun(unittest.TestCase):
                               sources={"<db-test>.newr": src})
         with tempfile.TemporaryDirectory() as d:
             for name, text in result.files.items():
-                (Path(d) / name).write_text(text, encoding="utf-8")
+                (Path(d) / _safe_disk_name(name)).write_text(text, encoding="utf-8")
             if result.uses_rt:
                 (Path(d) / "newr_rt.py").write_text(
                     (root / "compiler" / "newr_rt.py").read_text(
                         encoding="utf-8"), encoding="utf-8")
             proc = subprocess.run(
-                [sys.executable, str(Path(d) / result.main_file)],
+                [sys.executable, str(Path(d) / _safe_disk_name(result.main_file))],
                 capture_output=True, text=True, cwd=d)
             return proc.stdout, proc.stderr, proc.returncode
 

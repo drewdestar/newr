@@ -402,9 +402,9 @@ def _pair_cmds(target: str, server_dir: Path,
                 if c.returncode != 0:
                     raise RuntimeError(f"cargo build exit "
                                        f"{c.returncode}\n{c.stderr}")
-            return ([str(server_dir / "target" / "debug"
+            return ([str(_cargo_target_dir(server_dir) / "debug"
                          / _PAIR_SERVER)],
-                    [str(client_dir / "target" / "debug"
+                    [str(_cargo_target_dir(client_dir) / "debug"
                          / _PAIR_CLIENT)], None)
         # Plain program: rustc compiles the bin directly.
         for d, stem in ((server_dir, _PAIR_SERVER),
@@ -450,6 +450,19 @@ def _pair_cmds(target: str, server_dir: Path,
              str(server_dir / (_PAIR_SERVER + ".csproj"))],
             [DOTNET, "run", "--project",
              str(client_dir / (_PAIR_CLIENT + ".csproj")), "--"], env)
+
+
+def _cargo_target_dir(program_dir: Path) -> Path:
+    """Where `cargo build` puts the binary for a program in
+    `program_dir`. Cargo honors CARGO_TARGET_DIR when it is set (CI
+    shares one target dir across steps so dependencies are compiled
+    once); otherwise the binary lands in the program directory's own
+    `target/`. The harness must look in the same place cargo wrote.
+    """
+    shared = os.environ.get("CARGO_TARGET_DIR")
+    if shared:
+        return Path(shared)
+    return program_dir / "target"
 
 
 def _run_http_pair(target: str) -> int:
@@ -664,7 +677,7 @@ def run_conformance(target: str = "py", only: str | None = None) -> int:
                         failures += 1
                         continue
                     r = _run(
-                        [str(Path(d) / "target" / "debug"
+                        [str(_cargo_target_dir(Path(d)) / "debug"
                              / path.stem)],
                         capture_output=True, text=True, cwd=d)
                 else:

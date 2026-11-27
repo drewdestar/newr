@@ -28,6 +28,14 @@ ROOT = Path(__file__).resolve().parent.parent
 RT_SRC = ROOT / "compiler" / "newr_rt.py"
 
 
+def _safe_disk_name(name):
+    """A file name safe to write on every OS: Windows rejects `<` and
+    `>` in file names, so the `<test>` stem used by the emit helpers
+    cannot be written to disk there. The logical (diagnostic) name
+    stays `<test>.newr`; only the on-disk spelling changes."""
+    return name.replace("<", "_").replace(">", "_")
+
+
 def full_program(src, filename="<test>.newr"):
     """Resolve + check a source string; assert it is clean."""
     resolved = resolve_source(src, filename)
@@ -63,12 +71,12 @@ def run_src(src, filename="<test>.newr", argv=None, input_text=None):
     result = emit_src(src, filename)
     with tempfile.TemporaryDirectory() as d:
         for name, text in result.files.items():
-            (Path(d) / name).write_text(text, encoding="utf-8")
+            (Path(d) / _safe_disk_name(name)).write_text(text, encoding="utf-8")
         if result.uses_rt:
             (Path(d) / "newr_rt.py").write_text(
                 RT_SRC.read_text(encoding="utf-8"), encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, str(Path(d) / result.main_file),
+            [sys.executable, str(Path(d) / _safe_disk_name(result.main_file)),
              *(argv or [])],
             input=input_text,
             capture_output=True, text=True, cwd=d)

@@ -1637,7 +1637,8 @@ class _DartEmitter:
         if all_str:
             if not parts:
                 return "print('')", _PREC["primary"]
-            return (f"print({' + \" \" + '.join(parts)})",
+            joined = ' + " " + '.join(parts)
+            return (f"print({joined})",
                     _PREC["primary"])
         self._need_rt("print")
         return f"NewrRt.print([{', '.join(parts)}])", _PREC["primary"]
@@ -5441,7 +5442,13 @@ class _DartEmitter:
             # `examples/shop_items.newr` directly give the same
             # shop_items.dart header).
             import os
-            sub_path = os.path.relpath(sub_path)
+            try:
+                sub_path = os.path.relpath(sub_path)
+            except ValueError:
+                # Windows: relpath raises when the paths are on
+                # different drives (C: vs D:); the absolute path
+                # still names the file correctly.
+                pass
             sub_em = _DartEmitter(sub, main_path=sub_path,
                                   sources=self.sources,
                                   line_comments=self.line_comments,

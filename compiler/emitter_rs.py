@@ -1459,7 +1459,13 @@ class _RsEmitter:
                 # `examples/shop_items.newr` directly give the same
                 # shop_items.rs header).
                 import os
-                sub_path = os.path.relpath(sub_path)
+                try:
+                    sub_path = os.path.relpath(sub_path)
+                except ValueError:
+                    # Windows: relpath raises when the paths are on
+                    # different drives (C: vs D:); the absolute path
+                    # still names the file correctly.
+                    pass
                 sub_em = _RsEmitter(sub, main_path=sub_path,
                                       sources=self.sources,
                                       line_comments=self.line_comments,
