@@ -384,7 +384,9 @@ class TestScaffold(unittest.TestCase):
     def test_creates_all_five_scaffold_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             created = scaffold(Path(tmp) / "demo")
-            names = sorted(str(p.relative_to(Path(tmp) / "demo"))
+            # as_posix: the expected names use forward slashes, and
+            # str() on Windows gives backslashes.
+            names = sorted(p.relative_to(Path(tmp) / "demo").as_posix()
                            for p in created)
             self.assertEqual(names, [".env.example", ".gitignore",
                                      "locales/.gitkeep", "main.newr",

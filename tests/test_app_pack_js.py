@@ -50,6 +50,23 @@ def temp_dir():
     return tempfile.TemporaryDirectory(dir=str(SCRATCH_ROOT))
 
 
+def _run_sh(artifact):
+    """Run the artifact's run.sh and return the completed process,
+    or None when there is no shell to run it with. POSIX runs it
+    directly (it carries the exec bit); Windows runs it via `sh`
+    (Git Bash on the runners), because a .sh file is not
+    executable there and has no exec bit."""
+    if os.name == "nt":
+        sh = shutil.which("sh")
+        if sh is None:
+            return None
+        argv = [sh, "./run.sh"]
+    else:
+        argv = ["./run.sh"]
+    return subprocess.run(argv, capture_output=True, text=True,
+                          cwd=artifact, timeout=RUN_TIMEOUT)
+
+
 class TestPackageJsHello(unittest.TestCase):
     def test_hello_runs_via_node_and_run_sh(self):
         with temp_dir() as d:
@@ -78,15 +95,18 @@ class TestPackageJsHello(unittest.TestCase):
                 run_sh.read_text(encoding="utf-8"),
                 "#!/bin/sh\n"
                 "exec node \"$(dirname \"$0\")/hello.js\" \"$@\"\n")
-            self.assertTrue(run_sh.stat().st_mode & stat.S_IXUSR)
+            # Windows has no exec bit; run.sh is exercised via sh
+            # below instead.
+            if os.name != "nt":
+                self.assertTrue(run_sh.stat().st_mode & stat.S_IXUSR)
             node_run = subprocess.run(
                 ["node", "hello.js"], capture_output=True, text=True,
                 cwd=artifact, timeout=RUN_TIMEOUT)
             self.assertEqual(node_run.returncode, 0, node_run.stderr)
             self.assertEqual(node_run.stdout, "Hello, world!\n")
-            sh_run = subprocess.run(
-                ["./run.sh"], capture_output=True, text=True,
-                cwd=artifact, timeout=RUN_TIMEOUT)
+            sh_run = _run_sh(artifact)
+            if sh_run is None:
+                self.skipTest("no sh on this Windows machine")
             self.assertEqual(sh_run.returncode, 0, sh_run.stderr)
             self.assertEqual(sh_run.stdout, "Hello, world!\n")
             # Receipt definitions for a directory artifact: bytes
@@ -120,9 +140,9 @@ class TestPackageJsHello(unittest.TestCase):
                 cwd=artifact, timeout=RUN_TIMEOUT)
             self.assertEqual(node_run.returncode, 0, node_run.stderr)
             self.assertEqual(node_run.stdout, "5\n")
-            sh_run = subprocess.run(
-                ["./run.sh"], capture_output=True, text=True,
-                cwd=artifact, timeout=RUN_TIMEOUT)
+            sh_run = _run_sh(artifact)
+            if sh_run is None:
+                self.skipTest("no sh on this Windows machine")
             self.assertEqual(sh_run.returncode, 0, sh_run.stderr)
             self.assertEqual(sh_run.stdout, "5\n")
 

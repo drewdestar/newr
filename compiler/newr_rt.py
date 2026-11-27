@@ -529,6 +529,16 @@ def _db_new_conn(path: str) -> sqlite3.Connection:
                            check_same_thread=False)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 5000")
+    # WAL: concurrent writers from many threads (one connection
+    # per thread) deadlock in rollback-journal mode when two
+    # connections both hold SHARED and try to upgrade to RESERVED:
+    # SQLite returns SQLITE_BUSY at once for that upgrade
+    # (deadlock avoidance), bypassing the busy timeout. On Windows
+    # runners the threads overlap tightly enough that the
+    # 8-thread concurrent-writes test hit it on every run. In WAL
+    # mode the writer takes the write lock directly, so the busy
+    # timeout applies and the writers serialize instead of failing.
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
