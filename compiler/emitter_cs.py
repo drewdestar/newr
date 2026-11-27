@@ -7879,9 +7879,11 @@ def emit_program_cs(program: A.Program, *, main_path: str,
     # next to the csproj, so building in a directory that already
     # holds .cs files (for example the repo root) fails with
     # duplicate-type errors (CS0101). List exactly the emitted files.
+    # The default glob is recursive (**/*.cs), so the removal must be
+    # recursive too, or .cs files in subdirectories still leak in.
     csproj_lines += [
         "  <ItemGroup>",
-        "    <Compile Remove=\"*.cs\" />",
+        "    <Compile Remove=\"**/*.cs\" />",
     ]
     for name in sorted(files):
         if name.endswith(".cs") and not name.endswith("_deploy.cs"):
