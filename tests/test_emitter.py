@@ -81,14 +81,19 @@ def run_src(src, filename="<test>.newr", argv=None, input_text=None):
         # UnicodeEncodeError there. The program itself is correct;
         # run it with a UTF-8 stdout, the same way a user would
         # with PYTHONIOENCODING=utf-8. No-op on Linux/macOS, where
-        # stdout is already UTF-8.
+        # stdout is already UTF-8. Decode the captured output as
+        # UTF-8 explicitly too: the parent would otherwise decode
+        # the pipe with the locale code page (cp1252 on the Windows
+        # runner) and mangle the same non-ASCII bytes the child
+        # just wrote as UTF-8. Both ends UTF-8, on every OS.
         env = dict(os.environ)
         env["PYTHONIOENCODING"] = "utf-8"
         proc = subprocess.run(
             [sys.executable, str(Path(d) / _safe_disk_name(result.main_file)),
              *(argv or [])],
             input=input_text,
-            capture_output=True, text=True, cwd=d, env=env)
+            capture_output=True, text=True, encoding="utf-8",
+            cwd=d, env=env)
         return proc.stdout, proc.stderr, proc.returncode
 
 
@@ -283,10 +288,16 @@ class TestStringsAndInterpolation(unittest.TestCase):
                          "use {x} for a set\n")
 
     def test_escapes_and_unicode(self):
+        # The expected emoji is built with chr(), not a \U escape
+        # in the literal: on the Windows runner the \U escape in
+        # this literal evaluated to the literal text "\U0001F600"
+        # instead of the emoji (PR #4 CI), while chr() is the
+        # same character on every platform.
         src = ('print "tab\\there"\nprint "quote \\"hi\\""\n'
                'print "emoji \\u{1F600} ok"\n')
         self.assertEqual(run_ok(src),
-                         "tab\there\nquote \"hi\"\nemoji \U0001F600 ok\n")
+                         "tab\there\nquote \"hi\"\nemoji "
+                         + chr(0x1F600) + " ok\n")
 
     def test_fstring_hoists_backslash(self):
         # A string literal with an escape inside an interpolation is

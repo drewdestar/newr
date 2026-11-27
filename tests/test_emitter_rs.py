@@ -95,11 +95,17 @@ def run_rs_src(src, filename="<test>.newr", stem="Main",
             capture_output=True, text=True, cwd=d)
         if proc.returncode != 0:
             return "", proc.stderr, proc.returncode
-        # rustc names the binary <stem>.exe on Windows; running
-        # ./<stem> there is WinError 2 (file not found).
+        # rustc names the binary <stem>.exe on Windows. Run it by
+        # absolute path: on Windows, CreateProcess resolves a
+        # relative executable (./<stem>) against the *parent's*
+        # working directory, not the child's `cwd`, so the binary
+        # in the temp dir is never found (WinError 2) even though
+        # rustc compiled it fine. An absolute path is unambiguous
+        # on every OS (this is also how conformance/run.py runs
+        # rustc binaries).
         binary = stem + (".exe" if os.name == "nt" else "")
         proc = subprocess.run(
-            [f"./{binary}", *(argv or [])],
+            [str(Path(d) / binary), *(argv or [])],
             capture_output=True, text=True, cwd=d, env=env)
         return proc.stdout, proc.stderr, proc.returncode
 

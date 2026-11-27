@@ -43,11 +43,15 @@ class TestNewrRtRs(unittest.TestCase):
                 [RUSTC, "RtChecks.rs", "-o", "RtChecks"],
                 capture_output=True, text=True, cwd=d)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            # rustc names the binary RtChecks.exe on Windows;
-            # running ./RtChecks there is WinError 2.
-            binary = "./RtChecks" + (".exe" if os.name == "nt"
-                                     else "")
-            r = subprocess.run([binary],
+            # rustc names the binary RtChecks.exe on Windows.
+            # Run it by absolute path: on Windows, CreateProcess
+            # resolves a relative executable (./RtChecks) against
+            # the *parent's* working directory, not the child's
+            # `cwd`, so the binary in the temp dir is never found
+            # (WinError 2) even though rustc compiled it fine.
+            binary = "RtChecks" + (".exe" if os.name == "nt"
+                                   else "")
+            r = subprocess.run([str(Path(d) / binary)],
                                capture_output=True, text=True, cwd=d)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("checks passed", r.stdout)
