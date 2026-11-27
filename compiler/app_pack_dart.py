@@ -75,6 +75,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import toolfind
 from .app_pack import AppPackError, SCRATCH_ROOT
 
 #: The commands the dart packager runs (used in failure
@@ -92,18 +93,22 @@ def _find_tool(name: str) -> str | None:
     """The path of the dart binary: the `DART_HOME` directory
     first, then `~/dart-sdk/dart-sdk/bin`, then PATH (the same
     rule as `compiler/test.py` `_which`, which passes
-    `DART_HOME` and `dart-sdk/dart-sdk/bin`). None when dart is
+    `DART_HOME` and `dart-sdk/dart-sdk/bin`). The path is spelled
+    as it is on disk (`compiler/toolfind.py`): on Windows,
+    `shutil.which` returns the PATHEXT spelling (`dart.EXE`) and
+    Dart's build-hook runner appends `.exe` again, looking for
+    `dart.EXE.exe`, which does not exist. None when dart is
     nowhere to be found."""
     dart_home = os.environ.get("DART_HOME")
     if dart_home:
-        found = shutil.which(name, path=dart_home)
+        found = toolfind.which(name, path=dart_home)
         if found is not None:
             return found
-    found = shutil.which(
+    found = toolfind.which(
         name, path=str(Path.home() / "dart-sdk" / "dart-sdk" / "bin"))
     if found is not None:
         return found
-    return shutil.which(name)
+    return toolfind.which(name)
 
 
 #: The resolved dart path, found live at import time (None when

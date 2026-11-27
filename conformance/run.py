@@ -44,37 +44,73 @@ GOLDEN_DIR_RS = ROOT / "goldens" / "rs"
 GOLDEN_DIR_KT = ROOT / "goldens" / "kt"
 GOLDEN_DIR_DART = ROOT / "goldens" / "dart"
 
+# Tool lookup: this runner is a standalone script, so it cannot
+# import `compiler/toolfind.py`; the spelling rule below is a copy
+# of `on_disk_spelling` there. On Windows, `shutil.which` builds
+# candidates from PATHEXT, whose entries are uppercase, and the
+# filesystem is case-insensitive, so `which("dart")` returns
+# `...\\dart.EXE` even though the file on disk is `dart.exe`.
+# That spelling works when executed directly, but tools that
+# derive a path from it break: Dart's build-hook runner appends
+# `.exe` itself and looks for `dart.EXE.exe`, which does not exist
+# (CI run 46053910369, dart-win). Every tool below is spelled as
+# it is on disk.
+def _on_disk_spelling(path: str) -> str:
+    directory, name = os.path.split(path)
+    if not name:
+        return path
+    try:
+        entries = os.listdir(directory or ".")
+    except OSError:
+        return path
+    if name in entries:
+        return path
+    lowered = name.lower()
+    for entry in entries:
+        if entry.lower() == lowered:
+            return os.path.join(directory, entry) if directory \
+                else entry
+    return path
+
+
+def _which(name: str, path: str | None = None) -> str | None:
+    found = shutil.which(name, path=path)
+    if found is None:
+        return None
+    return _on_disk_spelling(found)
+
+
 # Toolchains (M4): the JDK lives in ~/jdk-21 on the build VM (or
 # JAVA_HOME / the PATH, e.g. CI's setup-java); dotnet lives in
 # ~/.dotnet (or DOTNET_ROOT / the PATH, e.g. CI's setup-dotnet).
 _JAVA_HOME = Path(os.environ["JAVA_HOME"]) \
     if os.environ.get("JAVA_HOME") else (Path.home() / "jdk-21")
 _JAVA_BIN = _JAVA_HOME / "bin"
-JAVA = shutil.which("java", path=str(_JAVA_BIN)) or shutil.which("java")
-JAVAC = shutil.which("javac", path=str(_JAVA_BIN)) or shutil.which("javac")
+JAVA = _which("java", path=str(_JAVA_BIN)) or _which("java")
+JAVAC = _which("javac", path=str(_JAVA_BIN)) or _which("javac")
 _DOTNET_ROOT = Path(os.environ["DOTNET_ROOT"]) \
     if os.environ.get("DOTNET_ROOT") else (Path.home() / ".dotnet")
-DOTNET = shutil.which("dotnet", path=str(_DOTNET_ROOT)) \
-    or shutil.which("dotnet")
+DOTNET = _which("dotnet", path=str(_DOTNET_ROOT)) \
+    or _which("dotnet")
 
 # Toolchains (M5): rustc/cargo live in ~/.cargo/bin (rustup) or the
 # PATH (CI's rust toolchain); kotlinc in ~/kotlin/kotlinc/bin or
 # the PATH; dart in ~/dart-sdk/dart-sdk/bin or the PATH.
 _CARGO_HOME = Path(os.environ["CARGO_HOME"]) \
     if os.environ.get("CARGO_HOME") else (Path.home() / ".cargo")
-CARGO = shutil.which("cargo", path=str(_CARGO_HOME / "bin")) \
-    or shutil.which("cargo")
-RUSTC = shutil.which("rustc", path=str(_CARGO_HOME / "bin")) \
-    or shutil.which("rustc")
+CARGO = _which("cargo", path=str(_CARGO_HOME / "bin")) \
+    or _which("cargo")
+RUSTC = _which("rustc", path=str(_CARGO_HOME / "bin")) \
+    or _which("rustc")
 _KOTLIN_HOME = Path(os.environ["KOTLIN_HOME"]) \
     if os.environ.get("KOTLIN_HOME") else (Path.home() / "kotlin")
-KOTLINC = shutil.which("kotlinc", path=str(_KOTLIN_HOME / "kotlinc"
-                                           / "bin")) \
-    or shutil.which("kotlinc")
+KOTLINC = _which("kotlinc", path=str(_KOTLIN_HOME / "kotlinc"
+                                     / "bin")) \
+    or _which("kotlinc")
 _DART_HOME = Path(os.environ["DART_HOME"]) \
     if os.environ.get("DART_HOME") else (Path.home() / "dart-sdk")
-DART = shutil.which("dart", path=str(_DART_HOME / "dart-sdk" / "bin")) \
-    or shutil.which("dart")
+DART = _which("dart", path=str(_DART_HOME / "dart-sdk" / "bin")) \
+    or _which("dart")
 
 # JDBC driver jars (M8a): a `db.*` program needs sqlite-jdbc on the
 # runtime classpath (compiling needs only java.sql, which is in the

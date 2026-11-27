@@ -43,6 +43,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import toolfind
 from .app_pack import (
     AppPackError, SCRATCH_ROOT, _bundle_sqlite_jars, _uses_db,
 )
@@ -76,15 +77,19 @@ _STDERR_TAIL = 2000
 
 
 def _resolve_kotlinc() -> str | None:
-    """The kotlinc binary, or None when it cannot be found."""
-    return shutil.which("kotlinc", path=str(_KOTLIN_BIN)) \
-        or shutil.which("kotlinc")
+    """The kotlinc binary, or None when it cannot be found.
+    The path is spelled as it is on disk
+    (`compiler/toolfind.py`)."""
+    return toolfind.which("kotlinc", path=str(_KOTLIN_BIN)) \
+        or toolfind.which("kotlinc")
 
 
 def _resolve_java() -> str | None:
-    """The java binary, or None when it cannot be found."""
-    return shutil.which("java", path=str(_JAVA_BIN)) \
-        or shutil.which("java")
+    """The java binary, or None when it cannot be found.
+    The path is spelled as it is on disk
+    (`compiler/toolfind.py`)."""
+    return toolfind.which("java", path=str(_JAVA_BIN)) \
+        or toolfind.which("java")
 
 
 def _tool_env() -> dict[str, str]:

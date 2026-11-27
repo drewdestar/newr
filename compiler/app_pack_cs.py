@@ -73,6 +73,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import toolfind
 from .app_pack import (
     AppPackError, SCRATCH_ROOT, _artifact_bytes, _artifact_sha256,
 )
@@ -132,8 +133,11 @@ def _detect_dotnet() -> str | None:
     root = (Path(os.environ["DOTNET_ROOT"])
             if os.environ.get("DOTNET_ROOT")
             else Path.home() / ".dotnet")
-    return (shutil.which("dotnet", path=str(root))
-            or shutil.which("dotnet"))
+    # Spelled as it is on disk (`compiler/toolfind.py`): on
+    # Windows, `shutil.which` returns the PATHEXT spelling
+    # (`dotnet.EXE`).
+    return (toolfind.which("dotnet", path=str(root))
+            or toolfind.which("dotnet"))
 
 
 def _detect_dotnet_version() -> str | None:

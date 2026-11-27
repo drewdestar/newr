@@ -12,13 +12,17 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from compiler import toolfind
+
 ROOT = Path(__file__).resolve().parent.parent
 RT_RS_SRC = ROOT / "compiler" / "newr_rt.rs"
 RT_CHECKS_SRC = ROOT / "tests" / "rs" / "RtChecks.rs"
 
 
 def _find_tool(name):
-    """Find a Rust tool: CARGO_HOME/bin, ~/.cargo/bin, then PATH."""
+    """Find a Rust tool: CARGO_HOME/bin, ~/.cargo/bin, then PATH.
+    The path is spelled as it is on disk
+    (`compiler/toolfind.py`)."""
     cargo_home = os.environ.get("CARGO_HOME")
     if cargo_home:
         p = Path(cargo_home) / "bin" / name
@@ -27,7 +31,7 @@ def _find_tool(name):
     p = Path.home() / ".cargo" / "bin" / name
     if p.exists():
         return str(p)
-    return shutil.which(name)
+    return toolfind.which(name)
 
 
 RUSTC = _find_tool("rustc")
