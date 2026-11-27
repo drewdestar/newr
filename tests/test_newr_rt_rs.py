@@ -43,7 +43,11 @@ class TestNewrRtRs(unittest.TestCase):
                 [RUSTC, "RtChecks.rs", "-o", "RtChecks"],
                 capture_output=True, text=True, cwd=d)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            r = subprocess.run(["./RtChecks"],
+            # rustc names the binary RtChecks.exe on Windows;
+            # running ./RtChecks there is WinError 2.
+            binary = "./RtChecks" + (".exe" if os.name == "nt"
+                                     else "")
+            r = subprocess.run([binary],
                                capture_output=True, text=True, cwd=d)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("checks passed", r.stdout)

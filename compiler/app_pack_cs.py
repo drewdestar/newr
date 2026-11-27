@@ -26,8 +26,11 @@ Framework-dependent publish does NOT run on this VM (EVAL.md
 section 4, correction 5): its apphost cannot find the runtime,
 because the runtime lives in `~/.dotnet`, which is not on PATH.
 Only the self-contained publish is a valid app artifact here.
-The runtime identifier is `linux-x64` only on this VM; `win-x64`
-and `osx-arm64` are not claimed.
+The runtime identifier follows the machine it runs on (see
+`_detect_rid`): linux-x64 on this VM, osx-arm64/osx-x64 on macOS,
+win-x64 on Windows. A publish for the wrong OS produces an
+artifact the machine cannot run at all (a linux-x64 binary on
+macOS dies with Exec format error; on Windows with WinError 193).
 
 The package step stages the emitted `.cs` files, the `.csproj`,
 and `newr_rt.cs` when listed in `emitted_files` into a scratch
@@ -64,6 +67,7 @@ traceback.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -73,10 +77,30 @@ from .app_pack import (
     AppPackError, SCRATCH_ROOT, _artifact_bytes, _artifact_sha256,
 )
 
-#: The .NET runtime identifier for this VM (SPEC.md section 22.2).
-#: Only linux-x64 is claimed; win-x64 and osx-arm64 are not
-#: verified here.
-RID = "linux-x64"
+def _detect_rid() -> str:
+    """The .NET runtime identifier for this machine (SPEC.md
+    section 22.2): the publish must target the OS it runs on, or
+    the artifact cannot execute there at all. Until this fix the
+    RID was hardcoded to linux-x64, so a publish on macOS produced
+    a Linux ELF (Exec format error when run) and on Windows a file
+    Windows refused with WinError 193. The macOS arm64/x64 split
+    follows platform.machine(); GitHub's macos-latest runners are
+    arm64. linux-x64 stays the RID on this VM and is the only one
+    verified live here; the macOS and Windows RIDs are verified
+    by CI."""
+    system = platform.system()
+    if system == "Windows":
+        return "win-x64"
+    if system == "Darwin":
+        machine = platform.machine().lower()
+        return ("osx-arm64" if machine in ("arm64", "aarch64")
+                else "osx-x64")
+    return "linux-x64"
+
+
+#: The .NET runtime identifier for this machine, detected live
+#: from platform.system()/platform.machine().
+RID = _detect_rid()
 
 #: Where dotnet's temp files go for every dotnet subprocess
 #: (SPEC.md section 22.2: under `~/workspace`, never `/tmp`).
@@ -85,7 +109,7 @@ DOTNET_TMPDIR = Path.home() / "workspace" / ".newr-dotnet-tmp"
 #: The command the cs packager runs (used in failure diagnostics
 #: so the user can reproduce the step by hand).
 PUBLISH_COMMAND = (
-    "dotnet publish -c Release --self-contained -r linux-x64 "
+    f"dotnet publish -c Release --self-contained -r {RID} "
     "-p:PublishSingleFile=true -o <dir>"
 )
 
@@ -206,10 +230,11 @@ def package_cs(*, app_name: str, emitted_dir: Path,
     `newr_rt.cs` when listed in `emitted_files` into a scratch
     dir under `SCRATCH_ROOT`, runs the self-contained single-file
     publish there, and installs the single published executable
-    as `dist_dir/<app_name>`. The artifact is one file, so this
-    returns `dist_dir / app_name` (the receipt `artifact_bytes`
-    for it is `artifact_bytes(artifact)` and its `sha256` is
-    `artifact_sha256(artifact)`).
+    as `dist_dir/<app_name>` (`dist_dir/<app_name>.exe` on
+    Windows, where the published file carries the .exe name).
+    The artifact is one file, so this returns that path (the
+    receipt `artifact_bytes` for it is `artifact_bytes(artifact)`
+    and its `sha256` is `artifact_sha256(artifact)`).
 
     The `.pdb` the publish leaves next to the executable is
     debug symbols only and is not shipped: the artifact is one
@@ -311,7 +336,12 @@ def package_cs(*, app_name: str, emitted_dir: Path,
                 f"{names}, not exactly one executable file plus a "
                 f".pdb, so no single-file artifact can be picked; "
                 f"staging kept at {staging} for diagnosis")
-        artifact = dist_dir / app_name
+        # On Windows the published file is <app_name>.exe; the
+        # artifact keeps that name so it runs from a plain path
+        # (an extensionless PE is not reliably runnable there).
+        # On Linux/macOS it stays extensionless.
+        artifact = dist_dir / (app_name + (".exe" if os.name == "nt"
+                                           else ""))
         try:
             dist_dir.mkdir(parents=True, exist_ok=True)
             if artifact.is_dir() and not artifact.is_symlink():

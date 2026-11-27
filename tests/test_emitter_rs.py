@@ -95,8 +95,11 @@ def run_rs_src(src, filename="<test>.newr", stem="Main",
             capture_output=True, text=True, cwd=d)
         if proc.returncode != 0:
             return "", proc.stderr, proc.returncode
+        # rustc names the binary <stem>.exe on Windows; running
+        # ./<stem> there is WinError 2 (file not found).
+        binary = stem + (".exe" if os.name == "nt" else "")
         proc = subprocess.run(
-            [f"./{stem}", *(argv or [])],
+            [f"./{binary}", *(argv or [])],
             capture_output=True, text=True, cwd=d, env=env)
         return proc.stdout, proc.stderr, proc.returncode
 

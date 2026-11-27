@@ -122,9 +122,14 @@ TARGETS = {
     },
     "cs": {
         "available": DOTNET is not None,
-        "artifact": "dist/hello-cs/hello",
+        # On Windows the artifact keeps the published .exe name
+        # (see package_cs); the run path matches it.
+        "artifact": ("dist/hello-cs/hello.exe" if os.name == "nt"
+                     else "dist/hello-cs/hello"),
         "run": lambda work, java: [str(work / "dist/hello-cs"
-                                       "/hello")],
+                                       / ("hello.exe"
+                                          if os.name == "nt"
+                                          else "hello"))],
         "toolchain": {"dotnet"},
     },
     "dart": {

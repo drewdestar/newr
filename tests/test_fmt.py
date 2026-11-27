@@ -566,7 +566,10 @@ class TestCorpus(FormatTestCase):
     def test_every_corpus_file_formats_clean_or_is_an_exception(self):
         unclean = []
         for path in _corpus_files():
-            rel = str(path.relative_to(ROOT))
+            # as_posix: CORPUS_EXCEPTIONS uses forward slashes, and
+            # str() on Windows gives backslashes, so the exception
+            # never matched there.
+            rel = path.relative_to(ROOT).as_posix()
             source = path.read_text(encoding="utf-8")
             formatted = format_source(source, rel)
             if formatted != source and rel not in CORPUS_EXCEPTIONS:
@@ -575,7 +578,7 @@ class TestCorpus(FormatTestCase):
 
     def test_corpus_idempotency(self):
         for path in _corpus_files():
-            rel = str(path.relative_to(ROOT))
+            rel = path.relative_to(ROOT).as_posix()
             source = path.read_text(encoding="utf-8")
             once = format_source(source, rel)
             twice = format_source(once, rel)
@@ -583,7 +586,7 @@ class TestCorpus(FormatTestCase):
 
     def test_corpus_ast_roundtrip(self):
         for path in _corpus_files():
-            rel = str(path.relative_to(ROOT))
+            rel = path.relative_to(ROOT).as_posix()
             source = path.read_text(encoding="utf-8")
             formatted = format_source(source, rel)
             self.assertEqual(

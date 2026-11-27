@@ -94,22 +94,35 @@ class TestPackageCsHello(unittest.TestCase):
                 emitted_files=["hello.cs", "hello.csproj"],
                 main_file="hello.cs", dist_dir=dist_dir)
             self.assertEqual(_staging_dirs("hello"), before)
-            # The cs artifact is a single self-contained file.
-            self.assertEqual(artifact, dist_dir / "hello")
+            # The cs artifact is a single self-contained file. On
+            # Windows it keeps the published .exe name so it runs
+            # from a plain path.
+            exe_name = "hello.exe" if os.name == "nt" else "hello"
+            self.assertEqual(artifact, dist_dir / exe_name)
             self.assertTrue(artifact.is_file())
             self.assertEqual(
                 sorted(p.name for p in dist_dir.iterdir()),
-                ["hello"])
-            self.assertTrue(artifact.stat().st_mode & stat.S_IXUSR)
+                [exe_name])
+            # Windows has no exec bit; the run below proves the
+            # artifact executes there instead.
+            if os.name != "nt":
+                self.assertTrue(artifact.stat().st_mode & stat.S_IXUSR)
             # Self-contained single file: the .NET runtime is
             # bundled, so the artifact is tens of MB, not KB.
             self.assertGreater(artifact.stat().st_size, 50_000_000)
             # Run from another directory, with dotnet nowhere on
-            # PATH: a self-contained artifact must not need it.
+            # PATH: a self-contained artifact must not need it. On
+            # Windows the env keeps SystemRoot (the OS needs it)
+            # and drops the rest.
+            if os.name == "nt":
+                run_env = {"PATH": "",
+                           "SystemRoot": os.environ["SystemRoot"]}
+            else:
+                run_env = {"PATH": "/usr/bin:/bin",
+                           "HOME": str(Path.home())}
             run = subprocess.run(
                 [str(artifact)], capture_output=True, text=True,
-                cwd=d, env={"PATH": "/usr/bin:/bin",
-                            "HOME": str(Path.home())},
+                cwd=d, env=run_env,
                 timeout=RUN_TIMEOUT)
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual(run.stdout, "Hello, world!\n")
@@ -139,7 +152,9 @@ class TestPackageCsHello(unittest.TestCase):
                                "newr_rt.cs"],
                 main_file="calc.cs", dist_dir=dist_dir)
             self.assertTrue(artifact.is_file())
-            self.assertEqual(artifact.name, "calc")
+            self.assertEqual(
+                artifact.name,
+                "calc.exe" if os.name == "nt" else "calc")
             run = subprocess.run(
                 [str(artifact)], capture_output=True, text=True,
                 cwd=d, timeout=RUN_TIMEOUT)
