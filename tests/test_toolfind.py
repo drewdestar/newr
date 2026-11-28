@@ -58,8 +58,16 @@ class TestOnDiskSpelling(unittest.TestCase):
 
 class TestWhich(unittest.TestCase):
     def test_finds_tool_in_given_path(self):
+        # On Windows, `shutil.which` only finds names with an
+        # extension in PATHEXT: an extensionless file is never
+        # returned, even when it sits in the given path (CI run
+        # 46133702014, every Windows job: `which("mydart")`
+        # returned None for a `mydart` file). A real tool on
+        # Windows has an extension, so the fixture uses one
+        # there and the bare name elsewhere.
+        name = "mydart.exe" if os.name == "nt" else "mydart"
         with tempfile.TemporaryDirectory() as d:
-            tool = Path(d) / "mydart"
+            tool = Path(d) / name
             tool.write_text("#!/bin/sh\n", encoding="utf-8")
             tool.chmod(tool.stat().st_mode | stat.S_IEXEC)
             self.assertEqual(which("mydart", path=d), str(tool))

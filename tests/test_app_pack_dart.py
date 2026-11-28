@@ -163,7 +163,8 @@ class TestPackageDartDbTodo(unittest.TestCase):
         # todo.newr uses db.* on :memory:, so the emitter writes
         # a pubspec.yaml (sqlite3 3.9.0) and newr_rt.dart. The
         # artifact is the bundle directory: bin/todo plus
-        # lib/libsqlite3.so, and the bundled binary runs from any
+        # lib/libsqlite3.so (bin/todo.exe plus a sqlite3 DLL in
+        # lib/ on Windows), and the bundled binary runs from any
         # directory and prints the expected output.
         if TOOLCHAIN["dart"] == "unknown":
             self.skipTest("dart is not installed on this VM")
@@ -183,16 +184,27 @@ class TestPackageDartDbTodo(unittest.TestCase):
                                "pubspec.yaml"],
                 main_file="todo.dart", dist_dir=dist_dir)
             self.assertEqual(artifact, dist_dir)
-            binary = dist_dir / "bin" / "todo"
+            binary = dist_dir / "bin" / ("todo.exe" if os.name
+                                         == "nt" else "todo")
             self.assertTrue(binary.is_file())
             size = binary.stat().st_size
             self.assertGreater(size, 0)
             print(f"\ntodo bundle binary bytes: {size}")
-            lib = dist_dir / "lib" / "libsqlite3.so"
-            self.assertTrue(lib.is_file(),
-                            "the bundle must carry the sqlite3 "
-                            "native library, or the binary fails "
-                            "at runtime with no native asset")
+            if os.name == "nt":
+                # The sqlite3 native asset is a DLL on Windows;
+                # its file name is the package's, not ours, so
+                # accept any DLL in lib/.
+                dlls = sorted((dist_dir / "lib").glob("*.dll"))
+                self.assertTrue(
+                    dlls, "the bundle must carry the sqlite3 "
+                    "native library, or the binary fails at "
+                    "runtime with no native asset")
+            else:
+                lib = dist_dir / "lib" / "libsqlite3.so"
+                self.assertTrue(lib.is_file(),
+                                "the bundle must carry the sqlite3 "
+                                "native library, or the binary fails "
+                                "at runtime with no native asset")
             run = subprocess.run([str(binary)], capture_output=True,
                                  text=True, timeout=300, cwd="/")
             self.assertEqual(run.returncode, 0, run.stderr)

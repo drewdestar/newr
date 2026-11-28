@@ -47,14 +47,20 @@ class TestNewrRtRs(unittest.TestCase):
                 [RUSTC, "RtChecks.rs", "-o", "RtChecks"],
                 capture_output=True, text=True, cwd=d)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            # rustc names the binary RtChecks.exe on Windows.
-            # Run it by absolute path: on Windows, CreateProcess
-            # resolves a relative executable (./RtChecks) against
-            # the *parent's* working directory, not the child's
-            # `cwd`, so the binary in the temp dir is never found
-            # (WinError 2) even though rustc compiled it fine.
-            binary = "RtChecks" + (".exe" if os.name == "nt"
-                                   else "")
+            # rustc with an explicit `-o` writes the binary at
+            # that exact path: no `.exe` is appended on Windows
+            # (the `.exe` only appears when rustc derives the
+            # output name itself). CI run 46133702014: looking
+            # for `RtChecks.exe` failed with WinError 2 on every
+            # Windows job even though rustc exited 0, while
+            # conformance/run.py runs the same binaries at the
+            # bare stem and passes on Windows. Run it by absolute
+            # path: on Windows, CreateProcess resolves a relative
+            # executable (./RtChecks) against the *parent's*
+            # working directory, not the child's `cwd`, so the
+            # binary in the temp dir is never found (WinError 2)
+            # even though rustc compiled it fine.
+            binary = "RtChecks"
             r = subprocess.run([str(Path(d) / binary)],
                                capture_output=True, text=True, cwd=d)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

@@ -326,14 +326,28 @@ def _build_db_bundle(*, app_name: str, staging: Path,
               command=BUILD_CLI_COMMAND, staging=staging,
               env=_build_env(staging))
     bundle = build_out / "bundle"
+    # `dart build cli` names the bundle binary with the platform
+    # executable extension (`todo.exe` on Windows), unlike
+    # `dart compile exe -o`, which writes the exact path given
+    # (the plain-binary smoke test proves that one). CI run
+    # 46133702014, dart-win: "no binary appeared at
+    # ...\\bundle\\bin\\todo". Accept the `.exe` spelling when
+    # the bare stem is not there, so either layout works.
     built = bundle / "bin" / stem
+    if os.name == "nt" and not built.is_file():
+        exe = bundle / "bin" / (stem + ".exe")
+        if exe.is_file():
+            built = exe
     if not built.is_file():
         raise AppPackError(
             f"{BUILD_CLI_COMMAND} failed: dart exited 0 but no "
             f"binary appeared at {built} (expected the bundle "
             f"binary named after the entry stem {stem!r}); "
             f"staging kept at {staging} for diagnosis")
-    libs = sorted((bundle / "lib").glob("*.so")) if (
+    # The sqlite3 native asset is a shared library on POSIX
+    # (`.so`) and a DLL on Windows.
+    lib_glob = "*.dll" if os.name == "nt" else "*.so"
+    libs = sorted((bundle / "lib").glob(lib_glob)) if (
         bundle / "lib").is_dir() else []
     if not libs:
         raise AppPackError(
@@ -353,9 +367,10 @@ def _build_db_bundle(*, app_name: str, staging: Path,
             f"cannot install the dart bundle into {dist_dir}: "
             f"{exc}; staging kept at {staging} for diagnosis"
             ) from exc
-    binary = dist_dir / "bin" / stem
+    binary = dist_dir / "bin" / built.name
     if stem != app_name:
-        dest = dist_dir / "bin" / app_name
+        dest = dist_dir / "bin" / (app_name + (".exe" if
+            built.name.endswith(".exe") else ""))
         try:
             binary.rename(dest)
         except OSError as exc:
