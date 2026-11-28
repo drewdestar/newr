@@ -43,6 +43,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import toolfind
 from .app_pack import (
     AppPackError, SCRATCH_ROOT, _bundle_sqlite_jars, _uses_db,
 )
@@ -83,12 +84,15 @@ def _jdk_bin_dir() -> Path | None:
 
 
 def _find_tool(name: str, jdk_bin: Path | None) -> str | None:
-    """Find a JDK tool: the JDK bin dir first, then the PATH."""
+    """Find a JDK tool: the JDK bin dir first, then the PATH.
+    The path is spelled as it is on disk
+    (`compiler/toolfind.py`): on Windows, `shutil.which`
+    returns the PATHEXT spelling (`java.EXE`)."""
     if jdk_bin is not None:
-        found = shutil.which(name, path=str(jdk_bin))
+        found = toolfind.which(name, path=str(jdk_bin))
         if found:
             return found
-    return shutil.which(name)
+    return toolfind.which(name)
 
 
 def _tool_env(jdk_bin: Path | None,

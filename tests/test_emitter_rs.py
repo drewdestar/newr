@@ -25,6 +25,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from compiler import toolfind
 from compiler.checker import check_program
 from compiler.discord_check import check_discord, discord_providers
 from compiler.resolver import resolve_file, resolve_source
@@ -34,13 +35,15 @@ RT_RS_SRC = ROOT / "compiler" / "newr_rt.rs"
 
 # rustc/cargo live in ~/.cargo/bin (rustup); fall back to the PATH
 # when they are not there (e.g. CI, where rustup provides them).
+# Spelled as they are on disk (`compiler/toolfind.py`): on Windows,
+# `shutil.which` returns the PATHEXT spelling (`rustc.EXE`).
 _CARGO_HOME = Path(os.environ.get("CARGO_HOME", "")) \
     if os.environ.get("CARGO_HOME") else (Path.home() / ".cargo")
 _CARGO_BIN = _CARGO_HOME / "bin"
-RUSTC = shutil.which("rustc", path=str(_CARGO_BIN)) \
-    or shutil.which("rustc")
-CARGO = shutil.which("cargo", path=str(_CARGO_BIN)) \
-    or shutil.which("cargo")
+RUSTC = toolfind.which("rustc", path=str(_CARGO_BIN)) \
+    or toolfind.which("rustc")
+CARGO = toolfind.which("cargo", path=str(_CARGO_BIN)) \
+    or toolfind.which("cargo")
 
 try:
     from compiler.emitter_rs import EmitterError, emit_program as emit_rs

@@ -220,12 +220,13 @@ class TestBuildEnv(unittest.TestCase):
 
     def test_find_tool_uses_dart_sdk_dir(self):
         # dart is not on the default PATH on this VM; it is found
-        # through ~/dart-sdk/dart-sdk/bin.
+        # through ~/dart-sdk/dart-sdk/bin. The name is compared
+        # without its extension: on Windows the file is `dart.exe`.
         found = _find_tool("dart")
         if found is None:
             self.skipTest("dart is not installed on this VM")
         self.assertTrue(Path(found).is_file())
-        self.assertEqual(Path(found).name, "dart")
+        self.assertEqual(Path(found).stem, "dart")
 
 
 if __name__ == "__main__":

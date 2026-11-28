@@ -66,6 +66,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from . import toolfind
 from .app_pack import AppPackError, SCRATCH_ROOT
 
 #: The commands the rs packager runs (used in failure diagnostics
@@ -95,11 +96,13 @@ def _cargo_home_bin() -> Path:
 def _find_tool(name: str) -> str | None:
     """The path of a Rust tool: the rustup bin dir first, then
     PATH (the conformance runner's rule in `conformance/run.py`).
-    None when the tool is nowhere to be found."""
-    found = shutil.which(name, path=str(_cargo_home_bin()))
+    The path is spelled as it is on disk (`compiler/toolfind.py`):
+    on Windows, `shutil.which` returns the PATHEXT spelling
+    (`rustc.EXE`). None when the tool is nowhere to be found."""
+    found = toolfind.which(name, path=str(_cargo_home_bin()))
     if found is not None:
         return found
-    return shutil.which(name)
+    return toolfind.which(name)
 
 
 #: The resolved tool paths, found live at import time (None when

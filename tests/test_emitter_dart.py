@@ -22,6 +22,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from compiler import toolfind
 from compiler.checker import check_program
 from compiler.discord_check import check_discord, discord_providers
 from compiler.resolver import resolve_file, resolve_source
@@ -31,9 +32,12 @@ RT_DART_SRC = ROOT / "compiler" / "newr_rt.dart"
 
 # The Dart SDK lives in ~/dart-sdk (installed for M5); fall back to
 # the PATH when it is not there (e.g. CI, where setup-dart
-# provides it).
+# provides it). Spelled as it is on disk (`compiler/toolfind.py`):
+# on Windows, `shutil.which` returns the PATHEXT spelling
+# (`dart.EXE`) and Dart's build-hook runner appends `.exe` again.
 _DART_BIN = Path.home() / "dart-sdk" / "dart-sdk" / "bin"
-DART = shutil.which("dart", path=str(_DART_BIN)) or shutil.which("dart")
+DART = toolfind.which("dart", path=str(_DART_BIN)) \
+    or toolfind.which("dart")
 
 try:
     from compiler.emitter_dart import EmitterError, emit_program as emit_dart

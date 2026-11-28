@@ -87,6 +87,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import ast_nodes as A
+from . import toolfind
 from .checker import check_program
 from .db_check import check_db
 from .discord_check import check_discord, discord_providers
@@ -401,15 +402,19 @@ def _emit_to_dir(program: A.Program, main_path: Path, target: str,
 
 def _which(name: str, env_var: str, home_sub: str) -> str | None:
     """Find a toolchain binary: the env var's directory first, then
-    ~/home_sub, then the PATH (same rule as conformance/run.py)."""
+    ~/home_sub, then the PATH (same rule as conformance/run.py).
+    The path is spelled as it is on disk
+    (`compiler/toolfind.py`): on Windows, `shutil.which`
+    returns the PATHEXT spelling (`dart.EXE`), and a tool that
+    derives a path from it looks for `dart.EXE.exe`."""
     if os.environ.get(env_var):
-        found = shutil.which(name, path=str(Path(os.environ[env_var])))
+        found = toolfind.which(name, path=str(Path(os.environ[env_var])))
         if found:
             return found
-    found = shutil.which(name, path=str(Path.home() / home_sub))
+    found = toolfind.which(name, path=str(Path.home() / home_sub))
     if found:
         return found
-    return shutil.which(name)
+    return toolfind.which(name)
 
 
 def _tool_or_error(name: str, env_var: str, home_sub: str,
